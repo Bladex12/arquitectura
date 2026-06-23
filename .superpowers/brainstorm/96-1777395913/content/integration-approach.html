@@ -1,0 +1,118 @@
+<style>
+  body { font-family: 'Segoe UI', sans-serif; }
+  .flow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin: 10px 0;
+    font-size: 12px;
+  }
+  .node {
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-weight: 600;
+    white-space: nowrap;
+    font-size: 11px;
+  }
+  .node-existing { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+  .node-new { background: #7c3aed; color: #fff; border: 1px solid #a78bfa; }
+  .node-dest { background: #0f766e; color: #fff; border: 1px solid #2dd4bf; }
+  .node-changed { background: #9a3412; color: #fed7aa; border: 1px solid #fb923c; }
+  .arrow { color: #64748b; font-size: 14px; }
+  .legend { display: flex; gap: 16px; margin-bottom: 16px; font-size: 11px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+</style>
+
+<h2>¿Dónde se integra PlanetLandingTransition?</h2>
+<p class="subtitle">Elige cómo dispara la animación de aterrizaje al cambiar de etapa</p>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#1e293b;border:1px solid #334155"></div> Código existente (sin tocar)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div> Componente nuevo</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#9a3412;border:1px solid #fb923c"></div> Código modificado</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#0f766e"></div> Destino final</div>
+</div>
+
+<div class="options">
+
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Reemplazar <code>/tablet/loading</code></h3>
+      <p>PlanetLandingTransition reemplaza TabletLoadingScreen en la ruta que ya existe. El Lobby ya navega ahí entre fases.</p>
+      <div class="flow">
+        <span class="node node-existing">Lobby.tsx</span>
+        <span class="arrow">→</span>
+        <span class="node node-changed">/tablet/loading<br><small>(reemplazado)</small></span>
+        <span class="arrow">→</span>
+        <span class="node node-new">PlanetLanding<br>Transition.tsx</span>
+        <span class="arrow">→</span>
+        <span class="node node-dest">/tablet/etapa2/...</span>
+      </div>
+      <div class="pros-cons" style="margin-top:8px">
+        <div class="pros"><h4>A favor</h4><ul>
+          <li>Cero cambios en Lobby.tsx</li>
+          <li>Ruta ya existe en App.tsx</li>
+          <li>Los parámetros <code>redirect=</code> y <code>connection_id=</code> funcionan igual</li>
+        </ul></div>
+        <div class="cons"><h4>En contra</h4><ul>
+          <li>La animación también se dispara para transiciones dentro de una etapa (Video → Instructivo), no solo entre etapas</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Overlay en Lobby — solo entre etapas</h3>
+      <p>El Lobby detecta un cambio de etapa (stage_number), muestra la animación como overlay, luego navega.</p>
+      <div class="flow">
+        <span class="node node-changed">Lobby.tsx<br><small>(agrega estado)</small></span>
+        <span class="arrow">→ detecta nueva etapa →</span>
+        <span class="node node-new">PlanetLanding<br>Transition</span>
+        <span class="arrow">→ onDone() →</span>
+        <span class="node node-dest">navigate()</span>
+      </div>
+      <div class="pros-cons" style="margin-top:8px">
+        <div class="pros"><h4>A favor</h4><ul>
+          <li>Animación solo se dispara al cambiar de ETAPA (no entre actividades)</li>
+          <li>Nombre del planeta = nombre de la etapa nueva</li>
+          <li>Control granular del momento exacto</li>
+        </ul></div>
+        <div class="cons"><h4>En contra</h4><ul>
+          <li>Modifica Lobby.tsx (agrega estado <code>showLanding</code> y lógica)</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Nueva ruta <code>/tablet/etapa-transition</code></h3>
+      <p>Ruta dedicada en App.tsx. Lobby navega ahí con parámetros <code>stage=2&amp;redirect=...</code>. Animación muestra el nombre de la etapa nueva.</p>
+      <div class="flow">
+        <span class="node node-existing">Lobby.tsx</span>
+        <span class="arrow">→</span>
+        <span class="node node-new">/tablet/etapa-transition<br><small>(nueva ruta)</small></span>
+        <span class="arrow">→ onDone →</span>
+        <span class="node node-dest">/tablet/etapa2/...</span>
+      </div>
+      <div class="pros-cons" style="margin-top:8px">
+        <div class="pros"><h4>A favor</h4><ul>
+          <li>Componente 100% aislado, fácil de testear</li>
+          <li>Lobby solo cambia las URLs de navegación entre etapas</li>
+          <li>Parámetro <code>stage=</code> le dice qué planeta mostrar</li>
+        </ul></div>
+        <div class="cons"><h4>En contra</h4><ul>
+          <li>Nueva ruta en App.tsx</li>
+          <li>Hay que actualizar las URLs de navegación en Lobby.tsx para cambios de etapa</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+</div>

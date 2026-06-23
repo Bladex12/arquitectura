@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Podium Options</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #050818;
+    color: #fff;
+    font-family: 'Segoe UI', sans-serif;
+    padding: 24px;
+    min-height: 100vh;
+  }
+  .page-title {
+    font-family: 'Georgia', serif;
+    font-size: 13px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+    margin-bottom: 6px;
+  }
+  .page-heading {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: #fff;
+  }
+  .page-sub {
+    font-size: 13px;
+    color: rgba(255,255,255,0.5);
+    margin-bottom: 28px;
+  }
+
+  /* Star bg simulation */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      radial-gradient(1px 1px at 10% 20%, rgba(255,255,255,0.6) 0%, transparent 100%),
+      radial-gradient(1px 1px at 40% 60%, rgba(255,255,255,0.4) 0%, transparent 100%),
+      radial-gradient(1px 1px at 70% 30%, rgba(255,255,255,0.5) 0%, transparent 100%),
+      radial-gradient(1px 1px at 90% 80%, rgba(255,255,255,0.3) 0%, transparent 100%),
+      radial-gradient(1px 1px at 25% 75%, rgba(255,255,255,0.5) 0%, transparent 100%),
+      radial-gradient(1px 1px at 55% 15%, rgba(255,255,255,0.4) 0%, transparent 100%),
+      radial-gradient(1px 1px at 80% 50%, rgba(255,255,255,0.6) 0%, transparent 100%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .options-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .option-card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+  .option-card:hover {
+    border-color: rgba(192,38,211,0.5);
+    transform: translateY(-2px);
+  }
+  .option-card.selected {
+    border-color: #c026d3;
+    box-shadow: 0 0 20px rgba(192,38,211,0.3);
+  }
+
+  .option-label {
+    padding: 14px 16px 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .option-letter {
+    width: 28px; height: 28px;
+    background: rgba(192,38,211,0.2);
+    border: 1px solid rgba(192,38,211,0.5);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    color: #c026d3;
+    flex-shrink: 0;
+  }
+  .option-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .option-desc {
+    font-size: 11px;
+    color: rgba(255,255,255,0.5);
+    padding: 4px 16px 12px 54px;
+  }
+
+  .mockup-area {
+    padding: 12px 16px 16px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+
+  /* GLASS CARD base */
+  .glass {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 12px;
+    padding: 14px;
+  }
+  .galactic-label {
+    font-size: 9px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+    margin-bottom: 10px;
+  }
+
+  /* ===== OPTION A: Classic Podium Bars ===== */
+  .podium-bars {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 8px;
+    height: 100px;
+    padding-bottom: 4px;
+  }
+  .podium-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .podium-avatar {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.3);
+    display: flex;align-items:center;justify-content:center;
+    font-size: 10px;
+    font-weight: 700;
+    color: #fff;
+    font-family: monospace;
+  }
+  .podium-medal { font-size: 14px; }
+  .podium-bar {
+    border-radius: 6px 6px 0 0;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 4px;
+    width: 46px;
+  }
+  .podium-bar .tokens {
+    font-size: 9px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.8);
+  }
+  .podium-name {
+    font-size: 8px;
+    color: rgba(255,255,255,0.6);
+    text-align: center;
+    max-width: 50px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .podium-rest {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .podium-rest-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 6px;
+  }
+  .podium-rest-rank { font-size: 9px; color: rgba(255,255,255,0.4); width: 14px; }
+  .podium-rest-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .podium-rest-name { font-size: 9px; color: rgba(255,255,255,0.7); flex: 1; }
+  .podium-rest-tokens { font-size: 9px; color: rgba(251,191,36,0.8); }
+
+  /* ===== OPTION B: Horizontal Leaderboard Strip ===== */
+  .leaderboard {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .lb-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 7px;
+    border: 1px solid transparent;
+  }
+  .lb-row.gold { background: rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.2); }
+  .lb-row.silver { background: rgba(156,163,175,0.08); border-color: rgba(156,163,175,0.2); }
+  .lb-row.bronze { background: rgba(249,115,22,0.08); border-color: rgba(249,115,22,0.2); }
+  .lb-row.other { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.07); }
+  .lb-medal { font-size: 13px; width: 18px; }
+  .lb-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .lb-name { font-size: 10px; color: rgba(255,255,255,0.85); flex: 1; }
+  .lb-tokens { display: flex; align-items: center; gap: 3px; }
+  .lb-star { font-size: 9px; }
+  .lb-val { font-size: 10px; font-weight: 700; color: rgba(251,191,36,0.9); }
+
+  /* ===== OPTION C: Top-3 Galaxy Cards ===== */
+  .galaxy-podium {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .gp-top3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 5px;
+  }
+  .gp-card {
+    border-radius: 8px;
+    padding: 8px 6px;
+    text-align: center;
+    border: 1px solid transparent;
+    position: relative;
+  }
+  .gp-card.first {
+    background: rgba(251,191,36,0.1);
+    border-color: rgba(251,191,36,0.3);
+  }
+  .gp-card.second {
+    background: rgba(156,163,175,0.07);
+    border-color: rgba(156,163,175,0.2);
+  }
+  .gp-card.third {
+    background: rgba(249,115,22,0.07);
+    border-color: rgba(249,115,22,0.2);
+  }
+  .gp-crown { font-size: 14px; }
+  .gp-avatar {
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    margin: 4px auto;
+    border: 2px solid rgba(255,255,255,0.25);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 700; color: #fff;
+  }
+  .gp-name {
+    font-size: 8px;
+    color: rgba(255,255,255,0.75);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .gp-tokens {
+    font-size: 9px;
+    font-weight: 700;
+    margin-top: 2px;
+  }
+  .gp-rank-badge {
+    position: absolute;
+    top: 4px; right: 5px;
+    font-size: 9px;
+    font-weight: 700;
+    opacity: 0.7;
+  }
+  .gp-others {
+    display: flex;
+    gap: 5px;
+  }
+  .gp-other-pill {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 7px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.07);
+  }
+  .gp-other-rank { font-size: 8px; color: rgba(255,255,255,0.35); width: 12px; }
+  .gp-other-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .gp-other-name { font-size: 8px; color: rgba(255,255,255,0.65); flex: 1; }
+  .gp-other-val { font-size: 8px; color: rgba(251,191,36,0.7); }
+</style>
+</head>
+<body>
+
+<div class="page-title">Misión Emprende · Visual Companion</div>
+<div class="page-heading">Clasificación Final — ¿Cómo mostrar el podio?</div>
+<div class="page-sub">Elige el estilo para la sección de ranking al final de la pantalla de reflexión del profesor</div>
+
+<div class="options-grid">
+
+  <!-- OPTION A -->
+  <div class="option-card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="option-label">
+      <div class="option-letter">A</div>
+      <div class="option-title">Barras de podio</div>
+    </div>
+    <div class="option-desc">Barras verticales estilo Kahoot — 1° más alta, con avatares y tokens arriba. Resto listado abajo.</div>
+    <div class="mockup-area">
+      <div class="glass">
+        <div class="galactic-label">🏆 Clasificación Final</div>
+        <div class="podium-bars">
+          <!-- 2nd -->
+          <div class="podium-col">
+            <div class="podium-avatar" style="background:#7c3aed">E2</div>
+            <div class="podium-medal">🥈</div>
+            <div class="podium-bar" style="background:rgba(156,163,175,0.25);height:55px">
+              <span class="tokens">840</span>
+            </div>
+            <div class="podium-name">Equipo Beta</div>
+          </div>
+          <!-- 1st -->
+          <div class="podium-col">
+            <div class="podium-avatar" style="background:#c026d3">E1</div>
+            <div class="podium-medal">🥇</div>
+            <div class="podium-bar" style="background:rgba(251,191,36,0.3);height:75px;border:1px solid rgba(251,191,36,0.4)">
+              <span class="tokens">1050</span>
+            </div>
+            <div class="podium-name">Equipo Alpha</div>
+          </div>
+          <!-- 3rd -->
+          <div class="podium-col">
+            <div class="podium-avatar" style="background:#093c92">E3</div>
+            <div class="podium-medal">🥉</div>
+            <div class="podium-bar" style="background:rgba(249,115,22,0.2);height:40px">
+              <span class="tokens">620</span>
+            </div>
+            <div class="podium-name">Equipo Gamma</div>
+          </div>
+        </div>
+        <div class="podium-rest">
+          <div class="podium-rest-row">
+            <span class="podium-rest-rank">4°</span>
+            <span class="podium-rest-dot" style="background:#10b981"></span>
+            <span class="podium-rest-name">Equipo Delta</span>
+            <span class="podium-rest-tokens">★ 480</span>
+          </div>
+          <div class="podium-rest-row">
+            <span class="podium-rest-rank">5°</span>
+            <span class="podium-rest-dot" style="background:#ef4444"></span>
+            <span class="podium-rest-name">Equipo Sigma</span>
+            <span class="podium-rest-tokens">★ 310</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- OPTION B -->
+  <div class="option-card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="option-label">
+      <div class="option-letter">B</div>
+      <div class="option-title">Tira de leaderboard</div>
+    </div>
+    <div class="option-desc">Lista compacta de todos los equipos ordenados, filas coloreadas por puesto. Muy legible de lejos.</div>
+    <div class="mockup-area">
+      <div class="glass">
+        <div class="galactic-label">🏆 Clasificación Final</div>
+        <div class="leaderboard">
+          <div class="lb-row gold">
+            <span class="lb-medal">🥇</span>
+            <span class="lb-dot" style="background:#c026d3"></span>
+            <span class="lb-name">Equipo Alpha</span>
+            <div class="lb-tokens"><span class="lb-star">★</span><span class="lb-val">1050</span></div>
+          </div>
+          <div class="lb-row silver">
+            <span class="lb-medal">🥈</span>
+            <span class="lb-dot" style="background:#7c3aed"></span>
+            <span class="lb-name">Equipo Beta</span>
+            <div class="lb-tokens"><span class="lb-star">★</span><span class="lb-val">840</span></div>
+          </div>
+          <div class="lb-row bronze">
+            <span class="lb-medal">🥉</span>
+            <span class="lb-dot" style="background:#093c92"></span>
+            <span class="lb-name">Equipo Gamma</span>
+            <div class="lb-tokens"><span class="lb-star">★</span><span class="lb-val">620</span></div>
+          </div>
+          <div class="lb-row other">
+            <span class="lb-medal" style="font-size:10px;color:rgba(255,255,255,0.3)">4°</span>
+            <span class="lb-dot" style="background:#10b981"></span>
+            <span class="lb-name">Equipo Delta</span>
+            <div class="lb-tokens"><span class="lb-star">★</span><span class="lb-val">480</span></div>
+          </div>
+          <div class="lb-row other">
+            <span class="lb-medal" style="font-size:10px;color:rgba(255,255,255,0.3)">5°</span>
+            <span class="lb-dot" style="background:#ef4444"></span>
+            <span class="lb-name">Equipo Sigma</span>
+            <div class="lb-tokens"><span class="lb-star">★</span><span class="lb-val">310</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- OPTION C -->
+  <div class="option-card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="option-label">
+      <div class="option-letter">C</div>
+      <div class="option-title">Cartas Top-3 + resto</div>
+    </div>
+    <div class="option-desc">Top 3 como tarjetas destacadas (oro/plata/bronce), el resto como píldoras compactas debajo.</div>
+    <div class="mockup-area">
+      <div class="glass">
+        <div class="galactic-label">🏆 Clasificación Final</div>
+        <div class="galaxy-podium">
+          <div class="gp-top3">
+            <div class="gp-card second">
+              <div class="gp-rank-badge" style="color:rgba(156,163,175,0.8)">2°</div>
+              <div class="gp-crown">🥈</div>
+              <div class="gp-avatar" style="background:#7c3aed">E2</div>
+              <div class="gp-name">Equipo Beta</div>
+              <div class="gp-tokens" style="color:rgba(156,163,175,0.9)">★ 840</div>
+            </div>
+            <div class="gp-card first">
+              <div class="gp-rank-badge" style="color:rgba(251,191,36,0.9)">1°</div>
+              <div class="gp-crown">🥇</div>
+              <div class="gp-avatar" style="background:#c026d3;border-color:rgba(251,191,36,0.5)">E1</div>
+              <div class="gp-name">Equipo Alpha</div>
+              <div class="gp-tokens" style="color:#fbbf24">★ 1050</div>
+            </div>
+            <div class="gp-card third">
+              <div class="gp-rank-badge" style="color:rgba(249,115,22,0.7)">3°</div>
+              <div class="gp-crown">🥉</div>
+              <div class="gp-avatar" style="background:#093c92">E3</div>
+              <div class="gp-name">Equipo Gamma</div>
+              <div class="gp-tokens" style="color:rgba(249,115,22,0.8)">★ 620</div>
+            </div>
+          </div>
+          <div class="gp-others">
+            <div class="gp-other-pill">
+              <span class="gp-other-rank">4°</span>
+              <span class="gp-other-dot" style="background:#10b981"></span>
+              <span class="gp-other-name">Equipo Delta</span>
+              <span class="gp-other-val">★480</span>
+            </div>
+            <div class="gp-other-pill">
+              <span class="gp-other-rank">5°</span>
+              <span class="gp-other-dot" style="background:#ef4444"></span>
+              <span class="gp-other-name">Equipo Sigma</span>
+              <span class="gp-other-val">★310</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function toggleSelect(el) {
+  document.querySelectorAll('.option-card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  if (window.__recordChoice) window.__recordChoice(el.dataset.choice, el.querySelector('.option-title').textContent);
+}
+</script>
+</body>
+</html>

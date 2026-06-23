@@ -1,0 +1,111 @@
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Exo+2:wght@300;400;600;700&display=swap');
+  body{margin:0;padding:0;background:#050818;color:#fff;font-family:'Exo 2',sans-serif;}
+  .screen{max-width:700px;margin:0 auto;padding:20px;min-height:95vh;display:flex;flex-direction:column;align-items:center;background:radial-gradient(ellipse at 50% 110%,rgba(124,58,237,0.2) 0%,transparent 60%);}
+
+  .pd-header{text-align:center;margin-bottom:12px;}
+  .pd-after{font-size:10px;letter-spacing:4px;text-transform:uppercase;color:rgba(255,255,255,0.35);margin-bottom:2px;}
+  .pd-planet{font-size:13px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#fff;margin-bottom:8px;}
+  .pd-title{font-family:'Orbitron',sans-serif;font-size:36px;font-weight:900;color:#fff;letter-spacing:3px;text-transform:uppercase;text-shadow:0 0 40px rgba(192,38,211,0.6);}
+  .pd-title span{color:#f59e0b;}
+
+  .pd-lower{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;justify-content:center;}
+  .lower-item{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:8px 16px;display:flex;align-items:center;gap:10px;min-width:170px;}
+  .lower-rank{font-family:'Orbitron',sans-serif;font-size:15px;font-weight:900;color:rgba(255,255,255,0.22);width:20px;}
+  .lower-dot{width:10px;height:10px;border-radius:50%;}
+  .lower-name{font-size:13px;font-weight:600;flex:1;}
+  .lower-pts{font-size:11px;font-weight:700;color:rgba(255,255,255,0.45);font-family:'Orbitron',sans-serif;}
+  /* sync badge on lower items */
+  .sync-ok{width:16px;height:16px;border-radius:50%;background:rgba(52,211,153,0.2);border:1px solid rgba(52,211,153,0.6);display:flex;align-items:center;justify-content:center;font-size:9px;color:#34d399;flex-shrink:0;}
+  .sync-wait{width:16px;height:16px;border-radius:50%;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;font-size:9px;color:rgba(255,255,255,0.3);flex-shrink:0;}
+
+  .pd-stage{display:flex;align-items:flex-end;justify-content:center;flex:1;width:100%;padding:0 40px;gap:10px;}
+  .pd-col{display:flex;flex-direction:column;align-items:center;flex:1;max-width:160px;}
+  .pd-crown{font-size:22px;margin-bottom:2px;}
+  .pd-avatar{width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;border:3px solid rgba(255,255,255,0.3);margin-bottom:5px;}
+  .av1{background:radial-gradient(circle at 35% 35%,#fef3c7,#f59e0b);border-color:#fbbf24;box-shadow:0 0 18px rgba(251,191,36,0.4);}
+  .av2{background:radial-gradient(circle at 35% 35%,#f1f5f9,#94a3b8);border-color:#cbd5e1;}
+  .av3{background:radial-gradient(circle at 35% 35%,#fde68a,#d97706);border-color:#d97706;}
+  .pd-name{font-size:12px;font-weight:700;color:#fff;text-align:center;white-space:nowrap;margin-bottom:2px;}
+  .pd-score{font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;color:rgba(255,255,255,0.65);margin-bottom:4px;}
+
+  /* Sync badge BELOW the team name / score, ABOVE the bar */
+  .sync-badge-ok{display:inline-flex;align-items:center;gap:4px;background:rgba(52,211,153,0.12);border:1px solid rgba(52,211,153,0.4);border-radius:999px;padding:2px 8px;font-size:9px;letter-spacing:1px;color:#34d399;margin-bottom:5px;text-transform:uppercase;}
+  .sync-badge-wait{display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:999px;padding:2px 8px;font-size:9px;letter-spacing:1px;color:rgba(255,255,255,0.3);margin-bottom:5px;text-transform:uppercase;}
+  .dot-pulse{width:5px;height:5px;border-radius:50%;background:#34d399;animation:pulse 1.4s infinite;}
+  .dot-grey{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,0.25);}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.3;}}
+
+  .pd-bar{width:100%;border-radius:8px 8px 0 0;display:flex;align-items:flex-end;justify-content:center;padding-bottom:10px;}
+  .bar-1{height:130px;background:linear-gradient(180deg,#fbbf24 0%,#d97706 100%);box-shadow:0 0 28px rgba(251,191,36,0.35);}
+  .bar-2{height:86px;background:linear-gradient(180deg,#cbd5e1 0%,#64748b 100%);}
+  .bar-3{height:62px;background:linear-gradient(180deg,#d97706 0%,#92400e 100%);}
+  .bar-rank{font-family:'Orbitron',sans-serif;font-size:32px;font-weight:900;color:rgba(255,255,255,0.25);}
+
+  .action-row{display:flex;gap:12px;margin:20px 0 16px;justify-content:center;}
+  .btn-prim{font-family:'Orbitron',sans-serif;font-size:12px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:#fff;background:rgba(192,38,211,0.15);border:2px solid rgba(192,38,211,0.6);padding:12px 32px;clip-path:polygon(10px 0%,100% 0%,calc(100% - 10px) 100%,0% 100%);cursor:pointer;}
+  .btn-sec{font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,0.4);background:transparent;border:2px solid rgba(255,255,255,0.15);padding:12px 24px;clip-path:polygon(10px 0%,100% 0%,calc(100% - 10px) 100%,0% 100%);cursor:pointer;}
+
+  .note{font-size:10px;color:rgba(255,255,255,0.25);text-align:center;letter-spacing:1px;margin-top:2px;}
+</style>
+
+<div class="screen">
+  <div class="pd-header">
+    <div class="pd-after">Después de</div>
+    <div class="pd-planet">Trabajo en Equipo</div>
+    <div class="pd-title">Clasifi<span>cación</span></div>
+  </div>
+
+  <!-- 4th & 5th with sync badge -->
+  <div class="pd-lower">
+    <div class="lower-item">
+      <span class="lower-rank">4</span>
+      <span class="lower-dot" style="background:#22d3ee"></span>
+      <span class="lower-name">Orbit Squad</span>
+      <span class="lower-pts">2600 pts</span>
+      <span class="sync-ok">✓</span>
+    </div>
+    <div class="lower-item">
+      <span class="lower-rank">5</span>
+      <span class="lower-dot" style="background:#34d399"></span>
+      <span class="lower-name">Galaxy Guards</span>
+      <span class="lower-pts">2400 pts</span>
+      <span class="sync-wait">···</span>
+    </div>
+  </div>
+
+  <!-- Podium with sync badges below name/score -->
+  <div class="pd-stage">
+    <!-- 2nd place -->
+    <div class="pd-col">
+      <div class="pd-avatar av2">🚀</div>
+      <div class="pd-name">Cosmic Crew</div>
+      <div class="pd-score">2900 pts</div>
+      <div class="sync-badge-ok"><div class="dot-pulse"></div> tablet OK</div>
+      <div class="pd-bar bar-2"><div class="bar-rank">2</div></div>
+    </div>
+    <!-- 1st place -->
+    <div class="pd-col">
+      <div class="pd-crown">👑</div>
+      <div class="pd-avatar av1">🚀</div>
+      <div class="pd-name">Nebula Nova</div>
+      <div class="pd-score">3200 pts</div>
+      <div class="sync-badge-wait"><div class="dot-grey"></div> esperando</div>
+      <div class="pd-bar bar-1"><div class="bar-rank">1</div></div>
+    </div>
+    <!-- 3rd place -->
+    <div class="pd-col">
+      <div class="pd-avatar av3">🚀</div>
+      <div class="pd-name">Star Seekers</div>
+      <div class="pd-score">2700 pts</div>
+      <div class="sync-badge-ok"><div class="dot-pulse"></div> tablet OK</div>
+      <div class="pd-bar bar-3"><div class="bar-rank">3</div></div>
+    </div>
+  </div>
+
+  <div class="action-row">
+    <button class="btn-sec">Cancelar Sala</button>
+    <button class="btn-prim">Ir a Etapa 2 ▶</button>
+  </div>
+  <div class="note">Los tablets se sincronizan automáticamente al detectar fin de etapa</div>
+</div>

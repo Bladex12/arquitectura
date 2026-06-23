@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Profesor Reflexión v3</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Exo+2:wght@400;500;600&display=swap');
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #050818;
+    color: #fff;
+    font-family: 'Exo 2', 'Segoe UI', sans-serif;
+    min-height: 100vh;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      radial-gradient(1px 1px at 5% 10%, rgba(255,255,255,0.7) 0%, transparent 100%),
+      radial-gradient(1px 1px at 15% 40%, rgba(255,255,255,0.4) 0%, transparent 100%),
+      radial-gradient(1px 1px at 25% 70%, rgba(255,255,255,0.6) 0%, transparent 100%),
+      radial-gradient(1px 1px at 35% 20%, rgba(255,255,255,0.3) 0%, transparent 100%),
+      radial-gradient(1px 1px at 45% 85%, rgba(255,255,255,0.5) 0%, transparent 100%),
+      radial-gradient(1px 1px at 55% 55%, rgba(255,255,255,0.4) 0%, transparent 100%),
+      radial-gradient(1px 1px at 65% 30%, rgba(255,255,255,0.6) 0%, transparent 100%),
+      radial-gradient(1px 1px at 75% 65%, rgba(255,255,255,0.3) 0%, transparent 100%),
+      radial-gradient(1px 1px at 85% 15%, rgba(255,255,255,0.5) 0%, transparent 100%),
+      radial-gradient(1px 1px at 92% 45%, rgba(255,255,255,0.4) 0%, transparent 100%),
+      radial-gradient(2px 2px at 50% 5%,  rgba(255,255,255,0.5) 0%, transparent 100%),
+      radial-gradient(2px 2px at 30% 50%, rgba(255,255,255,0.3) 0%, transparent 100%),
+      radial-gradient(2px 2px at 80% 80%, rgba(255,255,255,0.4) 0%, transparent 100%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .screen {
+    position: relative;
+    z-index: 1;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  /* ── Top bar ── */
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .topbar-left { display: flex; flex-direction: column; gap: 3px; }
+  .galactic-label { font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: rgba(255,255,255,0.45); }
+  .page-title { font-family: 'Orbitron', monospace; font-size: 22px; font-weight: 700; color: #fff; }
+  .topbar-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .room-badge { background: rgba(192,38,211,0.15); border: 1px solid rgba(192,38,211,0.4); border-radius: 8px; padding: 6px 14px; font-family: 'Orbitron', monospace; font-size: 14px; color: #c026d3; letter-spacing: 2px; }
+  .status-badge { background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.35); border-radius: 8px; padding: 6px 12px; font-size: 11px; color: #34d399; font-weight: 600; }
+  .btn-secondary { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 7px 14px; font-size: 11px; color: rgba(255,255,255,0.7); cursor: pointer; }
+  .btn-danger { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; padding: 7px 14px; font-size: 11px; color: #ef4444; cursor: pointer; }
+
+  .glass { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 20px; }
+
+  /* ── ROW 1: Podium ── */
+  .podium-card { border-color: rgba(251,191,36,0.2); }
+  .podium-inner {
+    display: grid;
+    grid-template-columns: 2fr 1fr;   /* podium gets twice the space */
+    gap: 24px;
+    align-items: end;
+  }
+
+  /* Left: bar chart */
+  .podium-bars-wrap {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 22px;
+    height: 150px;
+  }
+  .p-col { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+  .p-avatar {
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.25);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: #fff;
+    font-family: 'Orbitron', monospace;
+  }
+  .p-medal { font-size: 20px; line-height: 1; }
+  .p-bar {
+    border-radius: 8px 8px 0 0;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding-top: 7px;
+    width: 70px;
+  }
+  .p-tokens { font-family: 'Orbitron', monospace; font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.9); }
+  .p-name { font-size: 9px; color: rgba(255,255,255,0.5); text-align: center; max-width: 78px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Right: rest */
+  .podium-right { display: flex; flex-direction: column; gap: 6px; padding-bottom: 4px; }
+  .p-rest-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 8px; }
+  .p-rest-rank { font-size: 9px; color: rgba(255,255,255,0.3); width: 16px; font-family: 'Orbitron', monospace; }
+  .p-rest-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .p-rest-name { font-size: 10px; color: rgba(255,255,255,0.65); flex: 1; }
+  .p-rest-val { font-size: 9px; color: rgba(251,191,36,0.8); font-family: 'Orbitron', monospace; }
+
+  /* ── ROW 2: QR + Questions ── */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+  .qr-section { text-align: center; }
+  .section-heading { font-family: 'Orbitron', monospace; font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 12px; }
+  .qr-box { width: 130px; height: 130px; background: rgba(255,255,255,0.06); border: 2px solid rgba(192,38,211,0.4); border-radius: 12px; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 18px rgba(192,38,211,0.15); }
+  .qr-inner { width: 100px; height: 100px; display: grid; grid-template-columns: repeat(10,1fr); grid-template-rows: repeat(10,1fr); gap: 1px; opacity: 0.5; }
+  .qr-pixel { background: rgba(255,255,255,0.8); border-radius: 1px; }
+
+  .steps-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 12px; }
+  .step { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 7px 5px; text-align: center; }
+  .step-num { width: 20px; height: 20px; background: linear-gradient(135deg,#093c92,#c026d3); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; margin: 0 auto 4px; box-shadow: 0 0 6px rgba(192,38,211,0.4); }
+  .step-text { font-size: 8px; color: rgba(255,255,255,0.6); line-height: 1.3; }
+
+  .progress-section { background: rgba(192,38,211,0.08); border: 1px solid rgba(192,38,211,0.2); border-radius: 10px; padding: 9px 12px; }
+  .progress-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+  .progress-label { font-size: 10px; color: rgba(255,255,255,0.7); }
+  .progress-count { font-family: 'Orbitron', monospace; font-size: 11px; color: #c026d3; }
+  .progress-track { height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; margin-bottom: 3px; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg,#093c92,#c026d3); border-radius: 3px; width: 60%; box-shadow: 0 0 6px rgba(192,38,211,0.5); }
+  .progress-pct { font-size: 9px; color: rgba(255,255,255,0.35); text-align: right; }
+
+  .questions-list { display: flex; flex-direction: column; gap: 5px; }
+  .q-item { display: flex; align-items: flex-start; gap: 8px; padding: 6px 9px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 8px; }
+  .q-num { width: 17px; height: 17px; background: linear-gradient(135deg,#093c92,#c026d3); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 8px; font-weight: 700; flex-shrink: 0; box-shadow: 0 0 5px rgba(192,38,211,0.3); }
+  .q-text { font-size: 10px; color: rgba(255,255,255,0.65); line-height: 1.4; }
+
+  .url-note { position: fixed; bottom: 12px; right: 16px; font-size: 10px; color: rgba(255,255,255,0.2); z-index: 999; }
+</style>
+</head>
+<body>
+<div class="screen">
+
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <span class="galactic-label">Control de Misión · Reflexión Final</span>
+      <span class="page-title">Reflexión Final</span>
+    </div>
+    <div class="topbar-right">
+      <span class="room-badge">ABC123</span>
+      <span class="status-badge">✓ Sesión Finalizada</span>
+      <button class="btn-danger">Finalizar Sesión</button>
+      <button class="btn-secondary">← Volver al Panel</button>
+    </div>
+  </div>
+
+  <!-- ROW 1: PODIUM -->
+  <div class="glass podium-card">
+    <div class="galactic-label" style="margin-bottom:14px">🏆 Clasificación Final</div>
+    <div class="podium-inner">
+
+      <!-- 2/3 width: bar chart -->
+      <div class="podium-bars-wrap">
+        <div class="p-col">
+          <div class="p-avatar" style="background:#7c3aed">E2</div>
+          <div class="p-medal">🥈</div>
+          <div class="p-bar" style="background:rgba(156,163,175,0.2);height:80px;border:1px solid rgba(156,163,175,0.3)">
+            <span class="p-tokens">840</span>
+          </div>
+          <div class="p-name">Equipo Beta</div>
+        </div>
+        <div class="p-col">
+          <div class="p-avatar" style="background:#c026d3;border-color:rgba(251,191,36,0.6);box-shadow:0 0 14px rgba(251,191,36,0.35)">E1</div>
+          <div class="p-medal">🥇</div>
+          <div class="p-bar" style="background:rgba(251,191,36,0.18);height:120px;border:1px solid rgba(251,191,36,0.4);box-shadow:0 0 16px rgba(251,191,36,0.2)">
+            <span class="p-tokens" style="color:#fbbf24">1050</span>
+          </div>
+          <div class="p-name" style="color:#fbbf24">Equipo Alpha</div>
+        </div>
+        <div class="p-col">
+          <div class="p-avatar" style="background:#093c92">E3</div>
+          <div class="p-medal">🥉</div>
+          <div class="p-bar" style="background:rgba(249,115,22,0.15);height:58px;border:1px solid rgba(249,115,22,0.25)">
+            <span class="p-tokens">620</span>
+          </div>
+          <div class="p-name">Equipo Gamma</div>
+        </div>
+      </div>
+
+      <!-- 1/3 width: rest -->
+      <div class="podium-right">
+        <div class="galactic-label" style="margin-bottom:6px">Resto de equipos</div>
+        <div class="p-rest-row">
+          <span class="p-rest-rank">4°</span>
+          <span class="p-rest-dot" style="background:#10b981"></span>
+          <span class="p-rest-name">Equipo Delta</span>
+          <span class="p-rest-val">★ 480</span>
+        </div>
+        <div class="p-rest-row">
+          <span class="p-rest-rank">5°</span>
+          <span class="p-rest-dot" style="background:#ef4444"></span>
+          <span class="p-rest-name">Equipo Sigma</span>
+          <span class="p-rest-val">★ 310</span>
+        </div>
+        <div class="p-rest-row">
+          <span class="p-rest-rank">6°</span>
+          <span class="p-rest-dot" style="background:#3b82f6"></span>
+          <span class="p-rest-name">Equipo Omega</span>
+          <span class="p-rest-val">★ 220</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ROW 2: QR + Questions -->
+  <div class="two-col">
+    <div class="glass">
+      <div class="galactic-label" style="margin-bottom:12px">Encuesta de Reflexión</div>
+      <div class="qr-section">
+        <div class="section-heading">Escanea el Código QR</div>
+        <div class="qr-box"><div class="qr-inner" id="qr"></div></div>
+        <div class="steps-row">
+          <div class="step"><div class="step-num">1</div><div class="step-text">Abre la cámara de tu teléfono</div></div>
+          <div class="step"><div class="step-num">2</div><div class="step-text">Escanea el código QR</div></div>
+          <div class="step"><div class="step-num">3</div><div class="step-text">Completa la encuesta</div></div>
+        </div>
+        <div class="progress-section">
+          <div class="progress-header">
+            <span class="progress-label">✓ Progreso de respuestas</span>
+            <span class="progress-count">9 / 15</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill"></div></div>
+          <div class="progress-pct">60% completado</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="glass">
+      <div class="galactic-label" style="margin-bottom:12px">Preguntas de la Encuesta</div>
+      <div class="questions-list">
+        <div class="q-item"><div class="q-num">1</div><div class="q-text">¿Qué tan efectiva fue la comunicación en tu equipo?</div></div>
+        <div class="q-item"><div class="q-num">2</div><div class="q-text">¿Qué tan creativa fue la solución propuesta?</div></div>
+        <div class="q-item"><div class="q-num">3</div><div class="q-text">¿Cómo calificarías el trabajo en equipo?</div></div>
+        <div class="q-item"><div class="q-num">4</div><div class="q-text">¿Qué tan empático fue tu equipo con el problema?</div></div>
+        <div class="q-item"><div class="q-num">5</div><div class="q-text">¿Qué tan bien se organizaron las tareas?</div></div>
+        <div class="q-item"><div class="q-num">6</div><div class="q-text">¿Qué tan satisfecho estás con el resultado final?</div></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+<div class="url-note">http://localhost:61895</div>
+
+<script>
+const qr = document.getElementById('qr');
+const pattern = [1,1,1,1,1,1,1,0,1,1,1,0,0,0,0,0,1,0,0,1,1,0,1,1,1,0,1,0,1,0,1,0,1,1,1,0,1,0,0,1,1,0,0,0,0,0,1,0,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,1,1,0,1,0,1,0,1,1,1,0,0,1,1,1,0,1,1,0,1,1,0,0,1,0,1,0,1];
+pattern.forEach(v => { const px = document.createElement('div'); if(v) px.className='qr-pixel'; qr.appendChild(px); });
+</script>
+</body>
+</html>

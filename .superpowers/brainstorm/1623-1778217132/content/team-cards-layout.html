@@ -1,0 +1,389 @@
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@400;500;600;700&display=swap');
+
+  .preview-wrap {
+    background: #050818;
+    border-radius: 14px;
+    padding: 18px;
+    font-family: 'Exo 2', sans-serif;
+  }
+
+  /* ---- TOP BAR ---- */
+  .top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .etapa-label {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.5);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .etapa-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 0 18px rgba(192,38,211,0.5);
+  }
+  .badge {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    background: linear-gradient(135deg, #7c3aed, #c026d3);
+    color: #fff;
+    padding: 6px 14px;
+    border-radius: 50px;
+  }
+
+  /* ---- TIMER BLOCK ---- */
+  .timer-block {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 14px;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+    backdrop-filter: blur(12px);
+  }
+  .timer-label { font-size: 12px; color: rgba(255,255,255,0.5); font-family: 'Orbitron',sans-serif; letter-spacing: 2px; text-transform: uppercase; }
+  .timer-value { font-family: 'Orbitron',sans-serif; font-size: 30px; font-weight: 700; color: #fff; text-shadow: 0 0 18px rgba(124,58,237,0.7); }
+
+  /* ---- STATS ROW ---- */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(3,1fr);
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .glass-card {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 14px;
+    padding: 14px 16px;
+    backdrop-filter: blur(12px);
+  }
+  .stat-label { font-family: 'Orbitron',sans-serif; font-size: 10px; font-weight: 600; color: rgba(255,255,255,0.5); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; }
+  .stat-value { font-family: 'Orbitron',sans-serif; font-size: 28px; font-weight: 700; color: #fff; }
+  .stat-sub { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 4px; }
+
+  /* ---- TEAMS SECTION LABEL ---- */
+  .section-label {
+    font-family: 'Orbitron',sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.5);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  /* ---- OPTION A: Large image cards ---- */
+  .teams-grid-a {
+    display: grid;
+    grid-template-columns: repeat(3,1fr);
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .team-card-a {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 14px;
+    padding: 14px;
+    backdrop-filter: blur(12px);
+  }
+  .team-card-a.done {
+    border-color: rgba(16,185,129,0.55);
+    background: rgba(16,185,129,0.08);
+  }
+  .team-card-a .team-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .team-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .team-name { font-family: 'Exo 2',sans-serif; font-size: 14px; font-weight: 700; color: #fff; flex: 1; }
+  .proto-img {
+    width: 100%;
+    height: 90px;
+    background: rgba(255,255,255,0.04);
+    border: 1px dashed rgba(255,255,255,0.15);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255,255,255,0.3);
+    font-size: 11px;
+    margin-bottom: 8px;
+    font-family: 'Exo 2',sans-serif;
+  }
+  .proto-img.has-img {
+    background: linear-gradient(135deg, rgba(124,58,237,0.15), rgba(192,38,211,0.08));
+    border: 1px solid rgba(124,58,237,0.3);
+    color: rgba(255,255,255,0.5);
+    font-size: 18px;
+  }
+  .status-pill {
+    font-family: 'Orbitron',sans-serif;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: 50px;
+    display: inline-block;
+  }
+  .status-pending { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.4); }
+  .status-done { background: rgba(16,185,129,0.2); color: #34d399; }
+  .status-submitted { background: rgba(124,58,237,0.2); color: #a78bfa; }
+
+  /* ---- OPTION B: Compact status cards ---- */
+  .teams-grid-b {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .team-card-b {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 14px;
+    padding: 14px 16px;
+    backdrop-filter: blur(12px);
+  }
+  .team-card-b.done {
+    border-color: rgba(16,185,129,0.55);
+    background: rgba(16,185,129,0.08);
+  }
+  .team-card-b .team-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .progress-bar {
+    height: 5px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 8px;
+  }
+  .progress-fill { height: 100%; background: linear-gradient(90deg,#7c3aed,#c026d3); border-radius: 3px; transition: width 0.5s; }
+  .team-status-text { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.5); font-family: 'Exo 2',sans-serif; }
+  .team-status-text.ready { color: #34d399; }
+
+  /* ---- ACTIONS ---- */
+  .actions { display: flex; justify-content: center; gap: 12px; padding-top: 4px; }
+  .btn-sec {
+    font-family: 'Orbitron',sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 10px 22px;
+    border-radius: 50px;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: rgba(255,255,255,0.07);
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+  }
+  .btn-prim {
+    font-family: 'Orbitron',sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 10px 22px;
+    border-radius: 50px;
+    background: linear-gradient(135deg, #7c3aed, #c026d3);
+    color: #fff;
+    box-shadow: 0 0 16px rgba(192,38,211,0.35);
+    border: none;
+    cursor: pointer;
+  }
+</style>
+
+<h2>How should team prototype cards look?</h2>
+<p class="subtitle">Both options use the same galactic top bar, timer, and stats. The difference is how each team's card is laid out.</p>
+
+<div class="cards">
+
+  <!-- OPTION A -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="preview-wrap">
+        <!-- top bar -->
+        <div class="top-bar">
+          <div>
+            <div class="etapa-label">Control de Misión · Etapa 3</div>
+            <div class="etapa-title">Creatividad</div>
+          </div>
+          <div class="badge">Actividad 1</div>
+        </div>
+        <!-- timer -->
+        <div class="timer-block">
+          <div>
+            <div class="timer-label">Tiempo restante</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.4);font-family:'Exo 2',sans-serif;margin-top:2px;">Prototipos de Lego</div>
+          </div>
+          <div class="timer-value">12:45</div>
+        </div>
+        <!-- stats -->
+        <div class="stats-row">
+          <div class="glass-card">
+            <div class="stat-label">Equipos</div>
+            <div class="stat-value">4</div>
+            <div class="stat-sub">totales</div>
+          </div>
+          <div class="glass-card">
+            <div class="stat-label">Completados</div>
+            <div class="stat-value" style="color:#34d399;">1</div>
+            <div class="stat-sub">prototipos</div>
+          </div>
+          <div class="glass-card">
+            <div class="stat-label">Fotos</div>
+            <div class="stat-value" style="color:#a78bfa;">2</div>
+            <div class="stat-sub">subidas</div>
+          </div>
+        </div>
+        <!-- teams -->
+        <div class="section-label">Estado de los equipos</div>
+        <div class="teams-grid-a">
+          <div class="team-card-a done">
+            <div class="team-header">
+              <div class="team-dot" style="background:#28a745;"></div>
+              <div class="team-name">Equipo Verde</div>
+              <span>✅</span>
+            </div>
+            <div class="proto-img has-img">🖼️ Prototipo</div>
+            <div class="status-pill status-done">Completado</div>
+          </div>
+          <div class="team-card-a">
+            <div class="team-header">
+              <div class="team-dot" style="background:#007bff;"></div>
+              <div class="team-name">Equipo Azul</div>
+            </div>
+            <div class="proto-img has-img">🖼️ Foto subida</div>
+            <div class="status-pill status-submitted">Foto subida</div>
+          </div>
+          <div class="team-card-a">
+            <div class="team-header">
+              <div class="team-dot" style="background:#dc3545;"></div>
+              <div class="team-name">Equipo Rojo</div>
+            </div>
+            <div class="proto-img">Sin foto aún</div>
+            <div class="status-pill status-pending">Pendiente</div>
+          </div>
+        </div>
+        <!-- actions -->
+        <div class="actions">
+          <button class="btn-sec">Cancelar Sesión</button>
+          <button class="btn-prim">Continuar Misión ▶</button>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Option A — Image Previews</h3>
+      <p>Each team card shows a prototype image area (photo when uploaded, placeholder when not). Professor can see at a glance which teams have photos. Cards are taller.</p>
+    </div>
+  </div>
+
+  <!-- OPTION B -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="preview-wrap">
+        <!-- top bar -->
+        <div class="top-bar">
+          <div>
+            <div class="etapa-label">Control de Misión · Etapa 3</div>
+            <div class="etapa-title">Creatividad</div>
+          </div>
+          <div class="badge">Actividad 1</div>
+        </div>
+        <!-- timer -->
+        <div class="timer-block">
+          <div>
+            <div class="timer-label">Tiempo restante</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.4);font-family:'Exo 2',sans-serif;margin-top:2px;">Prototipos de Lego</div>
+          </div>
+          <div class="timer-value">12:45</div>
+        </div>
+        <!-- stats -->
+        <div class="stats-row">
+          <div class="glass-card">
+            <div class="stat-label">Equipos</div>
+            <div class="stat-value">4</div>
+            <div class="stat-sub">totales</div>
+          </div>
+          <div class="glass-card">
+            <div class="stat-label">Completados</div>
+            <div class="stat-value" style="color:#34d399;">1</div>
+            <div class="stat-sub">prototipos</div>
+          </div>
+          <div class="glass-card">
+            <div class="stat-label">Fotos</div>
+            <div class="stat-value" style="color:#a78bfa;">2</div>
+            <div class="stat-sub">subidas</div>
+          </div>
+        </div>
+        <!-- teams compact -->
+        <div class="section-label">Estado de los equipos</div>
+        <div class="teams-grid-b">
+          <div class="team-card-b done">
+            <div class="team-header">
+              <div class="team-dot" style="background:#28a745;"></div>
+              <div class="team-name">Equipo Verde</div>
+              <span>✅</span>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" style="width:100%"></div></div>
+            <div class="team-status-text ready">Completado · 🖼️ Foto subida</div>
+          </div>
+          <div class="team-card-b">
+            <div class="team-header">
+              <div class="team-dot" style="background:#007bff;"></div>
+              <div class="team-name">Equipo Azul</div>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" style="width:60%"></div></div>
+            <div class="team-status-text" style="color:#a78bfa;">Foto subida · pendiente OK</div>
+          </div>
+          <div class="team-card-b">
+            <div class="team-header">
+              <div class="team-dot" style="background:#dc3545;"></div>
+              <div class="team-name">Equipo Rojo</div>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" style="width:0%"></div></div>
+            <div class="team-status-text">Esperando...</div>
+          </div>
+          <div class="team-card-b">
+            <div class="team-header">
+              <div class="team-dot" style="background:#ffc107;"></div>
+              <div class="team-name">Equipo Amarillo</div>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" style="width:0%"></div></div>
+            <div class="team-status-text">Esperando...</div>
+          </div>
+        </div>
+        <!-- actions -->
+        <div class="actions">
+          <button class="btn-sec">Cancelar Sesión</button>
+          <button class="btn-prim">Continuar Misión ▶</button>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Option B — Compact Status</h3>
+      <p>Team cards match Etapa 1/2 style: progress bar + status text only. More teams fit on screen at once. No image previews — the professor sees status counts in the stats row instead.</p>
+    </div>
+  </div>
+
+</div>

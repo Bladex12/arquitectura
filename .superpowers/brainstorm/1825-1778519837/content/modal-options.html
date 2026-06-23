@@ -1,0 +1,425 @@
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Exo+2:wght@300;400;600&display=swap');
+
+  body { background: #060d1f; }
+
+  .page-title {
+    text-align: center;
+    color: #fff;
+    font-family: 'Exo 2', sans-serif;
+    font-size: 13px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.55);
+    margin-bottom: 8px;
+  }
+  .page-heading {
+    text-align: center;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 20px;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+  .page-sub {
+    text-align: center;
+    font-family: 'Exo 2', sans-serif;
+    font-size: 13px;
+    color: rgba(255,255,255,0.5);
+    margin-bottom: 36px;
+  }
+
+  /* ---- Cards container ---- */
+  .cards {
+    display: flex;
+    gap: 24px;
+    justify-content: center;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .card {
+    width: 280px;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.1);
+    backdrop-filter: blur(12px);
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.25s, box-shadow 0.25s, transform 0.25s;
+    flex-shrink: 0;
+  }
+  .card:hover {
+    border-color: rgba(192,38,211,0.5);
+    box-shadow: 0 0 32px rgba(192,38,211,0.2);
+    transform: translateY(-4px);
+  }
+  .card.selected {
+    border-color: rgba(192,38,211,0.8);
+    box-shadow: 0 0 40px rgba(192,38,211,0.35);
+  }
+
+  .card-label {
+    font-family: 'Exo 2', sans-serif;
+    font-size: 11px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.45);
+    padding: 14px 16px 0;
+  }
+  .card-name {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 14px;
+    color: #fff;
+    padding: 6px 16px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+  }
+
+  /* ---- Modal previews ---- */
+  .modal-preview {
+    padding: 16px;
+  }
+
+  /* OPTION A — Minimal glass */
+  .modal-a {
+    background: rgba(6,13,31,0.88);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 14px;
+    padding: 24px 20px 20px;
+    backdrop-filter: blur(16px);
+  }
+  .modal-a .m-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #fff;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+  }
+  .modal-a .m-body {
+    font-family: 'Exo 2', sans-serif;
+    font-size: 12px;
+    color: rgba(255,255,255,0.55);
+    line-height: 1.5;
+    margin-bottom: 20px;
+  }
+  .modal-a .m-actions {
+    display: flex;
+    gap: 10px;
+  }
+  .modal-a .btn-cancel {
+    flex: 1;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.7);
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 7px;
+    padding: 10px 0;
+    text-align: center;
+  }
+  .modal-a .btn-confirm {
+    flex: 1.3;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: #fff;
+    background: linear-gradient(135deg, #093c92, #c026d3);
+    border: none;
+    border-radius: 7px;
+    padding: 10px 0;
+    text-align: center;
+    box-shadow: 0 0 18px rgba(192,38,211,0.4);
+  }
+
+  /* OPTION B — With icon strip */
+  .modal-b {
+    background: rgba(6,13,31,0.88);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 14px;
+    overflow: hidden;
+    backdrop-filter: blur(16px);
+  }
+  .modal-b .m-top-stripe {
+    height: 3px;
+    background: linear-gradient(90deg, #093c92, #c026d3);
+  }
+  .modal-b .m-inner {
+    padding: 20px 20px 18px;
+  }
+  .modal-b .m-icon-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .modal-b .m-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: rgba(192,38,211,0.15);
+    border: 1px solid rgba(192,38,211,0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+  .modal-b .m-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #fff;
+    text-transform: uppercase;
+  }
+  .modal-b .m-subtitle {
+    font-family: 'Exo 2', sans-serif;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(192,38,211,0.85);
+    margin-top: 1px;
+  }
+  .modal-b .m-body {
+    font-family: 'Exo 2', sans-serif;
+    font-size: 12px;
+    color: rgba(255,255,255,0.55);
+    line-height: 1.5;
+    margin-bottom: 18px;
+    padding-left: 44px;
+  }
+  .modal-b .m-actions {
+    display: flex;
+    gap: 10px;
+  }
+  .modal-b .btn-cancel {
+    flex: 1;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.7);
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 7px;
+    padding: 10px 0;
+    text-align: center;
+  }
+  .modal-b .btn-confirm {
+    flex: 1.3;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: #fff;
+    background: linear-gradient(135deg, #093c92, #c026d3);
+    border: none;
+    clip-path: polygon(8px 0%, 100% 0%, calc(100% - 8px) 100%, 0% 100%);
+    padding: 10px 0;
+    text-align: center;
+    box-shadow: 0 0 18px rgba(192,38,211,0.4);
+  }
+
+  /* OPTION C — Full galactic with angled card */
+  .modal-c {
+    background: rgba(9,13,35,0.92);
+    border: 1px solid rgba(192,38,211,0.25);
+    border-radius: 14px;
+    overflow: hidden;
+    backdrop-filter: blur(20px);
+    box-shadow: 0 0 40px rgba(9,60,146,0.2), inset 0 0 60px rgba(192,38,211,0.04);
+  }
+  .modal-c .m-header {
+    background: linear-gradient(135deg, rgba(9,60,146,0.3), rgba(192,38,211,0.2));
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .modal-c .m-badge {
+    background: linear-gradient(135deg, #c026d3, #7c3aed);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    color: #fff;
+    text-transform: uppercase;
+  }
+  .modal-c .m-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: rgba(255,255,255,0.85);
+    text-transform: uppercase;
+    flex: 1;
+    text-align: right;
+  }
+  .modal-c .m-inner {
+    padding: 20px 18px 18px;
+  }
+  .modal-c .m-body {
+    font-family: 'Exo 2', sans-serif;
+    font-size: 13px;
+    color: rgba(255,255,255,0.7);
+    line-height: 1.6;
+    margin-bottom: 8px;
+  }
+  .modal-c .m-warning {
+    font-family: 'Exo 2', sans-serif;
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: rgba(251,191,36,0.8);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .modal-c .m-warning::before {
+    content: '⚡';
+    font-size: 12px;
+  }
+  .modal-c .m-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .modal-c .btn-cancel {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.6);
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 7px;
+    padding: 10px 16px;
+    text-align: center;
+  }
+  .modal-c .btn-confirm {
+    flex: 1;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #fff;
+    background: linear-gradient(135deg, #093c92, #c026d3);
+    border: none;
+    clip-path: polygon(10px 0%, 100% 0%, calc(100% - 10px) 100%, 0% 100%);
+    padding: 12px 0;
+    text-align: center;
+    box-shadow: 0 0 24px rgba(192,38,211,0.5);
+  }
+
+  /* card footer */
+  .card-footer {
+    padding: 10px 16px 14px;
+    font-family: 'Exo 2', sans-serif;
+    font-size: 11px;
+    color: rgba(255,255,255,0.35);
+    border-top: 1px solid rgba(255,255,255,0.06);
+    line-height: 1.4;
+  }
+
+  /* overlay simulation */
+  .overlay-sim {
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(3px);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 4px;
+  }
+</style>
+
+<p class="page-title">Advance Phase Modal — Design Options</p>
+<h2 class="page-heading">¿Cómo debería verse el popup?</h2>
+<p class="page-sub">Click to select the design that fits best with the galactic theme</p>
+
+<div class="cards">
+
+  <!-- OPTION A -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-label">Option A</div>
+    <div class="card-name">Minimal Glass</div>
+    <div class="modal-preview">
+      <div class="overlay-sim">
+        <div class="modal-a">
+          <div class="m-title">Avanzar Actividad</div>
+          <div class="m-body">Todos los equipos deben haber completado la actividad actual antes de continuar.</div>
+          <div class="m-actions">
+            <div class="btn-cancel">Cancelar</div>
+            <div class="btn-confirm">Avanzar</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-footer">Clean and simple. Dark glass background, gradient confirm button. No extras.</div>
+  </div>
+
+  <!-- OPTION B -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-label">Option B</div>
+    <div class="card-name">Icon + Stripe</div>
+    <div class="modal-preview">
+      <div class="overlay-sim">
+        <div class="modal-b">
+          <div class="m-top-stripe"></div>
+          <div class="m-inner">
+            <div class="m-icon-row">
+              <div class="m-icon">🚀</div>
+              <div>
+                <div class="m-title">Avanzar Actividad</div>
+                <div class="m-subtitle">Etapa 1 · Actividad 2 → 3</div>
+              </div>
+            </div>
+            <div class="m-body">Todos los equipos deben haber completado la actividad actual antes de continuar.</div>
+            <div class="m-actions">
+              <div class="btn-cancel">Cancelar</div>
+              <div class="btn-confirm">Avanzar</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-footer">Gradient top stripe + icon row. Angled confirm button matches the galactic style.</div>
+  </div>
+
+  <!-- OPTION C -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-label">Option C</div>
+    <div class="card-name">Full Galactic</div>
+    <div class="modal-preview">
+      <div class="overlay-sim">
+        <div class="modal-c">
+          <div class="m-header">
+            <div class="m-badge">Etapa 1</div>
+            <div class="m-title">Confirmar Avance</div>
+          </div>
+          <div class="m-inner">
+            <div class="m-body">¿Avanzar a la siguiente actividad?</div>
+            <div class="m-warning">Todos los equipos deben haber completado la actividad actual.</div>
+            <div class="m-actions">
+              <div class="btn-cancel">Volver</div>
+              <div class="btn-confirm">Avanzar Ahora</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-footer">Gradient header panel, galactic badge, gold warning line. Most dramatic look.</div>
+  </div>
+
+</div>

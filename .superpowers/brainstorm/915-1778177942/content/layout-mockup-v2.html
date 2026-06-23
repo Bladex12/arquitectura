@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fase 2 Professor Screens v2</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #050818; color: #fff; font-family: 'Exo 2', sans-serif; padding: 20px; }
+  h1 { font-family: 'Orbitron', sans-serif; font-size: 18px; color: #c026d3; margin-bottom: 6px; letter-spacing: 2px; text-transform: uppercase; }
+  .page-label { font-size: 12px; letter-spacing: 4px; text-transform: uppercase; color: rgba(255,255,255,0.5); margin-bottom: 30px; }
+
+  .screen { background: #050818; border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; padding: 20px; margin-bottom: 40px; position: relative; overflow: hidden; }
+  .screen::before { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse at 80% 20%, rgba(192,38,211,0.08), transparent 60%), radial-gradient(ellipse at 20% 80%, rgba(9,60,146,0.1), transparent 60%); pointer-events: none; }
+
+  .starfield { position: absolute; inset: 0; pointer-events: none; overflow: hidden; border-radius: 16px; }
+  .star { position: absolute; background: white; border-radius: 50%; animation: twinkle linear infinite; }
+  @keyframes twinkle { 0%,100% { opacity: 0.3; } 50% { opacity: 0.9; } }
+
+  /* TOP BAR */
+  .top-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; position: relative; z-index: 1; }
+  .mission-tag { font-family: 'Exo 2', sans-serif; font-size: 11px; text-transform: uppercase; letter-spacing: 4px; color: rgba(255,255,255,0.55); margin-bottom: 3px; }
+  .phase-title { font-family: 'Orbitron', sans-serif; font-size: 24px; font-weight: 700; color: #fff; text-shadow: 0 0 24px rgba(192,38,211,0.5); }
+  .activity-badge { background: rgba(192,38,211,0.2); border: 1px solid rgba(192,38,211,0.5); border-radius: 20px; padding: 6px 16px; font-family: 'Orbitron', sans-serif; font-size: 11px; color: #d946ef; letter-spacing: 1px; }
+
+  /* TIMER — centered */
+  .timer-block { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px 24px; margin-bottom: 14px; position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; }
+  .timer-center { flex: 1; display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .timer-display { font-family: 'Orbitron', sans-serif; font-size: 64px; font-weight: 900; color: #fff; line-height: 1; text-shadow: 0 0 40px rgba(255,255,255,0.3); }
+  .timer-label { font-family: 'Exo 2', sans-serif; font-size: 13px; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 3px; margin-top: 4px; }
+  .timer-side { font-size: 14px; color: rgba(255,255,255,0.45); min-width: 100px; }
+  .timer-side.right { text-align: right; }
+
+  /* GLASS STATS */
+  .stats-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 14px; position: relative; z-index: 1; }
+  .glass-card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: 14px; backdrop-filter: blur(12px); padding: 18px 22px; }
+  .glass-card .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 3px; color: rgba(255,255,255,0.55); margin-bottom: 8px; }
+  .glass-card .val { font-family: 'Orbitron', sans-serif; font-size: 32px; font-weight: 700; color: #fff; line-height: 1; }
+  .glass-card .sub { font-size: 13px; color: rgba(255,255,255,0.5); margin-top: 5px; }
+
+  .section-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 4px; color: rgba(255,255,255,0.55); margin-bottom: 10px; position: relative; z-index: 1; }
+
+  /* TEAM CARDS */
+  .team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; position: relative; z-index: 1; }
+  .team-card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .team-card.done { border-color: rgba(16,185,129,0.5); background: rgba(16,185,129,0.06); }
+  .team-header { display: flex; align-items: flex-start; gap: 10px; }
+  .color-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; margin-top: 3px; }
+  .team-name { font-family: 'Exo 2', sans-serif; font-size: 16px; font-weight: 700; color: #fff; flex: 1; }
+  .team-subtitle { font-size: 10px; color: rgba(255,255,255,0.4); margin-top: 2px; }
+  .status-pill { font-size: 10px; padding: 3px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+  .status-pill.done { background: rgba(16,185,129,0.2); color: #34d399; border: 1px solid rgba(16,185,129,0.4); }
+  .status-pill.progress { background: rgba(59,130,246,0.2); color: #93c5fd; border: 1px solid rgba(59,130,246,0.3); }
+  .status-pill.pending { background: rgba(245,158,11,0.15); color: #fcd34d; border: 1px solid rgba(245,158,11,0.3); }
+  .progress-bar { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg,#7c3aed,#c026d3); border-radius: 2px; transition: width .5s; }
+
+  /* INFO ROWS (Screen 1) */
+  .info-row { background: rgba(255,255,255,0.04); border-radius: 8px; padding: 8px 10px; }
+  .info-row .row-label { font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: rgba(255,255,255,0.45); margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center; }
+  .info-row .row-value { font-size: 13px; font-weight: 600; color: #fff; }
+  .info-row .row-value.empty { color: rgba(255,255,255,0.3); font-weight: 400; font-style: italic; }
+  .check-icon { color: #34d399; }
+  .wait-icon { color: rgba(255,255,255,0.3); }
+
+  /* NODE GRID (Screen 2) — always 3 columns, ver mapa OUTSIDE */
+  .node-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; }
+  .node-tile { border-radius: 8px; padding: 8px 6px; text-align: center; border: 1px solid; }
+  .node-tile .node-icon { font-size: 14px; margin-bottom: 2px; }
+  .node-tile .node-name { font-size: 8px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .node-tile .node-count { font-family: 'Orbitron', sans-serif; font-size: 16px; font-weight: 700; color: #fff; }
+  .node-tile .node-unit { font-size: 7px; color: rgba(255,255,255,0.4); }
+  /* "Ver Mapa" lives below the grid, full-width, never inside the grid */
+  .ver-mapa-btn { width: 100%; margin-top: 2px; background: rgba(192,38,211,0.12); border: 1px solid rgba(192,38,211,0.35); color: #d946ef; font-size: 11px; font-family: 'Exo 2', sans-serif; font-weight: 600; padding: 7px 0; border-radius: 8px; cursor: pointer; letter-spacing: 1px; text-align: center; }
+
+  /* Pending placeholder */
+  .pending-placeholder { padding: 18px; text-align: center; color: rgba(255,255,255,0.2); font-size: 12px; font-style: italic; background: rgba(255,255,255,0.02); border-radius: 8px; }
+
+  /* ACTIONS */
+  .actions { display: flex; justify-content: center; gap: 14px; margin-top: 18px; position: relative; z-index: 1; }
+  .btn-primary { background: linear-gradient(90deg, #093c92, #c026d3); border: none; color: #fff; font-family: 'Orbitron', sans-serif; font-size: 13px; font-weight: 700; padding: 12px 28px; border-radius: 8px; cursor: pointer; clip-path: polygon(10px 0%,100% 0%,calc(100% - 10px) 100%,0% 100%); box-shadow: 0 0 20px rgba(192,38,211,0.4); letter-spacing: 1px; }
+  .btn-secondary { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.2); color: rgba(255,255,255,0.7); font-family: 'Exo 2', sans-serif; font-size: 13px; padding: 12px 24px; border-radius: 8px; cursor: pointer; }
+  .btn-dev { background: rgba(249,115,22,0.2); border: 1px solid rgba(249,115,22,0.5); color: #fb923c; font-size: 12px; padding: 10px 18px; border-radius: 8px; cursor: pointer; }
+
+  .screen-title-strip { font-family: 'Exo 2', sans-serif; font-size: 13px; background: rgba(192,38,211,0.15); border: 1px solid rgba(192,38,211,0.3); border-radius: 8px; padding: 6px 14px; display: inline-block; margin-bottom: 14px; color: #d946ef; letter-spacing: 2px; text-transform: uppercase; }
+  .divider { height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent); margin: 32px 0; }
+  .note { background: rgba(9,60,146,0.2); border: 1px solid rgba(9,60,146,0.4); border-radius: 10px; padding: 12px 16px; margin-top: 32px; font-size: 13px; color: rgba(255,255,255,0.7); line-height: 1.6; }
+  .note strong { color: #93c5fd; }
+</style>
+</head>
+<body>
+
+<h1>Fase 2 — Professor Screens v2</h1>
+<p class="page-label">Timer centered · More spacing between cards · Ver Mapa always below grid</p>
+
+<!-- ====== SCREEN 1 ====== -->
+<div class="screen-title-strip">Screen 1 · Seleccionar Tema</div>
+<div class="screen">
+  <div class="starfield" id="s1"></div>
+
+  <div class="top-bar">
+    <div>
+      <div class="mission-tag">Control de Misión · Etapa 2</div>
+      <div class="phase-title">Empatía</div>
+    </div>
+    <div class="activity-badge">Actividad 1 · Seleccionar Tema</div>
+  </div>
+
+  <!-- Timer — centered -->
+  <div class="timer-block">
+    <div class="timer-side">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:3px;color:rgba(255,255,255,0.4);margin-bottom:4px;">Sala</div>
+      <div style="font-family:'Orbitron',sans-serif;font-size:22px;font-weight:700;color:#c026d3;letter-spacing:4px;">AB12</div>
+    </div>
+    <div class="timer-center">
+      <div class="timer-display">08:42</div>
+      <div class="timer-label">Selección de Tema y Desafío</div>
+    </div>
+    <div class="timer-side right" style="min-width:100px;"></div>
+  </div>
+
+  <div class="stats-row">
+    <div class="glass-card">
+      <div class="lbl">Temas Seleccionados</div>
+      <div class="val">2 <span style="font-size:18px;color:rgba(255,255,255,0.4)">/ 4</span></div>
+      <div class="sub">equipos con tema elegido</div>
+    </div>
+    <div class="glass-card">
+      <div class="lbl">Desafíos Seleccionados</div>
+      <div class="val" style="color:#34d399">1 <span style="font-size:18px;color:rgba(255,255,255,0.4)">/ 4</span></div>
+      <div class="sub">equipos con desafío elegido</div>
+    </div>
+    <div class="glass-card">
+      <div class="lbl">Actividad Actual</div>
+      <div class="val" style="font-size:18px;color:#d946ef">Seleccionar Tema</div>
+      <div class="sub">sector + persona</div>
+    </div>
+  </div>
+
+  <div class="section-lbl">Estado de los equipos</div>
+  <div class="team-grid">
+    <div class="team-card done">
+      <div class="team-header">
+        <div class="color-dot" style="background:#28a745"></div>
+        <div style="flex:1"><div class="team-name">Galaxia</div></div>
+        <span class="status-pill done">✓ Completo</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:100%"></div></div>
+      <div class="info-row">
+        <div class="row-label">🌍 Tema <span class="check-icon">✓</span></div>
+        <div class="row-value">Educación</div>
+      </div>
+      <div class="info-row">
+        <div class="row-label">🎯 Desafío <span class="check-icon">✓</span></div>
+        <div class="row-value">👩‍🏫 Martina, 35 · Profesora rural</div>
+      </div>
+    </div>
+    <div class="team-card">
+      <div class="team-header">
+        <div class="color-dot" style="background:#007bff"></div>
+        <div style="flex:1"><div class="team-name">Nebulosa</div></div>
+        <span class="status-pill pending">⏳ En progreso</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:50%"></div></div>
+      <div class="info-row">
+        <div class="row-label">🌍 Tema <span class="check-icon">✓</span></div>
+        <div class="row-value">Salud</div>
+      </div>
+      <div class="info-row">
+        <div class="row-label">🎯 Desafío <span class="wait-icon">•••</span></div>
+        <div class="row-value empty">Eligiendo...</div>
+      </div>
+    </div>
+    <div class="team-card">
+      <div class="team-header">
+        <div class="color-dot" style="background:#dc3545"></div>
+        <div style="flex:1"><div class="team-name">Aurora</div></div>
+        <span class="status-pill pending">⏳ Pendiente</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:0%"></div></div>
+      <div class="info-row">
+        <div class="row-label">🌍 Tema <span class="wait-icon">•••</span></div>
+        <div class="row-value empty">Sin seleccionar</div>
+      </div>
+      <div class="info-row">
+        <div class="row-label">🎯 Desafío <span class="wait-icon">•••</span></div>
+        <div class="row-value empty">Sin seleccionar</div>
+      </div>
+    </div>
+    <div class="team-card">
+      <div class="team-header">
+        <div class="color-dot" style="background:#6f42c1"></div>
+        <div style="flex:1"><div class="team-name">Cosmos</div></div>
+        <span class="status-pill pending">⏳ Pendiente</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:0%"></div></div>
+      <div class="info-row">
+        <div class="row-label">🌍 Tema <span class="wait-icon">•••</span></div>
+        <div class="row-value empty">Sin seleccionar</div>
+      </div>
+      <div class="info-row">
+        <div class="row-label">🎯 Desafío <span class="wait-icon">•••</span></div>
+        <div class="row-value empty">Sin seleccionar</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn-secondary">Cancelar Sesión</button>
+    <button class="btn-primary" style="opacity:0.35;cursor:not-allowed">Avanzar a Bubble Map ▶</button>
+    <button class="btn-dev">Dev ⚙</button>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ====== SCREEN 2 ====== -->
+<div class="screen-title-strip">Screen 2 · Bubble Map</div>
+<div class="screen">
+  <div class="starfield" id="s2"></div>
+
+  <div class="top-bar">
+    <div>
+      <div class="mission-tag">Control de Misión · Etapa 2</div>
+      <div class="phase-title">Empatía</div>
+    </div>
+    <div class="activity-badge">Actividad 3 · Bubble Map</div>
+  </div>
+
+  <!-- Timer — centered -->
+  <div class="timer-block">
+    <div class="timer-side">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:3px;color:rgba(255,255,255,0.4);margin-bottom:4px;">Sala</div>
+      <div style="font-family:'Orbitron',sans-serif;font-size:22px;font-weight:700;color:#c026d3;letter-spacing:4px;">AB12</div>
+    </div>
+    <div class="timer-center">
+      <div class="timer-display">12:00</div>
+      <div class="timer-label">Mapa de Empatía</div>
+    </div>
+    <div class="timer-side right"></div>
+  </div>
+
+  <div class="stats-row">
+    <div class="glass-card">
+      <div class="lbl">Completados</div>
+      <div class="val" style="color:#34d399">1 <span style="font-size:18px;color:rgba(255,255,255,0.4)">/ 4</span></div>
+      <div class="sub">mapas finalizados</div>
+    </div>
+    <div class="glass-card">
+      <div class="lbl">Ideas Totales</div>
+      <div class="val">17</div>
+      <div class="sub">entre todos los equipos</div>
+    </div>
+    <div class="glass-card">
+      <div class="lbl">Actividad Actual</div>
+      <div class="val" style="font-size:18px;color:#d946ef">Bubble Map</div>
+      <div class="sub">mapa de empatía V2</div>
+    </div>
+  </div>
+
+  <div class="section-lbl">Estado de los equipos</div>
+
+  <!-- Team grid — increased gap -->
+  <div class="team-grid" style="gap:20px;">
+
+    <!-- Team 1: COMPLETED — 6 default + 1 custom node -->
+    <div class="team-card done">
+      <div class="team-header">
+        <div class="color-dot" style="background:#28a745"></div>
+        <div style="flex:1">
+          <div class="team-name">Galaxia</div>
+          <div class="team-subtitle">👩‍🏫 Martina · Educación</div>
+        </div>
+        <span class="status-pill done">✓ Listo</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:100%"></div></div>
+
+      <!-- Node grid: 7 tiles (6 default + 1 custom), pure 3-col no extras -->
+      <div class="node-grid">
+        <div class="node-tile" style="background:rgba(124,58,237,0.15);border-color:rgba(124,58,237,0.4)">
+          <div class="node-icon">👤</div>
+          <div class="node-name" style="color:#a78bfa">Perfil</div>
+          <div class="node-count">3</div><div class="node-unit">ideas</div>
+        </div>
+        <div class="node-tile" style="background:rgba(2,132,199,0.15);border-color:rgba(2,132,199,0.4)">
+          <div class="node-icon">🌍</div>
+          <div class="node-name" style="color:#7dd3fc">Entorno</div>
+          <div class="node-count">2</div><div class="node-unit">ideas</div>
+        </div>
+        <div class="node-tile" style="background:rgba(234,88,12,0.15);border-color:rgba(234,88,12,0.4)">
+          <div class="node-icon">❤️</div>
+          <div class="node-name" style="color:#fdba74">Emociones</div>
+          <div class="node-count">4</div><div class="node-unit">ideas</div>
+        </div>
+        <div class="node-tile" style="background:rgba(16,185,129,0.15);border-color:rgba(16,185,129,0.4)">
+          <div class="node-icon">⚡</div>
+          <div class="node-name" style="color:#6ee7b7">Necesidades</div>
+          <div class="node-count">2</div><div class="node-unit">ideas</div>
+        </div>
+        <div class="node-tile" style="background:rgba(239,68,68,0.15);border-color:rgba(239,68,68,0.4)">
+          <div class="node-icon">🚧</div>
+          <div class="node-name" style="color:#fca5a5">Limitaciones</div>
+          <div class="node-count">1</div><div class="node-unit">ideas</div>
+        </div>
+        <div class="node-tile" style="background:rgba(245,158,11,0.15);border-color:rgba(245,158,11,0.4)">
+          <div class="node-icon">🌟</div>
+          <div class="node-name" style="color:#fcd34d">Motivaciones</div>
+          <div class="node-count">3</div><div class="node-unit">ideas</div>
+        </div>
+        <!-- Custom node — just another tile, wraps naturally -->
+        <div class="node-tile" style="background:rgba(129,140,248,0.15);border-color:rgba(129,140,248,0.4)">
+          <div class="node-icon">✦</div>
+          <div class="node-name" style="color:#a5b4fc">Cultura</div>
+          <div class="node-count">2</div><div class="node-unit">ideas</div>
+        </div>
+      </div>
+
+      <!-- Ver Mapa ALWAYS below the grid, full-width, never inside it -->
+      <button class="ver-mapa-btn">Ver Mapa Completo →</button>
+    </div>
+
+    <!-- Team 2: IN PROGRESS — 6 nodes, no custom -->
+    <div class="team-card">
+      <div class="team-header">
+        <div class="color-dot" style="background:#007bff"></div>
+        <div style="flex:1">
+          <div class="team-name">Nebulosa</div>
+          <div class="team-subtitle">👨‍⚕️ Carlos · Salud</div>
+        </div>
+        <span class="status-pill progress">⏳ En progreso</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:35%"></div></div>
+      <div class="node-grid">
+        <div class="node-tile" style="background:rgba(124,58,237,0.1);border-color:rgba(124,58,237,0.25)">
+          <div class="node-icon">👤</div>
+          <div class="node-name" style="color:#a78bfa">Perfil</div>
+          <div class="node-count" style="color:rgba(255,255,255,0.6)">1</div><div class="node-unit">ideas</div>
+        </div>
+        <div class="node-tile" style="background:rgba(2,132,199,0.04);border-color:rgba(2,132,199,0.12)">
+          <div class="node-icon" style="opacity:.35">🌍</div>
+          <div class="node-name" style="color:rgba(125,211,252,0.35)">Entorno</div>
+          <div class="node-count" style="color:rgba(255,255,255,0.2)">0</div><div class="node-unit">ideas</div>
+        </div>
+        <div class="node-tile" style="background:rgba(234,88,12,0.1);border-color:rgba(234,88,12,0.25)">
+          <div class="node-icon">❤️</div>
+          <div class="node-name" style="color:#fdba74">Emociones</div>
+          <div class="node-count" style="color:rgba(255,255,255,0.6)">2</div><div class="node-unit">ideas</div>
+        </div>
+        <div class="node-tile" style="background:rgba(16,185,129,0.04);border-color:rgba(16,185,129,0.12)">
+          <div class="node-icon" style="opacity:.35">⚡</div>
+          <div class="node-name" style="color:rgba(110,231,183,0.35)">Necesidades</div>
+          <div class="node-count" style="color:rgba(255,255,255,0.2)">0</div><div class="node-unit">ideas</div>
+        </div>
+        <div class="node-tile" style="background:rgba(239,68,68,0.04);border-color:rgba(239,68,68,0.12)">
+          <div class="node-icon" style="opacity:.35">🚧</div>
+          <div class="node-name" style="color:rgba(252,165,165,0.35)">Limitaciones</div>
+          <div class="node-count" style="color:rgba(255,255,255,0.2)">0</div><div class="node-unit">ideas</div>
+        </div>
+        <div class="node-tile" style="background:rgba(245,158,11,0.04);border-color:rgba(245,158,11,0.12)">
+          <div class="node-icon" style="opacity:.35">🌟</div>
+          <div class="node-name" style="color:rgba(252,211,77,0.35)">Motivaciones</div>
+          <div class="node-count" style="color:rgba(255,255,255,0.2)">0</div><div class="node-unit">ideas</div>
+        </div>
+      </div>
+      <!-- Ver Mapa below grid (shown even in progress) -->
+      <button class="ver-mapa-btn" style="opacity:0.55">Ver Mapa Parcial →</button>
+    </div>
+
+    <!-- Team 3: PENDING -->
+    <div class="team-card">
+      <div class="team-header">
+        <div class="color-dot" style="background:#dc3545"></div>
+        <div style="flex:1">
+          <div class="team-name">Aurora</div>
+          <div class="team-subtitle">🧑‍🌾 Pedro · Sustentabilidad</div>
+        </div>
+        <span class="status-pill pending">⏳ Pendiente</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:0%"></div></div>
+      <div class="pending-placeholder">Esperando inicio del mapa...</div>
+    </div>
+
+    <!-- Team 4: PENDING -->
+    <div class="team-card">
+      <div class="team-header">
+        <div class="color-dot" style="background:#6f42c1"></div>
+        <div style="flex:1">
+          <div class="team-name">Cosmos</div>
+          <div class="team-subtitle">👩‍💼 Ana · Educación</div>
+        </div>
+        <span class="status-pill pending">⏳ Pendiente</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:0%"></div></div>
+      <div class="pending-placeholder">Esperando inicio del mapa...</div>
+    </div>
+
+  </div>
+
+  <div class="actions">
+    <button class="btn-secondary">Cancelar Sesión</button>
+    <button class="btn-primary" style="opacity:0.35;cursor:not-allowed">Continuar ▶</button>
+    <button class="btn-dev">Dev ⚙</button>
+  </div>
+</div>
+
+<div class="note">
+  <strong>Changes from v1:</strong> Timer is centered with sala code on the left.
+  Team cards now have 20px gap (was 10px) to prevent visual overflow.
+  "Ver Mapa" button is always a separate full-width row <em>below</em> the node grid — it never lives inside the grid, so adding a custom node never displaces it.
+</div>
+
+<script>
+function makeStars(id, n) {
+  const c = document.getElementById(id);
+  if (!c) return;
+  for (let i = 0; i < n; i++) {
+    const s = document.createElement('div');
+    s.className = 'star';
+    const sz = Math.random()*2+0.5;
+    s.style.cssText = `width:${sz}px;height:${sz}px;left:${Math.random()*100}%;top:${Math.random()*100}%;animation-duration:${2+Math.random()*4}s;animation-delay:${Math.random()*3}s`;
+    c.appendChild(s);
+  }
+}
+makeStars('s1',60); makeStars('s2',60);
+</script>
+</body>
+</html>

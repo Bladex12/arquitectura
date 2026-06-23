@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Etapa 4 Profesor — Galactic Redesign Mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #050818;
+  font-family: 'Exo 2', sans-serif;
+  color: #fff;
+  min-height: 100vh;
+}
+
+/* ── NAV TABS ── */
+.nav-tabs {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(5,8,24,0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  display: flex; gap: 0; padding: 0 24px;
+}
+.nav-tab {
+  padding: 14px 24px;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 2px; text-transform: uppercase;
+  color: rgba(255,255,255,0.4);
+  cursor: pointer; border: none; background: none;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+.nav-tab.active { color: #c026d3; border-bottom-color: #c026d3; }
+.nav-tab:hover:not(.active) { color: rgba(255,255,255,0.7); }
+
+.screen { display: none; padding: 32px; max-width: 1100px; margin: 0 auto; }
+.screen.active { display: block; }
+
+/* ── GALACTIC DESIGN TOKENS ── */
+.galactic-label {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 3px; text-transform: uppercase;
+  color: rgba(192,38,211,0.85);
+}
+.galactic-badge {
+  display: inline-block;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 2px; text-transform: uppercase;
+  color: rgba(255,255,255,0.7);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.15);
+  padding: 5px 14px; border-radius: 999px;
+}
+.glass-card {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 16px;
+  backdrop-filter: blur(8px);
+}
+.btn-primary {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 12px; font-weight: 700;
+  letter-spacing: 3px; text-transform: uppercase;
+  color: #fff;
+  background: linear-gradient(135deg, #7c3aed, #c026d3);
+  border: none; border-radius: 999px;
+  padding: 14px 32px; cursor: pointer;
+  box-shadow: 0 0 24px rgba(192,38,211,0.35);
+  transition: all 0.2s;
+}
+.btn-primary:hover { box-shadow: 0 0 36px rgba(192,38,211,0.55); }
+.btn-secondary {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 12px; font-weight: 700;
+  letter-spacing: 3px; text-transform: uppercase;
+  color: rgba(255,255,255,0.6);
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 999px;
+  padding: 14px 32px; cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-secondary:hover { color: #fff; border-color: rgba(255,255,255,0.5); }
+.btn-danger {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 2px; text-transform: uppercase;
+  color: #ef4444;
+  background: rgba(239,68,68,0.08);
+  border: 1px solid rgba(239,68,68,0.4);
+  border-radius: 999px;
+  padding: 12px 28px; cursor: pointer;
+}
+
+/* ── TOP BAR ── */
+.top-bar {
+  display: flex; align-items: center;
+  justify-content: space-between; margin-bottom: 22px;
+}
+.orb-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 28px; font-weight: 700; color: #fff;
+  text-shadow: 0 0 24px rgba(192,38,211,0.5);
+  margin-top: 4px;
+}
+
+/* ── TIMER BLOCK ── */
+.timer-block {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  padding: 20px 28px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+  margin-bottom: 22px;
+}
+.timer-label { font-size: 12px; color: rgba(255,255,255,0.45); font-weight: 500; letter-spacing: 2px; text-transform: uppercase; font-family: 'Orbitron', sans-serif; margin-bottom: 4px; }
+.timer-value {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 64px; font-weight: 700; color: #fff;
+  text-shadow: 0 0 32px rgba(192,38,211,0.7);
+  letter-spacing: 6px; line-height: 1;
+}
+.timer-activity { font-size: 12px; color: rgba(255,255,255,0.35); margin-top: 6px; }
+
+/* ── STATS ROW ── */
+.stats-row {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 14px; margin-bottom: 22px;
+}
+.stat-card {
+  padding: 20px 24px;
+}
+.stat-num {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 36px; font-weight: 700; color: #fff;
+  margin: 8px 0 4px;
+}
+.stat-sub { font-size: 14px; color: rgba(255,255,255,0.55); }
+
+/* ── TEAM GRID ── */
+.team-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px; margin-top: 12px;
+}
+.team-card {
+  padding: 16px 18px;
+}
+.team-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.team-dot {
+  width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+}
+.team-name {
+  font-size: 15px; font-weight: 700; color: #fff;
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.check { color: #34d399; font-size: 16px; }
+
+/* field dots */
+.field-dots { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.field-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: rgba(255,255,255,0.15);
+  flex-shrink: 0;
+}
+.field-dot.filled { background: #34d399; }
+.field-dot.partial { background: #f59e0b; }
+
+/* progress bar */
+.prog-track {
+  width: 100%; height: 4px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 4px; margin-bottom: 10px;
+  overflow: hidden;
+}
+.prog-fill { height: 100%; border-radius: 4px; }
+
+/* status pill */
+.status-pill {
+  display: inline-block;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 9px; font-weight: 700;
+  letter-spacing: 1.5px; text-transform: uppercase;
+  padding: 4px 10px; border-radius: 50%;
+}
+.pill-completed { background: rgba(16,185,129,0.2); color: #34d399; }
+.pill-progress { background: rgba(124,58,237,0.2); color: #a78bfa; }
+.pill-pending { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.4); }
+
+.btn-ghost-sm {
+  font-family: 'Exo 2', sans-serif;
+  font-size: 12px; font-weight: 600;
+  color: rgba(255,255,255,0.5);
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  padding: 6px 14px; cursor: pointer;
+  margin-top: 8px; width: 100%;
+  transition: all 0.15s;
+}
+.btn-ghost-sm:hover { color: #fff; border-color: rgba(255,255,255,0.35); }
+
+/* ── ACTIONS ROW ── */
+.actions-row {
+  display: flex; justify-content: center; gap: 16px;
+  margin-top: 28px; padding-bottom: 8px;
+}
+.btn-dev {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 2px; text-transform: uppercase;
+  color: #fff; background: #f97316;
+  border: none; border-radius: 999px;
+  padding: 10px 20px; cursor: pointer;
+  box-shadow: 0 0 12px rgba(249,115,22,0.35);
+}
+
+/* ══════════════════════════════════
+   ROULETTE SCREEN
+══════════════════════════════════ */
+.roulette-wrap {
+  max-width: 900px; margin: 0 auto;
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 24px; align-items: start;
+}
+.roulette-left { text-align: center; }
+.roulette-right { text-align: left; }
+.roulette-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 22px; font-weight: 900; color: #fff;
+  letter-spacing: 2px;
+  text-shadow: 0 0 30px rgba(34,211,238,0.5);
+  margin-bottom: 14px;
+}
+.rl-wheel-wrap {
+  position: relative; display: inline-block;
+  margin-bottom: 12px;
+}
+.rl-pointer {
+  position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+  width: 0; height: 0;
+  border-left: 11px solid transparent;
+  border-right: 11px solid transparent;
+  border-top: 20px solid #f59e0b;
+  filter: drop-shadow(0 2px 8px rgba(245,158,11,0.8));
+  z-index: 3;
+}
+#rouletteCanvas {
+  border-radius: 50%;
+  filter: drop-shadow(0 0 24px rgba(34,211,238,0.35)) drop-shadow(0 0 60px rgba(34,211,238,0.15));
+  display: block;
+}
+.rl-winner {
+  opacity: 0; transform: scale(0.7);
+  transition: opacity 0.5s, transform 0.6s cubic-bezier(0.34,1.56,0.64,1);
+  min-height: 44px; margin-bottom: 10px;
+}
+.rl-winner.show { opacity: 1; transform: none; }
+.rl-winner-lbl {
+  font-family: 'Exo 2', sans-serif; font-size: 10px;
+  letter-spacing: 3px; text-transform: uppercase;
+  color: rgba(255,255,255,0.45); margin-bottom: 4px;
+}
+.rl-winner-name {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 20px; font-weight: 900;
+  color: #f59e0b; letter-spacing: 2px;
+  text-transform: uppercase;
+  text-shadow: 0 0 20px rgba(245,158,11,0.7);
+}
+.rl-spin-btn {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 12px; font-weight: 700;
+  letter-spacing: 3px; text-transform: uppercase;
+  color: #fff; background: rgba(34,211,238,0.1);
+  border: 2px solid rgba(34,211,238,0.7);
+  padding: 12px 40px; cursor: pointer;
+  clip-path: polygon(12px 0%,100% 0%,calc(100% - 12px) 100%,0% 100%);
+  transition: all 0.3s;
+  animation: pulseRl 2s infinite;
+  margin-bottom: 0;
+  display: block; margin-left: auto; margin-right: auto;
+}
+.rl-spin-btn:hover { background: rgba(34,211,238,0.2); border-color: #22d3ee; }
+.rl-spin-btn:disabled { opacity: 0.4; cursor: default; animation: none; }
+@keyframes pulseRl {
+  0%,100% { box-shadow: 0 0 16px rgba(34,211,238,0.3); }
+  50% { box-shadow: 0 0 36px rgba(34,211,238,0.6), 0 0 70px rgba(34,211,238,0.15); }
+}
+
+/* Generated order list */
+.order-list {
+  text-align: left;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px; padding: 14px;
+  opacity: 0; transform: translateY(10px);
+  transition: opacity 0.5s, transform 0.5s;
+}
+.order-list.show { opacity: 1; transform: none; }
+.order-list-title {
+  font-family: 'Orbitron', sans-serif; font-size: 10px;
+  letter-spacing: 2px; text-transform: uppercase;
+  color: rgba(255,255,255,0.4); margin-bottom: 10px;
+}
+.order-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.order-item:last-child { border-bottom: none; }
+.order-num {
+  font-family: 'Orbitron', sans-serif; font-size: 11px;
+  font-weight: 700; color: rgba(255,255,255,0.35);
+  width: 18px;
+}
+.order-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.order-name { font-size: 13px; font-weight: 600; color: #fff; }
+.order-badge {
+  font-family: 'Orbitron', sans-serif; font-size: 8px;
+  color: #f59e0b; letter-spacing: 1px;
+  background: rgba(245,158,11,0.15); padding: 3px 8px; border-radius: 4px;
+  margin-left: auto;
+}
+
+/* ── PRESENTING STATE ── */
+.present-grid {
+  display: grid; grid-template-columns: 3fr 2fr;
+  gap: 14px; margin: 12px 0;
+}
+.proto-name {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 18px; font-weight: 700; color: #fff;
+  letter-spacing: 1px; margin: 10px 0 2px;
+  text-shadow: 0 0 16px rgba(124,58,237,0.5);
+}
+.proto-team-tag {
+  font-size: 12px; color: rgba(255,255,255,0.45);
+  margin-bottom: 4px;
+}
+.proto-img {
+  width: 100%; height: 240px;
+  background: rgba(124,58,237,0.08);
+  border: 1px solid rgba(124,58,237,0.25);
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.25); font-size: 13px;
+  font-family: 'Exo 2', sans-serif; overflow: hidden;
+}
+.script-item {
+  display: flex; gap: 8px; padding: 5px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.script-item:last-child { border-bottom: none; }
+.script-tag {
+  font-family: 'Orbitron', sans-serif; font-size: 7px;
+  font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+  opacity: 0.7; white-space: nowrap; margin-top: 1px; min-width: 50px;
+}
+.script-text { font-size: 11px; color: rgba(255,255,255,0.55); line-height: 1.4; }
+
+/* ── EVALUATING STATE ── */
+.eval-card {
+  border-color: rgba(245,158,11,0.35);
+  background: rgba(245,158,11,0.04);
+}
+.eval-prog-track {
+  height: 8px; background: rgba(255,255,255,0.08);
+  border-radius: 4px; margin: 12px 0 6px; overflow: hidden;
+}
+.eval-prog-fill {
+  height: 100%; background: #34d399; border-radius: 4px;
+  transition: width 0.4s;
+}
+
+/* ── BADGE VARIANTS ── */
+.badge-green {
+  background: rgba(16,185,129,0.15);
+  border-color: rgba(16,185,129,0.4);
+  color: #34d399;
+}
+.badge-amber {
+  background: rgba(245,158,11,0.15);
+  border-color: rgba(245,158,11,0.4);
+  color: #fbbf24;
+}
+.badge-orange {
+  background: rgba(249,115,22,0.15);
+  border-color: rgba(249,115,22,0.4);
+  color: #fb923c;
+  animation: badgePulse 1.5s infinite;
+}
+@keyframes badgePulse { 0%,100%{opacity:1} 50%{opacity:0.55} }
+.badge-pill {
+  display: inline-block;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 2px; text-transform: uppercase;
+  padding: 5px 14px; border-radius: 999px;
+  border: 1px solid; margin-bottom: 14px;
+}
+
+/* starfield shimmer background */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background:
+    radial-gradient(ellipse at 30% 40%, rgba(124,58,237,0.12) 0%, transparent 55%),
+    radial-gradient(ellipse at 75% 60%, rgba(192,38,211,0.08) 0%, transparent 45%);
+  pointer-events: none; z-index: 0;
+}
+.screen { position: relative; z-index: 1; }
+
+/* annotations */
+.annotation {
+  display: inline-block;
+  background: rgba(192,38,211,0.15);
+  border: 1px solid rgba(192,38,211,0.3);
+  color: #e879f9; font-size: 11px;
+  padding: 2px 8px; border-radius: 4px;
+  margin-left: 8px; vertical-align: middle;
+}
+
+.section-sep {
+  border: none; border-top: 1px solid rgba(255,255,255,0.06);
+  margin: 28px 0;
+}
+
+/* scroll hint */
+.scroll-hint {
+  text-align: center; padding: 8px;
+  font-family: 'Exo 2', sans-serif; font-size: 11px;
+  color: rgba(255,255,255,0.25); letter-spacing: 1px;
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<div class="nav-tabs">
+  <button class="nav-tab active" onclick="show('formulario')">1 · FormularioPitch</button>
+  <button class="nav-tab" onclick="show('roulette')">2 · Ruleta de Orden</button>
+  <button class="nav-tab" onclick="show('presenting')">3 · Presentación en curso</button>
+  <button class="nav-tab" onclick="show('evaluating')">4 · Evaluación</button>
+  <button class="nav-tab" onclick="show('completed')">5 · Completado</button>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     SCREEN 1 — FORMULARIO PITCH (PROFESOR)
+════════════════════════════════════════════ -->
+<div id="formulario" class="screen active">
+
+  <!-- TOP BAR -->
+  <div class="top-bar">
+    <div>
+      <div class="galactic-label">Control de Misión · Etapa 4</div>
+      <div class="orb-title">Comunicación</div>
+    </div>
+    <div class="galactic-badge">Sala: ABC123</div>
+  </div>
+
+  <!-- TIMER BLOCK -->
+  <div class="timer-block glass-card">
+    <div>
+      <div class="timer-label">Tiempo restante</div>
+      <div class="timer-activity">Formulario de Pitch</div>
+    </div>
+    <div class="timer-value">12:34</div>
+  </div>
+
+  <!-- STATS ROW -->
+  <div class="stats-row">
+    <div class="glass-card stat-card">
+      <div class="galactic-label" style="font-size:11px">Equipos Totales</div>
+      <div class="stat-num">4</div>
+      <div class="stat-sub">en esta sesión</div>
+    </div>
+    <div class="glass-card stat-card">
+      <div class="galactic-label" style="font-size:11px;color:#34d399">Pitches Completados</div>
+      <div class="stat-num" style="color:#34d399">2</div>
+      <div class="stat-sub">formularios</div>
+    </div>
+    <div class="glass-card stat-card">
+      <div class="galactic-label" style="font-size:11px;color:#a78bfa">En Progreso</div>
+      <div class="stat-num" style="color:#a78bfa">1</div>
+      <div class="stat-sub">rellenando</div>
+    </div>
+  </div>
+
+  <!-- TEAM GRID -->
+  <div class="galactic-label" style="margin-bottom:12px">Estado de los equipos</div>
+  <div class="team-grid">
+
+    <!-- COMPLETED team -->
+    <div class="glass-card team-card" style="border-color:rgba(16,185,129,0.45);background:rgba(16,185,129,0.06)">
+      <div class="team-header">
+        <div class="team-dot" style="background:#28a745"></div>
+        <span class="team-name">Equipo Nova</span>
+        <span class="check">✓</span>
+      </div>
+      <div class="field-dots">
+        <div class="field-dot filled" title="Problema"></div>
+        <div class="field-dot filled" title="Solución"></div>
+        <div class="field-dot filled" title="Valor"></div>
+        <div class="field-dot filled" title="Impacto"></div>
+        <div class="field-dot filled" title="Cierre"></div>
+      </div>
+      <div class="prog-track"><div class="prog-fill" style="width:100%;background:#34d399"></div></div>
+      <span class="status-pill pill-completed">Completado</span>
+      <button class="btn-ghost-sm">👁 Ver Pitch Completo</button>
+    </div>
+
+    <!-- IN PROGRESS team -->
+    <div class="glass-card team-card" style="border-color:rgba(124,58,237,0.3)">
+      <div class="team-header">
+        <div class="team-dot" style="background:#007bff"></div>
+        <span class="team-name">Equipo Cosmos</span>
+      </div>
+      <div class="field-dots">
+        <div class="field-dot filled" title="Problema"></div>
+        <div class="field-dot filled" title="Solución"></div>
+        <div class="field-dot filled" title="Valor"></div>
+        <div class="field-dot partial" title="Impacto (parcial)"></div>
+        <div class="field-dot" title="Cierre"></div>
+      </div>
+      <div class="prog-track"><div class="prog-fill" style="width:68%;background:#a78bfa"></div></div>
+      <span class="status-pill pill-progress">En Progreso · 68%</span>
+      <button class="btn-ghost-sm">👁 Ver Pitch Completo</button>
+    </div>
+
+    <!-- COMPLETED team 2 -->
+    <div class="glass-card team-card" style="border-color:rgba(16,185,129,0.45);background:rgba(16,185,129,0.06)">
+      <div class="team-header">
+        <div class="team-dot" style="background:#dc3545"></div>
+        <span class="team-name">Equipo Quasar</span>
+        <span class="check">✓</span>
+      </div>
+      <div class="field-dots">
+        <div class="field-dot filled"></div>
+        <div class="field-dot filled"></div>
+        <div class="field-dot filled"></div>
+        <div class="field-dot filled"></div>
+        <div class="field-dot filled"></div>
+      </div>
+      <div class="prog-track"><div class="prog-fill" style="width:100%;background:#34d399"></div></div>
+      <span class="status-pill pill-completed">Completado</span>
+      <button class="btn-ghost-sm">👁 Ver Pitch Completo</button>
+    </div>
+
+    <!-- PENDING team -->
+    <div class="glass-card team-card">
+      <div class="team-header">
+        <div class="team-dot" style="background:#ffc107"></div>
+        <span class="team-name">Equipo Pulsar</span>
+      </div>
+      <div class="field-dots">
+        <div class="field-dot"></div>
+        <div class="field-dot"></div>
+        <div class="field-dot"></div>
+        <div class="field-dot"></div>
+        <div class="field-dot"></div>
+      </div>
+      <div class="prog-track"><div class="prog-fill" style="width:0%;background:#34d399"></div></div>
+      <span class="status-pill pill-pending">Pendiente</span>
+    </div>
+
+  </div>
+
+  <!-- ACTIONS -->
+  <div class="actions-row">
+    <button class="btn-secondary">Cancelar Sesión</button>
+    <button class="btn-dev">⚡ Dev Skip</button>
+    <button class="btn-primary">Continuar Misión ▶</button>
+  </div>
+
+  <p class="scroll-hint" style="margin-top:12px">Field dots: ● Problema &nbsp;● Solución &nbsp;● Valor &nbsp;● Impacto &nbsp;● Cierre</p>
+</div>
+
+
+<!-- ═══════════════════════════════════════════
+     SCREEN 2 — ROULETTE (not_started state)
+════════════════════════════════════════════ -->
+<div id="roulette" class="screen">
+
+  <!-- TOP BAR -->
+  <div class="top-bar">
+    <div>
+      <div class="galactic-label">Control de Misión · Etapa 4</div>
+      <div class="orb-title">Comunicación</div>
+    </div>
+    <div class="galactic-badge">Sala: ABC123</div>
+  </div>
+
+  <div class="roulette-wrap">
+    <!-- LEFT: wheel -->
+    <div class="roulette-left">
+      <div class="galactic-label" style="margin-bottom:4px">Planeta Comunicación · Presentaciones</div>
+      <div class="roulette-title">¿Quién Habla Primero?</div>
+      <div class="rl-wheel-wrap">
+        <div class="rl-pointer"></div>
+        <canvas id="rouletteCanvas"></canvas>
+      </div>
+      <div class="rl-winner" id="rlWinner">
+        <div class="rl-winner-lbl">🏆 Primer Presentador</div>
+        <div class="rl-winner-name" id="rlWinnerName"></div>
+      </div>
+      <button class="rl-spin-btn" id="rlSpinBtn" onclick="spinRoulette()">▶&nbsp; Girar</button>
+    </div>
+
+    <!-- RIGHT: order + start -->
+    <div class="roulette-right" style="padding-top:40px">
+      <div class="order-list" id="orderList">
+        <div class="order-list-title">Orden de presentación</div>
+        <div id="orderItems">
+          <div style="color:rgba(255,255,255,0.25);font-size:13px;padding:16px 0;text-align:center">
+            Gira la ruleta para generar el orden ↑
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:14px">
+        <button class="btn-primary" id="startBtn" style="display:none;width:100%">Iniciar Presentaciones ▶</button>
+      </div>
+      <div style="margin-top:10px">
+        <button class="btn-secondary" style="width:100%">Cancelar Sesión</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+
+<!-- ═══════════════════════════════════════════
+     SCREEN 3 — PRESENTING (presenting state)
+════════════════════════════════════════════ -->
+<div id="presenting" class="screen">
+
+  <!-- TOP BAR -->
+  <div class="top-bar" style="margin-bottom:12px">
+    <div>
+      <div class="galactic-label">Control de Misión · Etapa 4</div>
+      <div class="orb-title">Comunicación</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <span class="badge-pill badge-green" style="margin-bottom:0">● En curso · Turno 1/4</span>
+      <div class="galactic-badge">Sala: ABC123</div>
+    </div>
+  </div>
+
+  <!-- Timer centered at top -->
+  <div class="timer-block glass-card" style="margin-bottom:12px;border-color:rgba(249,115,22,0.25);max-width:280px;margin-left:auto;margin-right:auto">
+    <div class="timer-label" style="color:#fb923c">Tiempo de Pitch</div>
+    <div class="timer-value" style="font-size:52px;color:#fbbf24">01:12</div>
+    <div class="timer-activity">Turno 1 de 4</div>
+  </div>
+
+  <!-- prototype (big) + pitch script (narrow) -->
+  <div style="display:grid;grid-template-columns:3fr 1fr;gap:14px;margin-bottom:14px;align-items:start">
+
+    <!-- LEFT: prototype -->
+    <div class="glass-card" style="padding:18px;text-align:center">
+      <div class="galactic-label" style="font-size:10px;margin-bottom:8px">🖼 Prototipo</div>
+      <div class="proto-img" style="font-size:40px">📷</div>
+      <div class="proto-name" style="text-align:center">EduSpark</div>
+      <div class="proto-team-tag" style="text-align:center">Equipo Nova &nbsp;·&nbsp; <span style="color:#28a745">●</span> Verde</div>
+    </div>
+
+    <!-- RIGHT: pitch script (narrow) -->
+    <div class="glass-card" style="padding:12px">
+      <div class="galactic-label" style="font-size:10px;margin-bottom:8px">📋 Guión</div>
+      <div class="script-item">
+        <div class="script-tag" style="color:#ef4444">Problema</div>
+        <div class="script-text">Los estudiantes pierden motivación en clases remotas.</div>
+      </div>
+      <div class="script-item">
+        <div class="script-tag" style="color:#3b82f6">Solución</div>
+        <div class="script-text">App gamificada que premia la participación en tiempo real.</div>
+      </div>
+      <div class="script-item">
+        <div class="script-tag" style="color:#c026d3">Valor</div>
+        <div class="script-text">Retención +40% en piloto con 200 alumnos.</div>
+      </div>
+      <div class="script-item">
+        <div class="script-tag" style="color:#10b981">Impacto</div>
+        <div class="script-text">Mejora bienestar y resultados académicos.</div>
+      </div>
+      <div class="script-item">
+        <div class="script-tag" style="color:#f59e0b">Cierre</div>
+        <div class="script-text">Únete a reinventar la educación del futuro.</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;justify-content:center;gap:14px">
+    <button class="btn-secondary">Cancelar Sesión</button>
+    <button class="btn-danger">✓ Finalizar Presentación — Equipo Nova</button>
+  </div>
+
+</div>
+
+
+<!-- ═══════════════════════════════════════════
+     SCREEN 4 — EVALUATING
+════════════════════════════════════════════ -->
+<div id="evaluating" class="screen">
+
+  <div class="top-bar">
+    <div>
+      <div class="galactic-label">Control de Misión · Etapa 4</div>
+      <div class="orb-title">Comunicación</div>
+    </div>
+    <div class="galactic-badge">Sala: ABC123</div>
+  </div>
+
+  <div class="glass-card eval-card" style="padding:24px;max-width:640px;margin:0 auto">
+    <span class="badge-pill badge-amber">⭐ Evaluación en curso</span>
+    <div style="font-family:'Orbitron',sans-serif;font-size:20px;font-weight:700;margin-bottom:6px">Equipo Nova</div>
+    <div style="font-size:14px;color:rgba(255,255,255,0.55);margin-bottom:16px">Los otros equipos están evaluando al equipo que acaba de presentar</div>
+
+    <div class="galactic-label" style="font-size:10px;margin-bottom:6px">Progreso de Evaluaciones</div>
+    <div class="eval-prog-track">
+      <div class="eval-prog-fill" style="width:66%"></div>
+    </div>
+    <div style="font-family:'Orbitron',sans-serif;font-size:22px;font-weight:700;color:#34d399;margin-bottom:4px">2 <span style="font-size:14px;color:rgba(255,255,255,0.4)">/ 3 equipos evaluaron</span></div>
+    <div style="font-size:13px;color:rgba(255,255,255,0.45);margin-bottom:20px">Esperando evaluación de: Equipo Pulsar</div>
+
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+      <button class="btn-secondary" style="opacity:0.4;cursor:default">Siguiente Turno ▶ <span style="font-size:10px">(esperando)</span></button>
+      <button class="btn-dev">⚡ Dev — Siguiente Turno</button>
+    </div>
+  </div>
+
+  <div class="actions-row">
+    <button class="btn-secondary">Cancelar Sesión</button>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════
+     SCREEN 5 — ALL COMPLETED
+════════════════════════════════════════════ -->
+<div id="completed" class="screen">
+
+  <div class="top-bar">
+    <div>
+      <div class="galactic-label">Control de Misión · Etapa 4</div>
+      <div class="orb-title">Comunicación</div>
+    </div>
+    <div class="galactic-badge">Sala: ABC123</div>
+  </div>
+
+  <div class="glass-card" style="padding:32px;max-width:640px;margin:0 auto;text-align:center;border-color:rgba(16,185,129,0.4);background:rgba(16,185,129,0.05)">
+    <div style="font-size:56px;margin-bottom:12px">🎉</div>
+    <span class="badge-pill badge-green" style="margin-bottom:16px">Misión Completada · Fase 4</span>
+    <div style="font-family:'Orbitron',sans-serif;font-size:26px;font-weight:900;margin-bottom:8px;text-shadow:0 0 30px rgba(52,211,153,0.5)">¡Todas las Presentaciones Completadas!</div>
+    <div style="font-size:15px;color:rgba(255,255,255,0.55);margin-bottom:24px">Todos los equipos han presentado y sido evaluados.</div>
+
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+      <button class="btn-secondary">👁 Ver Evaluaciones</button>
+      <button class="btn-primary">🏆 Ir a Reflexión →</button>
+    </div>
+  </div>
+
+  <!-- Evaluations list (expanded) -->
+  <div class="glass-card" style="padding:20px;max-width:640px;margin:16px auto 0">
+    <div class="galactic-label" style="margin-bottom:14px">Todas las Evaluaciones</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:12px 16px">
+        <div style="font-size:14px;font-weight:600;color:#fff;margin-bottom:6px">Equipo Cosmos → Equipo Nova</div>
+        <div style="display:flex;gap:20px;font-size:12px;color:rgba(255,255,255,0.5)">
+          <span>Puntuación: <b style="color:#34d399">27/30</b></span>
+          <span>Claridad: <b>9</b></span>
+          <span>Solución: <b>9</b></span>
+          <span>Presentación: <b>9</b></span>
+        </div>
+      </div>
+      <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:12px 16px">
+        <div style="font-size:14px;font-weight:600;color:#fff;margin-bottom:6px">Equipo Quasar → Equipo Nova</div>
+        <div style="display:flex;gap:20px;font-size:12px;color:rgba(255,255,255,0.5)">
+          <span>Puntuación: <b style="color:#34d399">24/30</b></span>
+          <span>Claridad: <b>8</b></span>
+          <span>Solución: <b>8</b></span>
+          <span>Presentación: <b>8</b></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="actions-row">
+    <button class="btn-secondary">Cancelar Sesión</button>
+  </div>
+</div>
+
+
+<script>
+// Tab navigation
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  event.target.classList.add('active');
+}
+
+// ── ROULETTE ──
+const TEAMS = [
+  { name: 'Nova', color: '#28a745' },
+  { name: 'Cosmos', color: '#007bff' },
+  { name: 'Quasar', color: '#dc3545' },
+  { name: 'Pulsar', color: '#ffc107' },
+];
+const RL_COLORS = TEAMS.map(t => t.color);
+
+let rlAngle = 0, rlSpinning = false;
+
+function drawRouletteWheel(angle) {
+  const canvas = document.getElementById('rouletteCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const size = canvas.width, cx = size / 2, cy = size / 2, r = size / 2 - 6;
+  const n = TEAMS.length, arc = (Math.PI * 2) / n;
+  ctx.clearRect(0, 0, size, size);
+  TEAMS.forEach((team, i) => {
+    const start = angle + i * arc - Math.PI / 2, end = start + arc, mid = start + arc / 2;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, start, end); ctx.closePath();
+    ctx.fillStyle = RL_COLORS[i % RL_COLORS.length]; ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.save();
+    ctx.translate(cx + Math.cos(mid) * (r * 0.64), cy + Math.sin(mid) * (r * 0.64));
+    ctx.rotate(mid + Math.PI / 2);
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.max(11, Math.round(size * 0.04))}px 'Exo 2',sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('Equipo ' + team.name, 0, 0);
+    ctx.restore();
+  });
+  // Center
+  ctx.beginPath(); ctx.arc(cx, cy, size * 0.07, 0, Math.PI * 2);
+  ctx.fillStyle = '#050818'; ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 3; ctx.stroke();
+  // Outer ring
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(34,211,238,0.3)'; ctx.lineWidth = 4; ctx.stroke();
+}
+
+function initRoulette() {
+  const size = Math.min(260, Math.round(window.innerWidth * 0.35));
+  const canvas = document.getElementById('rouletteCanvas');
+  canvas.width = canvas.height = size;
+  rlAngle = 0;
+  drawRouletteWheel(rlAngle);
+}
+
+function spinRoulette() {
+  if (rlSpinning) return;
+  rlSpinning = true;
+  const btn = document.getElementById('rlSpinBtn');
+  btn.disabled = true;
+  document.getElementById('rlWinner').classList.remove('show');
+  document.getElementById('orderItems').innerHTML = '';
+  const startBtn = document.getElementById('startBtn');
+  startBtn.style.display = 'none';
+
+  const n = TEAMS.length;
+  const arc = (Math.PI * 2) / n;
+  const winnerIdx = Math.floor(Math.random() * n);
+  const extraSpins = 5 + Math.floor(Math.random() * 3);
+  const targetAngle = rlAngle - (rlAngle % (Math.PI * 2)) - winnerIdx * arc - arc / 2 - extraSpins * Math.PI * 2;
+  const startAngle = rlAngle, delta = targetAngle - startAngle;
+  const duration = 4200 + Math.random() * 800;
+  let startTime = null;
+
+  function easeOut(t) { return 1 - Math.pow(1 - t, 4); }
+  function frame(ts) {
+    if (!startTime) startTime = ts;
+    const p = Math.min((ts - startTime) / duration, 1);
+    rlAngle = startAngle + delta * easeOut(p);
+    drawRouletteWheel(rlAngle);
+    if (p < 1) { requestAnimationFrame(frame); }
+    else {
+      rlAngle = targetAngle;
+      drawRouletteWheel(rlAngle);
+      rlSpinning = false;
+      // Show winner
+      document.getElementById('rlWinnerName').textContent = 'Equipo ' + TEAMS[winnerIdx].name;
+      document.getElementById('rlWinner').classList.add('show');
+      // Build order list — items pop in one by one
+      setTimeout(() => {
+        const remaining = TEAMS.filter((_, i) => i !== winnerIdx).sort(() => Math.random() - 0.5);
+        const fullOrder = [TEAMS[winnerIdx], ...remaining];
+        const itemsEl = document.getElementById('orderItems');
+        itemsEl.innerHTML = '';
+        document.getElementById('orderList').classList.add('show');
+
+        fullOrder.forEach((t, idx) => {
+          // winner appears immediately (delay 0), rest stagger by 280ms each
+          const delay = idx === 0 ? 0 : 180 + (idx - 1) * 280;
+          setTimeout(() => {
+            const row = document.createElement('div');
+            row.className = 'order-item';
+            row.style.cssText = 'opacity:0;transform:translateX(-12px);transition:opacity 0.3s ease,transform 0.3s ease';
+            row.innerHTML = `
+              <div class="order-num">${idx + 1}</div>
+              <div class="order-dot" style="background:${t.color}"></div>
+              <div class="order-name">Equipo ${t.name}</div>
+              ${idx === 0 ? '<div class="order-badge">PRIMERO</div>' : ''}
+            `;
+            itemsEl.appendChild(row);
+            // trigger animation on next frame
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+              row.style.opacity = '1';
+              row.style.transform = 'none';
+            }));
+          }, delay);
+        });
+
+        // show start button after last item appears
+        const totalDelay = 180 + (fullOrder.length - 1) * 280 + 400;
+        setTimeout(() => { startBtn.style.display = 'block'; }, totalDelay);
+      }, 800);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+// init roulette on load + show order list placeholder immediately
+window.addEventListener('load', () => {
+  initRoulette();
+  document.getElementById('orderList').classList.add('show');
+});
+</script>
+</body>
+</html>

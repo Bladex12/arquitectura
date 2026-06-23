@@ -1,0 +1,157 @@
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700&family=Exo+2:wght@400;600&display=swap');
+
+.arch-wrap { display: flex; flex-direction: column; gap: 20px; }
+
+.layer {
+  border-radius: 12px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.layer-title {
+  font-size: 10px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.35);
+  margin-bottom: 10px;
+  font-family: 'Exo 2', sans-serif;
+}
+
+/* layers */
+.layer-config { background: rgba(15,23,42,0.6); }
+.layer-hooks  { background: rgba(30,27,75,0.5); }
+.layer-atoms  { background: rgba(76,29,149,0.25); }
+.layer-screens{ background: rgba(8,90,130,0.2); }
+.layer-routes { background: rgba(15,118,110,0.2); }
+.layer-modified{ background: rgba(154,52,18,0.2); }
+
+.nodes { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start; }
+
+.box {
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-family: 'Exo 2', sans-serif;
+  border: 1px solid rgba(255,255,255,0.15);
+  min-width: 140px;
+  flex: 1;
+  max-width: 260px;
+}
+.box code { font-size: 11px; display: block; margin-bottom: 4px; font-weight: 700; font-family: 'Orbitron', monospace; letter-spacing: 0; }
+.box small { font-size: 10px; color: rgba(255,255,255,0.45); line-height: 1.5; }
+
+.box-config  { background: rgba(99,102,241,0.2);  border-color: #818cf8; }
+.box-hook    { background: rgba(124,58,237,0.25); border-color: #a78bfa; }
+.box-atom    { background: rgba(167,139,250,0.15);border-color: #c4b5fd; }
+.box-new     { background: rgba(8,90,130,0.3);    border-color: #22d3ee; }
+.box-modified{ background: rgba(154,52,18,0.3);   border-color: #fb923c; }
+.box-appchange{ background:rgba(15,118,110,0.25); border-color: #2dd4bf; }
+
+.arrow-down { text-align: center; color: rgba(255,255,255,0.2); font-size: 18px; margin: -8px 0; }
+
+.badge { display: inline-block; font-size: 9px; padding: 2px 7px; border-radius: 999px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; margin-top: 5px; }
+.badge-new      { background: #0e7490; color: #fff; }
+.badge-modified { background: #9a3412; color: #fed7aa; }
+.badge-hook     { background: #6d28d9; color: #ddd6fe; }
+.badge-config   { background: #4338ca; color: #c7d2fe; }
+</style>
+
+<h2>Arquitectura de Componentes — Enfoque 3</h2>
+<p class="subtitle">Jerarquía completa de archivos nuevos y modificados</p>
+
+<div class="arch-wrap">
+
+  <!-- Layer 0: Config -->
+  <div class="layer layer-config">
+    <div class="layer-title">0 — Config / Datos compartidos</div>
+    <div class="nodes">
+      <div class="box box-config">
+        <code>phases.ts</code>
+        <small>Array PHASES[4]: name, color, colorRich, glowRgb, surface gradient, desc — mapea stage_number (1-4) a visual config</small>
+        <span class="badge badge-config">nuevo</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">↓</div>
+
+  <!-- Layer 1: Hook -->
+  <div class="layer layer-hooks">
+    <div class="layer-title">1 — Custom Hook</div>
+    <div class="nodes">
+      <div class="box box-hook">
+        <code>useStarfield.ts</code>
+        <small>Recibe canvasRef. Corre el loop requestAnimationFrame con estrellas, nebula gradient y shooting stars. Expone setNebTarget(rgb) para cambiar el color de fondo suavemente.</small>
+        <span class="badge badge-hook">nuevo</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">↓</div>
+
+  <!-- Layer 2: Atoms -->
+  <div class="layer layer-atoms">
+    <div class="layer-title">2 — Componentes Átomo</div>
+    <div class="nodes">
+      <div class="box box-atom">
+        <code>StarfieldBackground.tsx</code>
+        <small>Canvas full-screen position:fixed z-0. Usa useStarfield internamente. Acepta children para superponer contenido. Prop: nebTarget?: [r,g,b]</small>
+        <span class="badge badge-new">nuevo</span>
+      </div>
+      <div class="box box-atom">
+        <code>RocketSVG.tsx</code>
+        <small>SVG de la nave extraído del HTML. Props: className, style. Incluye animaciones de llama (flicker) en CSS-in-JS.</small>
+        <span class="badge badge-new">nuevo</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">↓</div>
+
+  <!-- Layer 3: Screens -->
+  <div class="layer layer-screens">
+    <div class="layer-title">3 — Pantallas nuevas (new routes)</div>
+    <div class="nodes">
+      <div class="box box-new">
+        <code>SpaceWarpTransition.tsx</code>
+        <small>Ruta: /tablet/etapa-warp?stage=2&redirect=...<br>Canvas propio para el efecto warp. UFO easter egg (40% chance). Duración ~4s, luego navega a /tablet/etapa-transition.</small>
+        <span class="badge badge-new">nuevo</span>
+      </div>
+      <div class="box box-new">
+        <code>PlanetLandingTransition.tsx</code>
+        <small>Ruta: /tablet/etapa-transition?stage=2&redirect=...<br>Usa StarfieldBackground + RocketSVG + planetSurface. runLanding() completo con dust, quake, texto de etapa. onDone → navigate(redirect).</small>
+        <span class="badge badge-new">nuevo</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">↓</div>
+
+  <!-- Layer 4: Modified -->
+  <div class="layer layer-modified">
+    <div class="layer-title">4 — Archivos modificados</div>
+    <div class="nodes">
+      <div class="box box-modified">
+        <code>TabletResultadosEtapa1.tsx</code>
+        <small>Misma lógica de datos (polling, API calls, redirects). Visual completamente reemplazada: StarfieldBackground + barras animadas de podio (bar-1/2/3) + confetti para etapa 4.</small>
+        <span class="badge badge-modified">modificado</span>
+      </div>
+      <div class="box box-modified">
+        <code>Lobby.tsx</code>
+        <small>Solo cambio en determineAndRedirectToActivity(): transiciones de ETAPA (stage_number cambia) navegan a /tablet/etapa-warp?stage=X&redirect=. Actividades dentro de la misma etapa navegan directo (sin warp).</small>
+        <span class="badge badge-modified">modificado</span>
+      </div>
+      <div class="box box-appchange">
+        <code>App.tsx</code>
+        <small>Agrega 2 rutas nuevas:<br>/tablet/etapa-warp → SpaceWarpTransition<br>/tablet/etapa-transition → PlanetLandingTransition</small>
+        <span class="badge badge-new">+2 rutas</span>
+      </div>
+      <div class="box box-appchange">
+        <code>index.html</code>
+        <small>Agrega Google Fonts link: Orbitron + Exo 2. Ambas fuentes disponibles globalmente en todos los componentes.</small>
+        <span class="badge badge-modified">+fonts</span>
+      </div>
+    </div>
+  </div>
+
+</div>

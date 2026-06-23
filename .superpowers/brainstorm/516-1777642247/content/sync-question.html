@@ -1,0 +1,88 @@
+<style>
+  body { font-family: 'Exo 2', 'Segoe UI', sans-serif; background: #050818; color: #fff; }
+  .scene { display: flex; gap: 24px; align-items: flex-start; margin: 20px 0; }
+  .device { flex: 1; border-radius: 14px; overflow: hidden; border: 1px solid rgba(255,255,255,0.15); }
+  .device-label { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: rgba(255,255,255,0.4); text-align: center; margin-bottom: 8px; }
+  .device-screen { background: #0a0f2a; padding: 16px; min-height: 180px; position: relative; }
+  .screen-header { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: rgba(255,255,255,0.3); border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px; margin-bottom: 12px; }
+  .list-item { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 10px 14px; margin-bottom: 6px; display: flex; align-items: center; gap: 10px; }
+  .rank { font-size: 18px; font-weight: 900; color: rgba(255,255,255,0.2); width: 22px; }
+  .rank.gold { color: #fbbf24; }
+  .team-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .team-name { font-size: 13px; font-weight: 600; flex: 1; }
+  .team-pts { font-size: 12px; color: #fbbf24; font-weight: 700; }
+  .podium-mini { display: flex; align-items: flex-end; justify-content: center; gap: 8px; height: 110px; padding: 0 20px; }
+  .bar { border-radius: 6px 6px 0 0; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 4px; font-size: 16px; font-weight: 900; color: rgba(255,255,255,0.3); flex: 1; }
+  .bar-1 { height: 80px; background: linear-gradient(180deg,#fbbf24,#d97706); }
+  .bar-2 { height: 52px; background: linear-gradient(180deg,#cbd5e1,#64748b); }
+  .bar-3 { height: 38px; background: linear-gradient(180deg,#d97706,#92400e); }
+  .avatar-row { display: flex; justify-content: center; gap: 8px; margin-bottom: 4px; }
+  .avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  .av1 { background: radial-gradient(#fef3c7,#f59e0b); border: 2px solid #fbbf24; }
+  .av2 { background: radial-gradient(#f1f5f9,#94a3b8); border: 2px solid #cbd5e1; }
+  .av3 { background: radial-gradient(#fde68a,#d97706); border: 2px solid #d97706; }
+  .question-badge { display: inline-block; background: rgba(192,38,211,0.2); border: 1px solid rgba(192,38,211,0.5); border-radius: 999px; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: #e879f9; padding: 4px 14px; margin-bottom: 12px; }
+  .arrow { font-size: 28px; color: rgba(255,255,255,0.15); align-self: center; }
+  .unknown-screen { display: flex; align-items: center; justify-content: center; min-height: 180px; color: rgba(255,255,255,0.2); font-size: 13px; letter-spacing: 1px; flex-direction: column; gap: 8px; }
+  .question-mark { font-size: 48px; color: rgba(255,255,255,0.1); }
+</style>
+
+<h2>Sync Issue: Tablets during Resultados</h2>
+<p class="subtitle">When the professor opens the Results screen, what should the tablets show?</p>
+
+<div class="section">
+  <p class="label">Current situation</p>
+  <div class="scene">
+    <div style="flex:1">
+      <div class="device-label">Profesor (TV / laptop)</div>
+      <div class="device">
+        <div class="device-screen">
+          <div class="screen-header">Profesor · Resultados — Etapa 1</div>
+          <div class="list-item"><span class="rank gold">1</span><span class="team-dot" style="background:#818cf8"></span><span class="team-name">Nebula Nova</span><span class="team-pts">3200 pts</span></div>
+          <div class="list-item"><span class="rank">2</span><span class="team-dot" style="background:#f472b6"></span><span class="team-name">Cosmic Crew</span><span class="team-pts">2900 pts</span></div>
+          <div class="list-item"><span class="rank">3</span><span class="team-dot" style="background:#fb923c"></span><span class="team-name">Star Seekers</span><span class="team-pts">2700 pts</span></div>
+          <div class="list-item"><span class="rank">4</span><span class="team-dot" style="background:#22d3ee"></span><span class="team-name">Orbit Squad</span><span class="team-pts">2600 pts</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+    <div style="flex:1">
+      <div class="device-label">Tablets (estudiantes) — ¿Qué ven?</div>
+      <div class="device">
+        <div class="device-screen">
+          <div class="unknown-screen">
+            <div class="question-mark">?</div>
+            <div>Sin navegación automática al podio</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <p class="label">What you want — pick how it should work</p>
+  <div class="options">
+    <div class="option" data-choice="a" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3>Automatic sync</h3>
+        <p>When the professor lands on Resultados, tablets auto-navigate to their podium screen within seconds (via polling or a new backend flag). No button needed.</p>
+      </div>
+    </div>
+    <div class="option" data-choice="b" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>Professor-triggered</h3>
+        <p>The professor has a button on the Resultados screen ("Mostrar podio a tablets") — tablets only navigate when the professor explicitly pushes the button.</p>
+      </div>
+    </div>
+    <div class="option" data-choice="c" onclick="toggleSelect(this)">
+      <div class="letter">C</div>
+      <div class="content">
+        <h3>Already works — only visual redesign needed</h3>
+        <p>The tablets do navigate to their podium page correctly. The issue is just that the professor's view uses a flat list instead of the animated podium design.</p>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Profesor Dashboard Mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:100%;height:100%;background:#050818;color:#fff;font-family:'Exo 2',sans-serif;overflow-x:hidden;}
+canvas#bg{position:fixed;inset:0;z-index:0;}
+
+.page{position:relative;z-index:1;min-height:100vh;padding:20px 24px;}
+
+/* Top bar */
+.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.08);}
+.topbar-left{display:flex;flex-direction:column;gap:2px;}
+.mission-tag{font-family:'Exo 2';font-size:10px;letter-spacing:4px;text-transform:uppercase;color:rgba(255,255,255,0.35);}
+.mission-title{font-family:'Orbitron';font-size:18px;font-weight:700;letter-spacing:2px;color:#fff;text-shadow:0 0 20px rgba(192,38,211,0.5);}
+.topbar-right{display:flex;align-items:center;gap:12px;}
+.stage-badge{background:linear-gradient(135deg,#c026d3,#7c3aed);font-family:'Orbitron';font-size:10px;font-weight:700;letter-spacing:3px;padding:6px 16px;border-radius:999px;text-transform:uppercase;}
+.timer-pill{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:999px;padding:6px 14px;font-family:'Orbitron';font-size:13px;color:#fbbf24;}
+
+/* Stats row */
+.stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;}
+.stat-card{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:14px 18px;backdrop-filter:blur(12px);}
+.stat-label{font-size:10px;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,0.35);margin-bottom:6px;}
+.stat-value{font-family:'Orbitron';font-size:22px;font-weight:700;color:#fff;}
+.stat-sub{font-size:11px;color:rgba(255,255,255,0.4);margin-top:2px;}
+
+/* Team grid */
+.section-label{font-family:'Exo 2';font-size:10px;letter-spacing:4px;text-transform:uppercase;color:rgba(255,255,255,0.3);margin-bottom:10px;}
+.team-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:20px;}
+.team-card{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;backdrop-filter:blur(8px);}
+.team-card.submitted{border-color:rgba(16,185,129,0.4);background:rgba(16,185,129,0.06);}
+.team-top{display:flex;align-items:center;gap:10px;}
+.team-color{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+.team-name{font-family:'Exo 2';font-size:13px;font-weight:600;color:#fff;flex:1;}
+.team-check{font-size:14px;}
+.team-status{font-size:11px;color:rgba(255,255,255,0.35);}
+.team-status.done{color:#10b981;}
+
+/* Progress bar */
+.progress-row{height:3px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden;}
+.progress-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,#7c3aed,#c026d3);}
+
+/* Action button */
+.action-row{display:flex;justify-content:flex-end;gap:10px;}
+.btn-advance{font-family:'Orbitron';font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:#fff;background:linear-gradient(135deg,#093c92,#c026d3);border:none;padding:12px 28px;cursor:pointer;clip-path:polygon(10px 0%,100% 0%,calc(100% - 10px) 100%,0% 100%);transition:opacity 0.2s;box-shadow:0 0 20px rgba(192,38,211,0.3);}
+.btn-secondary{font-family:'Orbitron';font-size:10px;letter-spacing:2px;color:rgba(255,255,255,0.5);background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.15);padding:12px 20px;cursor:pointer;transition:all 0.2s;border-radius:8px;}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div class="page">
+
+  <!-- Top bar -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="mission-tag">Control de Misión · Etapa 1</div>
+      <div class="mission-title">Trabajo en Equipo</div>
+    </div>
+    <div class="topbar-right">
+      <div class="timer-pill">⏱ 3:42</div>
+      <div class="stage-badge">Actividad 2 / 4</div>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-label">Equipos Listos</div>
+      <div class="stat-value">3 / 5</div>
+      <div class="stat-sub">esperando a los demás</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Actividad Actual</div>
+      <div class="stat-value" style="font-size:14px;padding-top:4px;color:#c026d3;">Personalización</div>
+      <div class="stat-sub">nombre + relación del equipo</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Tokens Entregados</div>
+      <div class="stat-value" style="color:#fbbf24;">240</div>
+      <div class="stat-sub">en esta etapa</div>
+    </div>
+  </div>
+
+  <!-- Teams -->
+  <div class="section-label">Estado de los equipos</div>
+  <div class="team-grid">
+    <div class="team-card submitted">
+      <div class="team-top">
+        <div class="team-color" style="background:#6366f1;"></div>
+        <div class="team-name">Nebula Nova</div>
+        <div class="team-check">✅</div>
+      </div>
+      <div class="progress-row"><div class="progress-fill" style="width:100%"></div></div>
+      <div class="team-status done">Entregado · Ya se conocen</div>
+    </div>
+    <div class="team-card submitted">
+      <div class="team-top">
+        <div class="team-color" style="background:#f472b6;"></div>
+        <div class="team-name">Cosmic Crew</div>
+        <div class="team-check">✅</div>
+      </div>
+      <div class="progress-row"><div class="progress-fill" style="width:100%"></div></div>
+      <div class="team-status done">Entregado · No se conocen</div>
+    </div>
+    <div class="team-card submitted">
+      <div class="team-top">
+        <div class="team-color" style="background:#fb923c;"></div>
+        <div class="team-name">Star Seekers</div>
+        <div class="team-check">✅</div>
+      </div>
+      <div class="progress-row"><div class="progress-fill" style="width:100%"></div></div>
+      <div class="team-status done">Entregado · Ya se conocen</div>
+    </div>
+    <div class="team-card">
+      <div class="team-top">
+        <div class="team-color" style="background:#22d3ee;"></div>
+        <div class="team-name">Galaxy Guards</div>
+        <div class="team-check" style="opacity:0.2">⬜</div>
+      </div>
+      <div class="progress-row"><div class="progress-fill" style="width:60%"></div></div>
+      <div class="team-status">Completando formulario...</div>
+    </div>
+    <div class="team-card">
+      <div class="team-top">
+        <div class="team-color" style="background:#a3e635;"></div>
+        <div class="team-name">Orbit Squad</div>
+        <div class="team-check" style="opacity:0.2">⬜</div>
+      </div>
+      <div class="progress-row"><div class="progress-fill" style="width:0%"></div></div>
+      <div class="team-status">Sin comenzar</div>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="action-row">
+    <button class="btn-secondary">Cancelar Sesión</button>
+    <button class="btn-advance">Avanzar Actividad ▶</button>
+  </div>
+
+</div>
+
+<script>
+const c=document.getElementById('bg'),x=c.getContext('2d');
+let W,H,stars=[];
+function resize(){W=c.width=innerWidth;H=c.height=innerHeight;}
+resize();addEventListener('resize',resize);
+function mkStars(){stars=[];for(let i=0;i<200;i++)stars.push({x:Math.random()*W,y:Math.random()*H,r:Math.random()*1.1+0.2,a:Math.random()*0.6+0.2,p:Math.random()*Math.PI*2,s:Math.random()*0.015+0.004});}
+mkStars();
+(function loop(ts){
+  const t=ts*.001;
+  x.fillStyle='#050818';x.fillRect(0,0,W,H);
+  const g1=x.createRadialGradient(W*.28,H*.38,0,W*.28,H*.38,W*.55);
+  g1.addColorStop(0,'rgba(76,29,149,.22)');g1.addColorStop(1,'transparent');
+  x.fillStyle=g1;x.fillRect(0,0,W,H);
+  const g2=x.createRadialGradient(W*.75,H*.6,0,W*.75,H*.6,W*.35);
+  g2.addColorStop(0,'rgba(192,38,211,.1)');g2.addColorStop(1,'transparent');
+  x.fillStyle=g2;x.fillRect(0,0,W,H);
+  stars.forEach(s=>{const tw=.5+.5*Math.sin(s.p+t*s.s*60);x.beginPath();x.arc(s.x,s.y,s.r,0,Math.PI*2);x.fillStyle=`rgba(255,255,255,${s.a*tw})`;x.fill();});
+  requestAnimationFrame(loop);
+})(0);
+</script>
+</body>
+</html>

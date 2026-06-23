@@ -1,0 +1,58 @@
+<h2>Where does the Icebreaker fit in Phase 1?</h2>
+<p class="subtitle">The HTML reference has two minigames: <strong>Icebreaker (PREGUNTA)</strong> — 7 conversation prompts — and <strong>Word Search (SOPA DE LETRAS)</strong>. The current flow splits teams by whether they know each other. Which approach do you want?</p>
+
+<div style="margin-bottom: 24px; padding: 14px 18px; background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.25); border-radius: 10px;">
+  <span class="label" style="color:#6366f1;">Current flow (for reference)</span>
+  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:8px; font-size:13px; color:#555;">
+    <span style="background:#e0e7ff;padding:4px 10px;border-radius:6px;">Join room</span>
+    <span>→</span>
+    <span style="background:#e0e7ff;padding:4px 10px;border-radius:6px;">Video</span>
+    <span>→</span>
+    <span style="background:#e0e7ff;padding:4px 10px;border-radius:6px;">Personalization<br><em style="font-size:11px;">(team name + "know each other?")</em></span>
+    <span>→</span>
+    <span style="background:#fce7f3;padding:4px 10px;border-radius:6px;">If YES → Word Search + Anagram + GK Quiz</span>
+    <br>
+    <span style="margin-left:auto;background:#fef3c7;padding:4px 10px;border-radius:6px;">If NO → Chaos Questions + GK Quiz</span>
+  </div>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Icebreaker replaces "don't know each other" path</h3>
+      <p>Teams that don't know each other → <strong>Icebreaker (7 prompts)</strong> then Word Search.<br>
+      Teams that know each other → skip icebreaker, go straight to Word Search.<br>
+      <em style="color:#6b7280;">Chaos questions removed. Icebreaker is the new ice-breaking activity.</em></p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>All teams do Icebreaker → then Word Search</h3>
+      <p>Remove the "know each other?" split. Every team always does:<br>
+      <strong>Icebreaker (7 prompts) → Word Search</strong><br>
+      <em style="color:#6b7280;">Simplifies the flow. Teams that already know each other still do the icebreaker (shorter version or skippable).</em></p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Keep existing flow, just apply the new aesthetic</h3>
+      <p>Don't change the activities — keep chaos questions, anagram, and GK quiz.<br>
+      Only restyle everything with the dark galactic theme (starfield, glass morphism, Orbitron font, neon glow).<br>
+      <em style="color:#6b7280;">Safest scope — visual redesign only, no logic changes.</em></p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="d" onclick="toggleSelect(this)">
+    <div class="letter">D</div>
+    <div class="content">
+      <h3>New activities replace everything in Phase 1</h3>
+      <p>Phase 1 minigame becomes exactly what the HTML has: <strong>Icebreaker then Word Search</strong>, for all teams, with no split path.<br>
+      <em style="color:#6b7280;">Biggest change — replaces anagram, chaos questions, and GK quiz entirely.</em></p>
+    </div>
+  </div>
+</div>

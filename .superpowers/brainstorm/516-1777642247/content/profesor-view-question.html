@@ -1,0 +1,126 @@
+<style>
+  body { font-family: 'Exo 2','Segoe UI',sans-serif; background:#050818; color:#fff; }
+  .scene { border-radius:14px; border:1px solid rgba(255,255,255,0.12); overflow:hidden; background:#0a0f2a; margin-bottom:8px; }
+  .screen-bar { background:rgba(255,255,255,0.05); border-bottom:1px solid rgba(255,255,255,0.08); padding:8px 16px; font-size:10px; letter-spacing:3px; text-transform:uppercase; color:rgba(255,255,255,0.35); display:flex; justify-content:space-between; align-items:center; }
+  .screen-url { font-family:monospace; font-size:10px; color:rgba(255,255,255,0.2); }
+  .screen-body { padding:18px 20px; }
+
+  /* Option A – fullscreen podium */
+  .podium-stage { display:flex; align-items:flex-end; justify-content:center; gap:10px; height:110px; margin:8px 0 12px; }
+  .pb { border-radius:6px 6px 0 0; display:flex; align-items:flex-end; justify-content:center; padding-bottom:5px; font-weight:900; color:rgba(255,255,255,0.3); flex:1; font-size:14px; }
+  .pb1 { height:88px; background:linear-gradient(180deg,#fbbf24,#d97706); max-width:70px; }
+  .pb2 { height:58px; background:linear-gradient(180deg,#cbd5e1,#64748b); max-width:60px; }
+  .pb3 { height:42px; background:linear-gradient(180deg,#d97706,#92400e); max-width:50px; }
+  .avatar-trio { display:flex; align-items:flex-end; justify-content:center; gap:10px; margin-bottom:2px; }
+  .av { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; }
+  .av1 { background:radial-gradient(#fef3c7,#f59e0b); border:2px solid #fbbf24; }
+  .av2 { background:radial-gradient(#f1f5f9,#94a3b8); border:2px solid #cbd5e1; }
+  .av3 { background:radial-gradient(#fde68a,#d97706); border:2px solid #d97706; }
+  .lower-row { display:flex; gap:6px; justify-content:center; margin-bottom:10px; }
+  .lower-chip { background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:8px; padding:5px 12px; font-size:11px; color:rgba(255,255,255,0.6); }
+  .action-bar { display:flex; gap:8px; justify-content:center; }
+  .btn-prim { background:rgba(192,38,211,0.15); border:1px solid rgba(192,38,211,0.5); color:#e879f9; border-radius:6px; padding:7px 18px; font-size:11px; font-weight:700; letter-spacing:2px; text-transform:uppercase; }
+  .btn-sec { background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.15); color:rgba(255,255,255,0.5); border-radius:6px; padding:7px 14px; font-size:11px; }
+
+  /* Option B – split view */
+  .split { display:flex; gap:12px; }
+  .split-left { flex:1.2; }
+  .split-right { flex:0.8; display:flex; flex-direction:column; gap:6px; }
+  .mini-podium { display:flex; align-items:flex-end; gap:6px; height:80px; justify-content:center; margin:6px 0 8px; }
+  .mpb { border-radius:5px 5px 0 0; flex:1; display:flex; align-items:flex-end; justify-content:center; padding-bottom:3px; font-size:11px; font-weight:900; color:rgba(255,255,255,0.3); max-width:44px; }
+  .mpb1 { height:64px; background:linear-gradient(180deg,#fbbf24,#d97706); }
+  .mpb2 { height:42px; background:linear-gradient(180deg,#cbd5e1,#64748b); }
+  .mpb3 { height:30px; background:linear-gradient(180deg,#d97706,#92400e); }
+  .panel-card { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:8px 12px; }
+  .panel-label { font-size:9px; letter-spacing:2px; text-transform:uppercase; color:rgba(255,255,255,0.3); margin-bottom:4px; }
+  .panel-value { font-size:13px; font-weight:700; color:#fff; }
+  .team-row { display:flex; align-items:center; gap:6px; margin-bottom:4px; font-size:11px; }
+  .tdot { width:8px; height:8px; border-radius:50%; }
+  .tstatus { margin-left:auto; font-size:10px; color:rgba(255,255,255,0.4); }
+</style>
+
+<h2>Professor's Resultados view — which layout?</h2>
+<p class="subtitle">Both show the same animated podium. The difference is what else the professor can see alongside it.</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Fullscreen podium — same as tablets</h3>
+      <p>Professor sees the same animated podium the students see. Action buttons (Ir a Etapa 2, Cancelar Sala) replace the "Continuar" button at the bottom.</p>
+      <div class="scene" style="margin-top:12px">
+        <div class="screen-bar"><span>Profesor · Resultados</span><span class="screen-url">/profesor/resultados/42/</span></div>
+        <div class="screen-body">
+          <div style="text-align:center;font-size:9px;letter-spacing:3px;color:rgba(255,255,255,0.3);text-transform:uppercase;margin-bottom:2px">Después de · Trabajo en Equipo</div>
+          <div style="text-align:center;font-size:18px;font-weight:900;letter-spacing:2px;margin-bottom:8px">CLASIFI<span style="color:#f59e0b">CACIÓN</span></div>
+          <div class="lower-row">
+            <div class="lower-chip">4 · Orbit Squad · 2600 pts</div>
+            <div class="lower-chip">5 · Galaxy Guards · 2400 pts</div>
+          </div>
+          <div class="avatar-trio">
+            <div class="av av2">🚀</div>
+            <div class="av av1">🚀</div>
+            <div class="av av3">🚀</div>
+          </div>
+          <div class="podium-stage">
+            <div class="pb pb2">2</div>
+            <div class="pb pb1">1</div>
+            <div class="pb pb3">3</div>
+          </div>
+          <div class="action-bar">
+            <div class="btn-sec">Cancelar Sala</div>
+            <div class="btn-prim">Ir a Etapa 2 ▶</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Podium + control panel</h3>
+      <p>Left side has the animated podium (smaller). Right side shows a control panel: tablet sync status, stage info, and action buttons. Professor sees more at a glance.</p>
+      <div class="scene" style="margin-top:12px">
+        <div class="screen-bar"><span>Profesor · Resultados</span><span class="screen-url">/profesor/resultados/42/</span></div>
+        <div class="screen-body">
+          <div class="split">
+            <div class="split-left">
+              <div style="font-size:9px;letter-spacing:3px;color:rgba(255,255,255,0.3);text-transform:uppercase;text-align:center;margin-bottom:2px">Clasificación · Etapa 1</div>
+              <div class="avatar-trio" style="margin-bottom:2px">
+                <div class="av av2" style="width:22px;height:22px;font-size:10px">🚀</div>
+                <div class="av av1" style="width:22px;height:22px;font-size:10px">🚀</div>
+                <div class="av av3" style="width:22px;height:22px;font-size:10px">🚀</div>
+              </div>
+              <div class="mini-podium">
+                <div class="mpb mpb2">2</div>
+                <div class="mpb mpb1">1</div>
+                <div class="mpb mpb3">3</div>
+              </div>
+              <div class="lower-row" style="margin-bottom:0">
+                <div class="lower-chip" style="font-size:10px">4 · Orbit Squad</div>
+                <div class="lower-chip" style="font-size:10px">5 · Guards</div>
+              </div>
+            </div>
+            <div class="split-right">
+              <div class="panel-card">
+                <div class="panel-label">Tablets mostrando podio</div>
+                <div class="team-row"><div class="tdot" style="background:#818cf8"></div>Nebula Nova<div class="tstatus">✓ sincronizado</div></div>
+                <div class="team-row"><div class="tdot" style="background:#f472b6"></div>Cosmic Crew<div class="tstatus">✓ sincronizado</div></div>
+                <div class="team-row"><div class="tdot" style="background:#fb923c"></div>Star Seekers<div class="tstatus">✓ sincronizado</div></div>
+              </div>
+              <div class="panel-card">
+                <div class="panel-label">Etapa completada</div>
+                <div class="panel-value">Trabajo en Equipo</div>
+              </div>
+              <div class="action-bar" style="flex-direction:column;gap:6px">
+                <div class="btn-prim" style="text-align:center">Ir a Etapa 2 ▶</div>
+                <div class="btn-sec" style="text-align:center">Cancelar Sala</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
