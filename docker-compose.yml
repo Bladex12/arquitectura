@@ -22,12 +22,14 @@ services:
     container_name: mision_emprende_backend
     restart: unless-stopped
     command:
-      - daphne
-      - -b
-      - "0.0.0.0"
-      - -p
-      - "8000"
-      - mision_emprende_backend.asgi:application
+      - gunicorn
+      - mision_emprende_backend.wsgi:application
+      - --bind
+      - "0.0.0.0:8000"
+      - --workers
+      - "4"
+      - --timeout
+      - "120"
     volumes:
       - .:/app
       - static_volume:/app/staticfiles

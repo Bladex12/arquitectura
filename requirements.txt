@@ -42,11 +42,9 @@ Pillow==10.4.0  # Versión estable compatible (evita 12.x que requiere actualiza
 qrcode[pil]==8.0  # Versión más reciente compatible
 
 # ============================================
-# COMUNICACIÓN EN TIEMPO REAL
+# SERVIDOR WSGI
 # ============================================
-channels==4.1.0  # Versión estable compatible con Django 5.0 (4.3.x puede tener cambios)
-channels-redis==4.2.0  # Compatible con channels 4.1.0
-daphne==4.1.0  # Compatible con channels 4.1.0
+gunicorn==23.0.0
 
 # ============================================
 # VARIABLES DE ENTORNO
@@ -112,7 +110,6 @@ validators==0.35.0  # Versión más reciente
 #   * Django==5.2.7
 #   * django-axes==8.0.0
 #   * django-debug-toolbar==6.1.0
-#   * channels==4.3.1
 # 
 # - Python 3.11 compatible: Todas las versiones son compatibles con Python 3.11
 # - Para Python 3.12+: Considera actualizar ipython a 9.x

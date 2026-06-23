@@ -51,10 +51,6 @@ INSTALLED_APPS = [
     'drf_spectacular',
     'django_filters',
     
-    # Third Party - Real-time
-    'channels',
-    'channels_redis',
-    
     # Third Party - Security
     'axes',
     'django_ratelimit',
@@ -114,7 +110,6 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'mision_emprende_backend.wsgi.application'
-ASGI_APPLICATION = 'mision_emprende_backend.asgi.application'
 
 
 # ============================================
@@ -156,20 +151,6 @@ CACHES = {
         },
         'KEY_PREFIX': 'mision_emprende',
     }
-}
-
-
-# ============================================
-# CHANNELS CONFIGURATION (WebSockets)
-# ============================================
-
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            "hosts": [f'redis://{REDIS_HOST}:{REDIS_PORT}/2'],
-        },
-    },
 }
 
 

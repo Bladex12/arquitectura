@@ -45,7 +45,7 @@ services:
     command: >
       sh -c "python manage.py migrate &&
              python manage.py collectstatic --noinput &&
-             daphne -b 0.0.0.0 -p 8000 mision_emprende_backend.asgi:application"
+             gunicorn mision_emprende_backend.wsgi:application --bind 0.0.0.0:8000 --workers 4 --timeout 120"
     volumes:
       - static_volume:/app/staticfiles
       - media_volume:/app/media
