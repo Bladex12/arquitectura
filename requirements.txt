@@ -1,0 +1,121 @@
+# ============================================
+# MISIÓN EMPRENDE - Backend Requirements
+# Django REST API para Sistema de Juego Educativo
+# Versiones optimizadas y compatibles (Enero 2025)
+# Python 3.11 compatible
+# ============================================
+
+# ============================================
+# CORE FRAMEWORK
+# ============================================
+Django==5.0.14  # Última versión estable de Django 5.0.x (compatible con django-axes 6.5.2)
+djangorestframework==3.15.2  # Compatible con Django 5.0, versión estable
+django-cors-headers==4.3.1  # Compatible y estable
+
+# ============================================
+# BASE DE DATOS
+# ============================================
+mysqlclient==2.2.7  # Versión más reciente compatible con Python 3.11
+
+# ============================================
+# AUTENTICACIÓN Y SEGURIDAD
+# ============================================
+djangorestframework-simplejwt==5.3.1  # Versión estable compatible con Django 5.0
+cryptography==46.0.3  # ACTUALIZADO: Versión más segura y actualizada
+
+# ============================================
+# VALIDACIÓN Y SERIALIZACIÓN
+# ============================================
+django-filter==24.3  # Versión estable compatible con Django 5.0 (25.x puede tener cambios)
+drf-spectacular==0.27.2  # Versión estable para documentación API
+
+# ============================================
+# PROCESAMIENTO DE ARCHIVOS
+# ============================================
+openpyxl==3.1.5  # Versión más reciente con correcciones
+pandas==2.2.2  # Versión estable compatible (evita 2.3.x que puede tener cambios)
+Pillow==10.4.0  # Versión estable compatible (evita 12.x que requiere actualizaciones)
+
+# ============================================
+# GENERACIÓN DE CÓDIGOS Y QR
+# ============================================
+qrcode[pil]==8.0  # Versión más reciente compatible
+
+# ============================================
+# COMUNICACIÓN EN TIEMPO REAL
+# ============================================
+channels==4.1.0  # Versión estable compatible con Django 5.0 (4.3.x puede tener cambios)
+channels-redis==4.2.0  # Compatible con channels 4.1.0
+daphne==4.1.0  # Compatible con channels 4.1.0
+
+# ============================================
+# VARIABLES DE ENTORNO
+# ============================================
+python-decouple==3.8  # Versión estable
+
+# ============================================
+# UTILIDADES
+# ============================================
+redis==5.2.1  # Versión estable compatible (evita 7.x que puede tener cambios)
+django-redis==5.4.0  # Compatible con Django 5.0
+
+# ============================================
+# VALIDACIÓN Y PERMISOS
+# ============================================
+django-permissions-policy==4.28.0  # Versión más reciente
+
+# ============================================
+# TESTING
+# ============================================
+pytest==8.3.3  # Versión estable compatible con Python 3.11
+pytest-django==4.9.0  # Compatible con pytest 8.x
+pytest-cov==5.0.0  # Compatible con pytest 8.x
+factory-boy==3.3.1  # Versión más reciente
+faker==30.2.0  # Versión estable (evita 37.x que puede tener cambios mayores)
+
+# ============================================
+# DESARROLLO Y DEBUGGING
+# ============================================
+django-debug-toolbar==5.0.1  # Versión compatible con Django 5.0 (6.x requiere Django 5.2+)
+django-extensions==3.2.3  # Herramientas de desarrollo para Django
+ipython==8.27.0  # Versión estable de IPython 8.x (evita 9.x que requiere Python 3.12+)
+
+# ============================================
+# SEGURIDAD ADICIONAL
+# ============================================
+django-ratelimit==4.1.0  # Versión estable
+django-axes==6.5.2  # Compatible con Django 5.0.x (8.0.0 requiere Django 5.2+)
+
+# ============================================
+# UTILIDADES DE FECHA Y TIEMPO
+# ============================================
+python-dateutil==2.9.0  # Versión más reciente
+pytz==2024.2  # Versión más reciente con zonas horarias actualizadas
+
+# ============================================
+# GENERACIÓN DE REPORTES
+# ============================================
+reportlab==4.2.2  # Versión estable más reciente
+xhtml2pdf==0.2.17  # Versión más reciente con correcciones
+
+# ============================================
+# VALIDACIÓN DE DATOS
+# ============================================
+validators==0.35.0  # Versión más reciente
+
+# ============================================
+# NOTAS DE COMPATIBILIDAD
+# ============================================
+# 
+# - Django 5.0.14: Última versión de 5.0.x, compatible con django-axes 6.5.2
+# - Si en el futuro necesitas Django 5.2 LTS, actualiza:
+#   * Django==5.2.7
+#   * django-axes==8.0.0
+#   * django-debug-toolbar==6.1.0
+#   * channels==4.3.1
+# 
+# - Python 3.11 compatible: Todas las versiones son compatibles con Python 3.11
+# - Para Python 3.12+: Considera actualizar ipython a 9.x
+#
+# Verificar compatibilidad: pip check
+# Auditar seguridad: pip-audit -r requirements.txt

@@ -1,0 +1,260 @@
+/* ── Timer Block ── */
+.timer-block {
+  text-align: center;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 20px;
+  padding: 20px 24px 16px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: border-color 0.4s, background 0.4s;
+}
+.timer-block .timer-label {
+  font-family: 'Exo 2', sans-serif;
+  font-size: 16px;
+  letter-spacing: 5px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.75);
+  margin-bottom: 6px;
+}
+.timer-block .timer-display {
+  font-family: 'Orbitron', sans-serif;
+  font-size: clamp(72px, 12vw, 120px);
+  font-weight: 900;
+  letter-spacing: 10px;
+  color: #fff;
+  line-height: 1;
+  transition: color 0.4s, text-shadow 0.4s;
+}
+.timer-block .timer-sublabel {
+  font-family: 'Exo 2', sans-serif;
+  font-size: 17px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.7);
+  margin-top: 10px;
+}
+
+/* Warn ≤30s */
+.timer-block.timer-warn {
+  border-color: rgba(249,115,22,0.6);
+  background: rgba(249,115,22,0.07);
+}
+.timer-block.timer-warn .timer-display {
+  color: #f97316;
+  text-shadow: 0 0 40px rgba(249,115,22,0.8);
+  animation: galactic-twinkle 1s ease-in-out infinite;
+}
+.timer-block.timer-warn .timer-label,
+.timer-block.timer-warn .timer-sublabel { color: rgba(249,115,22,0.95); }
+
+/* Danger ≤10s */
+.timer-block.timer-danger {
+  border-color: rgba(239,68,68,0.7);
+  background: rgba(239,68,68,0.09);
+}
+.timer-block.timer-danger .timer-display {
+  color: #ef4444;
+  text-shadow: 0 0 60px rgba(239,68,68,1), 0 0 120px rgba(239,68,68,0.5);
+  animation: galactic-pulse-danger 0.28s ease-in-out infinite;
+}
+.timer-block.timer-danger .timer-label,
+.timer-block.timer-danger .timer-sublabel { color: rgba(239,68,68,1); }
+
+@keyframes galactic-twinkle {
+  0%,100% { opacity:1; transform:scale(1); }
+  50% { opacity:0.6; transform:scale(0.97); }
+}
+@keyframes galactic-pulse-danger {
+  0%,100% { opacity:1; transform:scale(1); }
+  50% { opacity:0.4; transform:scale(0.94); }
+}
+
+/* ── Glass card ── */
+.glass-card {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 16px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ── Choice Cards (Personalización) ── */
+.choice-row {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.choice-card {
+  width: clamp(180px, 36vw, 230px);
+  padding: 32px 24px 28px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(16px);
+  text-align: center;
+  cursor: pointer;
+  transition: transform 0.3s, box-shadow 0.3s, border-color 0.3s, background 0.3s;
+  position: relative;
+  overflow: hidden;
+  flex: 1;
+}
+
+.choice-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 22px;
+  opacity: 0;
+  transition: opacity 0.3s;
+  z-index: -1;
+}
+
+/* Variante: Veterano (Azul) */
+.choice-card.veteran::after {
+  background: radial-gradient(ellipse at 50% 0%, rgba(9, 60, 146, 0.25) 0%, transparent 70%);
+}
+.choice-card.veteran:hover, .choice-card.veteran.selected {
+  border-color: rgba(9, 60, 146, 0.6);
+  box-shadow: 0 12px 40px rgba(9, 60, 146, 0.3);
+  transform: translateY(-6px);
+}
+.choice-card.veteran:hover::after, .choice-card.veteran.selected::after {
+  opacity: 1;
+}
+
+/* Variante: Nueva Tripulación (Magenta) */
+.choice-card.newteam::after {
+  background: radial-gradient(ellipse at 50% 0%, rgba(192, 38, 211, 0.2) 0%, transparent 70%);
+}
+.choice-card.newteam:hover, .choice-card.newteam.selected {
+  border-color: rgba(192, 38, 211, 0.5);
+  box-shadow: 0 12px 40px rgba(192, 38, 211, 0.25);
+  transform: translateY(-6px);
+}
+.choice-card.newteam:hover::after, .choice-card.newteam.selected::after {
+  opacity: 1;
+}
+
+/* Textos internos de la tarjeta de selección */
+.choice-icon {
+  font-size: 48px;
+  margin-bottom: 18px;
+  line-height: 1;
+  display: block;
+}
+.choice-name {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #fff;
+  margin-bottom: 8px;
+}
+.choice-desc {
+  font-family: 'Exo 2', sans-serif;
+  font-size: 12px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.45);
+  line-height: 1.6;
+}
+.choice-tag {
+  display: inline-block;
+  margin-top: 14px;
+  font-family: 'Exo 2', sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 4px 12px;
+  border-radius: 50px;
+}
+.choice-card.veteran .choice-tag {
+  background: rgba(9, 60, 146, 0.25);
+  color: rgba(150, 180, 255, 0.9);
+}
+.choice-card.newteam .choice-tag {
+  background: rgba(192, 38, 211, 0.2);
+  color: rgba(220, 130, 255, 0.9);
+}
+
+/* ── Buttons ── */
+.btn-galactic-primary {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: #fff;
+  background: linear-gradient(135deg, #093c92, #c026d3);
+  border: none;
+  padding: 16px 40px;
+  cursor: pointer;
+  clip-path: polygon(14px 0%, 100% 0%, calc(100% - 14px) 100%, 0% 100%);
+  box-shadow: 0 0 28px rgba(192,38,211,0.45);
+  transition: box-shadow 0.2s;
+}
+.btn-galactic-primary:hover { box-shadow: 0 0 48px rgba(192,38,211,0.75); }
+.btn-galactic-primary:disabled { opacity: 0.5; cursor: default; }
+
+.btn-galactic-secondary {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: rgba(255,255,255,0.85);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.3);
+  padding: 16px 28px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+.btn-galactic-secondary:hover { color: #fff; border-color: rgba(255,255,255,0.6); }
+
+/* ── Misc ── */
+.galactic-badge {
+  background: linear-gradient(135deg, #c026d3, #7c3aed);
+  font-family: 'Orbitron', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  padding: 10px 24px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  color: #fff;
+  display: inline-block;
+}
+.galactic-label {
+  font-family: 'Exo 2', sans-serif;
+  font-size: 14px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.75);
+}
+
+/* ── Podium ── */
+.pd-bar {
+  width: 100%;
+  border-radius: 8px 8px 0 0;
+  height: 0;
+  transition: height 1s cubic-bezier(0.22, 1, 0.36, 1);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 10px;
+}
+.pd-bar.bar-1 { background: linear-gradient(180deg,#fbbf24 0%,#d97706 100%); box-shadow: 0 0 30px rgba(251,191,36,0.4); }
+.pd-bar.bar-2 { background: linear-gradient(180deg,#cbd5e1 0%,#64748b 100%); box-shadow: 0 0 20px rgba(203,213,225,0.25); }
+.pd-bar.bar-3 { background: linear-gradient(180deg,#d97706 0%,#92400e 100%); box-shadow: 0 0 20px rgba(217,119,6,0.25); }
+
+@keyframes confetti-fall {
+  0% { opacity:1; transform:translate(0,0) rotate(0deg); }
+  100% { opacity:0; transform:translate(var(--tx),var(--ty)) rotate(var(--rot)); }
+}
+
+@keyframes syncPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
