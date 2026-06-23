@@ -380,66 +380,6 @@ export function DetalleSesion() {
       // Cargar transacciones de tokens
       const tokensList = await tokenTransactionsAPI.list({ game_session: sessionId });
       const tokensArray = Array.isArray(tokensList) ? tokensList : [tokensList];
-      
-      console.log('[DetalleSesion] Total transacciones de tokens:', tokensArray.length);
-      console.log('[DetalleSesion] Transacciones con stage_number:', tokensArray.filter((t: TokenTransaction) => t.stage_number).length);
-      console.log('[DetalleSesion] Transacciones sin stage_number:', tokensArray.filter((t: TokenTransaction) => !t.stage_number).length);
-      
-      // Log detallado de transacciones sin stage_number
-      const tokensWithoutStage = tokensArray.filter((t: TokenTransaction) => !t.stage_number);
-      if (tokensWithoutStage.length > 0) {
-        console.log('[DetalleSesion] Detalles de tokens sin stage_number:', tokensWithoutStage.map((t: TokenTransaction) => ({
-          id: t.id,
-          team: t.team_name,
-          amount: t.amount,
-          source_type: t.source_type,
-          stage_name: t.stage_name,
-          stage_number: t.stage_number,
-          reason: t.reason
-        })));
-      }
-      
-      // Log específico para tokens de "Parte 1 completada" y "caos" (actividad de Presentación)
-      const presentacionTokens = tokensArray.filter((t: TokenTransaction) => 
-        t.reason && (
-          t.reason.includes('Parte 1 completada') || 
-          t.reason.includes('caos') ||
-          t.reason.includes('Preguntas del caos')
-        )
-      );
-      if (presentacionTokens.length > 0) {
-        console.log('[DetalleSesion] 🔴 Tokens de Presentación (no se conocen):', presentacionTokens.map((t: TokenTransaction) => ({
-          id: t.id,
-          team: t.team_name,
-          amount: t.amount,
-          stage_number: t.stage_number,
-          stage_name: t.stage_name,
-          reason: t.reason
-        })));
-      }
-      
-      // Log de TODAS las transacciones del Equipo Azul (sin filtrar por etapa)
-      const equipoAzulAll = tokensArray.filter((t: TokenTransaction) => 
-        t.team_name === 'Equipo Azul' || t.team_name.includes('Azul')
-      );
-      const equipoAzulDetails = equipoAzulAll.map((t: TokenTransaction) => ({
-        id: t.id,
-        amount: t.amount,
-        stage_number: t.stage_number,
-        stage_name: t.stage_name,
-        reason: t.reason,
-        source_type: t.source_type
-      }));
-      console.log('[DetalleSesion] 🔵🔵 TODAS las transacciones del Equipo Azul (todas las etapas):', equipoAzulDetails);
-      console.log('[DetalleSesion] 🔵🔵 Resumen Equipo Azul:', {
-        total_transacciones: equipoAzulAll.length,
-        total_tokens: equipoAzulAll.reduce((sum, t) => sum + t.amount, 0),
-        por_etapa: equipoAzulAll.reduce((acc, t) => {
-          const stage = t.stage_number || 'sin_etapa';
-          acc[stage] = (acc[stage] || 0) + t.amount;
-          return acc;
-        }, {} as Record<number | string, number>)
-      });
 
       // Crear mapa de colores de equipos
       const teamColorMap = new Map<string, string>();
@@ -491,100 +431,13 @@ export function DetalleSesion() {
       }
       
       // Agregar los tokens reales por etapa
-      const tokensByStageDetail: Record<number, Array<{ team: string; amount: number; reason?: string }>> = {};
       tokensArray.forEach((t: TokenTransaction) => {
         if (t.stage_number) {
           const current = byStageMap.get(t.stage_number) || 0;
           byStageMap.set(t.stage_number, current + t.amount);
-          
-          // Guardar detalles para logging
-          if (!tokensByStageDetail[t.stage_number]) {
-            tokensByStageDetail[t.stage_number] = [];
-          }
-          tokensByStageDetail[t.stage_number].push({
-            team: t.team_name,
-            amount: t.amount,
-            reason: t.reason || t.source_type
-          });
         }
       });
-      
-      // Log resumen de tokens por etapa
-      console.log('[DetalleSesion] Tokens por etapa:', Array.from(byStageMap.entries()).map(([stage, tokens]) => ({
-        etapa: `Etapa ${stage}`,
-        tokens
-      })));
-      
-      // Log detallado de tokens por etapa (especialmente Etapa 1)
-      Object.keys(tokensByStageDetail).forEach((stageKey) => {
-        const stageNum = Number(stageKey);
-        const tokens = tokensByStageDetail[stageNum];
-        const total = tokens.reduce((sum, t) => sum + t.amount, 0);
-        
-        // Agrupar por equipo para ver el desglose
-        const byTeam = tokens.reduce((acc, t) => {
-          acc[t.team] = (acc[t.team] || 0) + t.amount;
-          return acc;
-        }, {} as Record<string, number>);
-        
-        // Agrupar por tipo de transacción para ver el desglose
-        const byReason = tokens.reduce((acc, t) => {
-          const reason = t.reason || 'sin_razon';
-          if (!acc[reason]) {
-            acc[reason] = { count: 0, total: 0, teams: {} as Record<string, number> };
-          }
-          acc[reason].count += 1;
-          acc[reason].total += t.amount;
-          acc[reason].teams[t.team] = (acc[reason].teams[t.team] || 0) + t.amount;
-          return acc;
-        }, {} as Record<string, { count: number; total: number; teams: Record<string, number> }>);
-        
-        console.log(`[DetalleSesion] Etapa ${stageNum} - Total: ${total} tokens`, {
-          transacciones: tokens.length,
-          porEquipo: byTeam,
-          porTipo: byReason,
-          detalle: tokens.map(t => ({ team: t.team, amount: t.amount, reason: t.reason }))
-        });
-        
-        // Log especial para Etapa 1 y Equipo Azul
-        if (stageNum === 1) {
-          const equipoAzulTokens = tokens.filter(t => t.team === 'Equipo Azul' || t.team.includes('Azul'));
-          const totalAzul = equipoAzulTokens.reduce((sum, t) => sum + t.amount, 0);
-          console.log(`[DetalleSesion] 🔵 Etapa 1 - Equipo Azul: ${totalAzul} tokens`, {
-            transacciones: equipoAzulTokens.length,
-            detalle: equipoAzulTokens.map(t => ({
-              amount: t.amount,
-              reason: t.reason,
-              team: t.team
-            }))
-          });
-          
-          // Log detallado de TODAS las transacciones del Equipo Azul en Etapa 1
-          const equipoAzulAllTransactions = tokensArray.filter((t: TokenTransaction) => 
-            t.stage_number === 1 && (t.team_name === 'Equipo Azul' || t.team_name.includes('Azul'))
-          );
-          const equipoAzulEtapa1Details = equipoAzulAllTransactions.map((t: TokenTransaction) => ({
-            id: t.id,
-            amount: t.amount,
-            reason: t.reason,
-            source_type: t.source_type,
-            stage_number: t.stage_number,
-            stage_name: t.stage_name,
-            team_name: t.team_name
-          }));
-          console.log(`[DetalleSesion] 🔵🔵 TODAS las transacciones del Equipo Azul en Etapa 1:`, equipoAzulEtapa1Details);
-          console.log(`[DetalleSesion] 🔵🔵 Resumen Equipo Azul Etapa 1:`, {
-            total_transacciones: equipoAzulAllTransactions.length,
-            total_tokens: equipoAzulAllTransactions.reduce((sum, t) => sum + t.amount, 0),
-            tokens_por_tipo: equipoAzulAllTransactions.reduce((acc, t) => {
-              const tipo = t.reason || t.source_type || 'desconocido';
-              acc[tipo] = (acc[tipo] || 0) + t.amount;
-              return acc;
-            }, {} as Record<string, number>)
-          });
-        }
-      });
-      
+
       // Convertir a array con formato "Etapa X" y ordenar por número de etapa
       const byStage = Array.from(byStageMap.entries())
         .map(([stageNumber, tokens]) => ({ 
@@ -620,15 +473,6 @@ export function DetalleSesion() {
           const teamMap = byStageAndTeamMap.get(t.stage_number)!;
           const current = teamMap.get(teamName) || 0;
           teamMap.set(teamName, current + t.amount);
-        } else {
-          // Log para debuggear tokens sin stage_number en agrupación por equipo
-          console.warn(`[DetalleSesion] Token sin stage_number (por equipo):`, {
-            id: t.id,
-            team: t.team_name,
-            amount: t.amount,
-            source_type: t.source_type,
-            stage_name: t.stage_name
-          });
         }
       });
       

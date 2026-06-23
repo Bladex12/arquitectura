@@ -53,9 +53,6 @@ export function GeneralKnowledgeQuiz({ questions, onComplete, initialIndex = 0, 
       
       // Asegurar que esté dentro del rango válido
       displayIndex = Math.max(0, Math.min(displayIndex, questions.length - 1));
-      
-      console.log('[GeneralKnowledgeQuiz] Restaurando índice:', displayIndex, 'de', questions.length, 'preguntas (respuestas dadas:', initialIndex, ')');
-      
       setCurrentIndex(displayIndex);
       setShowFeedback(false);
     }
@@ -63,7 +60,6 @@ export function GeneralKnowledgeQuiz({ questions, onComplete, initialIndex = 0, 
 
   useEffect(() => {
     if (initialSelectedAnswers && initialSelectedAnswers.size > 0) {
-      console.log('[GeneralKnowledgeQuiz] Restaurando respuestas seleccionadas:', initialSelectedAnswers.size);
       setSelectedAnswers(new Map(initialSelectedAnswers));
     }
   }, [initialSelectedAnswers]);
@@ -163,9 +159,6 @@ export function GeneralKnowledgeQuiz({ questions, onComplete, initialIndex = 0, 
       })
       .filter((r): r is { question_id: number; selected: number } => r !== null);
     
-    console.log('[GeneralKnowledgeQuiz] handleComplete - Enviando respuestas:', results.length, 'de', questions.length);
-    console.log('[GeneralKnowledgeQuiz] handleComplete - selectedAnswers:', Array.from(selectedAnswers.entries()));
-    
     onComplete(results);
   };
 
@@ -209,10 +202,8 @@ export function GeneralKnowledgeQuiz({ questions, onComplete, initialIndex = 0, 
         });
         
         if (allResponsesPresent) {
-          console.log('[GeneralKnowledgeQuiz] Todas las respuestas están presentes, completando...');
           handleComplete();
         } else {
-          console.warn('[GeneralKnowledgeQuiz] Algunas respuestas faltan, esperando...');
           // Esperar un poco más si faltan respuestas
           setTimeout(() => {
             handleComplete();

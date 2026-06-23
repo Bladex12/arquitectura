@@ -74,7 +74,6 @@ const SECCIONES = [
 ];
 
 const FACULTADES = Object.keys(uddStructure);
-console.log('[CrearSala] Facultades disponibles:', FACULTADES);
 
 // ─── Custom Dropdown ───────────────────────────────────────────────────────────
 interface DropdownProps {
@@ -206,7 +205,6 @@ export function CrearSala() {
     setSelectedCarrera('');
     setSelectedCourse('');
     setCustomCourse('');
-    console.log('[CrearSala] Facultad:', val, '→ Carreras:', uddStructure[val]);
   };
 
   const handleCarreraChange = (val: string) => {

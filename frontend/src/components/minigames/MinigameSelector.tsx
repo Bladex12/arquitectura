@@ -357,7 +357,6 @@ export function parseMinigameConfig(
   // Sopa de letras - SOLO COMO FALLBACK DE EMERGENCIA
   // Normalmente esto debería venir del backend en word_search_data
   if (gameType === MinigameType.WORD_SEARCH) {
-    console.warn('⚠️ Generando sopa de letras en frontend (fallback). Esto no debería pasar normalmente.');
     let words: string[] = [];
     
     // COMPATIBILIDAD: Si las palabras vienen como array de strings (estructura antigua)
