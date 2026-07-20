@@ -6,7 +6,7 @@
 
 **Architecture:** A new `game_sessions/dynamodb/` package with one module per entity group (mirroring `docs/superpowers/specs/2026-07-19-dynamodb-single-table-design.md`'s entity table), each exposing plain functions that take/return plain `dict`s — no dataclasses or ORM-style wrapper classes, since boto3's `Table` resource already speaks dicts natively and there's no validation logic needed yet (that lands later when this layer gets wired into DRF serializers). Every module is unit-tested against `moto`'s mocked DynamoDB, with a shared test-table-creation helper mirroring the real `GameSessionTable` schema from `template.yaml`.
 
-**Tech Stack:** Python 3.11, boto3, moto (test-only), Django's `manage.py test` runner (matches existing `game_sessions/tests.py` convention — no pytest.ini exists in this repo despite pytest being a dependency, so tests use `django.test.TestCase`/`unittest.TestCase` run via `manage.py test`, not bare `pytest`).
+**Tech Stack:** Python 3.11 (worktree's committed `.venv`, which ships Python 3.12 and already has Django/mysqlclient/boto3/django-storages installed — run `pip install -r requirements.txt` once to pick up anything added since it was last synced), boto3, moto (test-only), Django's `manage.py test` runner (matches existing `game_sessions/tests.py` convention — no pytest.ini exists in this repo despite pytest being a dependency, so tests use `django.test.TestCase`/`unittest.TestCase` run via `manage.py test`, not bare `pytest`).
 
 ## Global Constraints
 
@@ -15,7 +15,7 @@
 - No wiring into views/serializers/URLs — that's a separate future task (the ORM cutover). This plan's deliverable is a fully tested, standalone repository layer.
 - Any attribute name that's a DynamoDB reserved word (`status`, `name`, `data`, etc. — see the full list in AWS's docs) needs an `ExpressionAttributeNames` placeholder when it appears in a hand-written `UpdateExpression` string, or the request fails at runtime with a syntax error. This doesn't apply to `FilterExpression`/`KeyConditionExpression`/`ConditionExpression` built via `boto3.dynamodb.conditions.Attr`/`Key` (e.g. `Attr('type').eq(...)`) — those builders alias reserved words automatically. Attribute names that aren't reserved (`updated_at`, `last_seen`, `tokens_total`, etc.) don't need manual aliasing either way — don't add placeholders reflexively, just where a real collision exists.
 - Test file naming: `game_sessions/test_dynamodb_<module>.py` (sibling files to the existing `game_sessions/tests.py`, not a `tests/` package — Python doesn't allow both `tests.py` and `tests/` in the same directory, and Django's default test discovery pattern `test*.py` picks up both naming styles fine).
-- Run tests via: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_<module>` (matches this repo's documented Docker-based dev workflow).
+- Run tests via: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_<module>` — run from the worktree root. `DATABASE_HOST` must be overridden because the project's root `.env` (auto-loaded into every shell in this repo) sets it to `host.docker.internal`, which only resolves from inside a Docker container, not from the host running `.venv`'s local Python. Every other `.env` default (`DATABASE_PORT`, `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_PASSWORD`) already matches this repo's local dev MySQL, so nothing else needs overriding. Do NOT use `docker exec mision_emprende_backend ...` — that execs into a container bind-mounting the *original* checkout's directory (`.:/app` in docker-compose.yml), not this worktree, so it would never see any file created here.
 
 ---
 
@@ -40,10 +40,10 @@ pytest==8.3.3  # Versión estable compatible con Python 3.11
 moto[dynamodb]==5.0.20  # Mocked AWS backend for DynamoDB repository tests
 ```
 
-- [ ] **Step 2: Install it**
+- [ ] **Step 2: Install it into the worktree's venv**
 
-Run: `docker exec mision_emprende_backend pip install moto[dynamodb]==5.0.20`
-Expected: `Successfully installed moto-5.0.20 ...`
+Run: `.venv/Scripts/python.exe -m pip install -q moto[dynamodb]==5.0.20`
+Expected: no output (quiet install) and exit code 0. Verify with: `.venv/Scripts/python.exe -c "import moto; print(moto.__version__)"` — expect `5.0.20`.
 
 - [ ] **Step 3: Create the package**
 
@@ -102,7 +102,7 @@ class BuildUpdateExpressionTest(TestCase):
 
 - [ ] **Step 5: Run tests to verify they fail**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_client -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_client -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.testing'` (and `client`)
 
 - [ ] **Step 6: Write `game_sessions/dynamodb/testing.py`**
@@ -194,7 +194,7 @@ def build_update_expression(fields):
 
 - [ ] **Step 8: Run tests to verify they pass**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_client -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_client -v 2`
 Expected: `OK` (3 tests)
 
 - [ ] **Step 9: Commit**
@@ -292,7 +292,7 @@ class KeysTest(TestCase):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_keys -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_keys -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.keys'`
 
 - [ ] **Step 3: Write `game_sessions/dynamodb/keys.py`**
@@ -384,7 +384,7 @@ def session_gsi1sk(status, created_at_iso):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_keys -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_keys -v 2`
 Expected: `OK` (16 tests)
 
 - [ ] **Step 5: Commit**
@@ -558,7 +558,7 @@ class GameSessionRepositoryTest(TestCase):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_game_session -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_game_session -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.game_session'`
 
 - [ ] **Step 3: Write `game_sessions/dynamodb/game_session.py`**
@@ -697,7 +697,7 @@ def get_room_items(room_code):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_game_session -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_game_session -v 2`
 Expected: `OK` (9 tests)
 
 - [ ] **Step 5: Commit**
@@ -839,7 +839,7 @@ class TeamRepositoryTest(TestCase):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_team -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_team -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.team'`
 
 - [ ] **Step 3: Write `game_sessions/dynamodb/team.py`**
@@ -960,7 +960,7 @@ def update_tokens(room_code, team_id, delta):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_team -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_team -v 2`
 Expected: `OK` (9 tests)
 
 - [ ] **Step 5: Commit**
@@ -1077,7 +1077,7 @@ class StageProgressRepositoryTest(TestCase):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_stage_progress -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_stage_progress -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.stage_progress'`
 
 - [ ] **Step 3: Write `game_sessions/dynamodb/stage_progress.py`**
@@ -1190,7 +1190,7 @@ def get_progress(room_code, team_id, activity_id):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_stage_progress -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_stage_progress -v 2`
 Expected: `OK` (7 tests)
 
 - [ ] **Step 5: Commit**
@@ -1295,7 +1295,7 @@ class BubbleRouletteRepositoryTest(TestCase):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_bubble_roulette -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_bubble_roulette -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.bubble_roulette'`
 
 - [ ] **Step 3: Write `game_sessions/dynamodb/bubble_roulette.py`**
@@ -1395,7 +1395,7 @@ def update_roulette_assignment(room_code, team_id, stage_id, **fields):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_bubble_roulette -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_bubble_roulette -v 2`
 Expected: `OK` (6 tests)
 
 - [ ] **Step 5: Commit**
@@ -1506,7 +1506,7 @@ class TabletConnectionRepositoryTest(TestCase):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_tablet_connection -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_tablet_connection -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.tablet_connection'`
 
 - [ ] **Step 3: Write `game_sessions/dynamodb/tablet_connection.py`**
@@ -1604,7 +1604,7 @@ def list_connections(room_code):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_tablet_connection -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_tablet_connection -v 2`
 Expected: `OK` (6 tests)
 
 - [ ] **Step 5: Commit**
@@ -1694,7 +1694,7 @@ class TokenTransactionRepositoryTest(TestCase):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_token_transaction -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_token_transaction -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.token_transaction'`
 
 - [ ] **Step 3: Write `game_sessions/dynamodb/token_transaction.py`**
@@ -1766,7 +1766,7 @@ def list_transactions(room_code):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_token_transaction -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_token_transaction -v 2`
 Expected: `OK` (4 tests)
 
 - [ ] **Step 5: Commit**
@@ -1863,7 +1863,7 @@ class EvaluationsRepositoryTest(TestCase):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_evaluations -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_evaluations -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.evaluations'`
 
 - [ ] **Step 3: Write `game_sessions/dynamodb/evaluations.py`**
@@ -1948,7 +1948,7 @@ def create_reflection(room_code, student_name, student_email, value_areas=None, 
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_evaluations -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_evaluations -v 2`
 Expected: `OK` (5 tests)
 
 - [ ] **Step 5: Commit**
@@ -2052,7 +2052,7 @@ class CatalogRepositoryTest(TestCase):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_catalog -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_catalog -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.catalog'`
 
 - [ ] **Step 3: Write `game_sessions/dynamodb/catalog.py`**
@@ -2166,7 +2166,7 @@ def deactivate_tablet(tablet_code):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_catalog -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_catalog -v 2`
 Expected: `OK` (6 tests)
 
 - [ ] **Step 5: Commit**
@@ -2189,12 +2189,12 @@ git commit -m "feat: add SessionGroup and Tablet DynamoDB repository"
 
 - [ ] **Step 1: Run the entire DynamoDB test suite together**
 
-Run: `docker exec mision_emprende_backend python manage.py test game_sessions.test_dynamodb_client game_sessions.test_dynamodb_keys game_sessions.test_dynamodb_game_session game_sessions.test_dynamodb_team game_sessions.test_dynamodb_stage_progress game_sessions.test_dynamodb_bubble_roulette game_sessions.test_dynamodb_tablet_connection game_sessions.test_dynamodb_token_transaction game_sessions.test_dynamodb_evaluations game_sessions.test_dynamodb_catalog -v 2`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_client game_sessions.test_dynamodb_keys game_sessions.test_dynamodb_game_session game_sessions.test_dynamodb_team game_sessions.test_dynamodb_stage_progress game_sessions.test_dynamodb_bubble_roulette game_sessions.test_dynamodb_tablet_connection game_sessions.test_dynamodb_token_transaction game_sessions.test_dynamodb_evaluations game_sessions.test_dynamodb_catalog -v 2`
 Expected: `OK` (61 tests total)
 
 - [ ] **Step 2: Run the full existing test suite to confirm no regressions**
 
-Run: `docker exec mision_emprende_backend python manage.py test`
+Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test`
 Expected: `OK` — the new `game_sessions/dynamodb/` package and its tests are additive and don't touch any existing model/view/URL, so every pre-existing test should be unaffected.
 
 - [ ] **Step 3: Commit the plan's checked-off state**
