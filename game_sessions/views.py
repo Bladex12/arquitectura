@@ -45,8 +45,13 @@ from game_sessions.dynamodb.game_session import (
     create_session, get_session, update_session, update_session_status,
     delete_session, list_sessions_for_professor, scan_all_sessions,
 )
-from game_sessions.dynamodb.team import create_team, set_roster, list_teams
+from game_sessions.dynamodb.team import create_team, set_roster, list_teams, get_team, delete_team
 from game_sessions.dynamodb.catalog import create_session_group
+from game_sessions.dynamodb.stage_progress import (
+    create_session_stage, get_session_stage, update_session_stage, upsert_progress, get_progress,
+)
+from game_sessions.dynamodb.tablet_connection import list_connections
+from game_sessions.dynamodb.client import now_iso
 
 
 class GameSessionViewSet(viewsets.ViewSet):
@@ -61,24 +66,27 @@ class GameSessionViewSet(viewsets.ViewSet):
     list/retrieve/create/update/partial_update/destroy are hand-implemented
     below.
 
-    IMPORTANT scope note: only this class's CRUD methods and the
-    process_excel/create_with_excel actions (plus their private helpers)
-    were ported in Task 10 -- per the task brief, views.py:44-592. Every
-    other @action on this same class below `start` (start, sync_teams,
-    next_activity, start_stage_1, set_video_institucional_activity,
-    set_instructivo_activity, complete_stage, activity_timer,
-    stage_results, next_stage, show_results, end, active_session,
-    start_reflection, reflection_qr, teams, lobby, etapa, ...) still calls
-    self.get_serializer()/self.get_object()/self.get_queryset(), which
-    viewsets.ModelViewSet used to provide via GenericViewSet and a plain
-    viewsets.ViewSet does not. Those actions are explicitly out of scope
-    here (ported incrementally in later tasks) and will raise
-    AttributeError until then -- this is expected, not something this task
-    fixes or regresses in spirit (Task 9 already left the whole class
-    non-functional; this task narrows that to "still broken, different
-    exception" for the not-yet-ported actions while making list/retrieve/
-    create/update/partial_update/destroy/process_excel/create_with_excel
-    actually work again).
+    DynamoDB cutover (Task 11): start, sync_teams, next_activity,
+    set_video_institucional_activity, set_instructivo_activity and
+    complete_stage are also now ported -- they read/write
+    game_sessions.dynamodb.stage_progress (SessionStage/TeamActivityProgress)
+    and game_sessions.dynamodb.tablet_connection in addition to the
+    game_session/team modules Task 10 already wired up. None of these six
+    actions call self.get_object() anymore.
+
+    IMPORTANT scope note: only this class's CRUD methods, process_excel/
+    create_with_excel (Task 10), and start/sync_teams/next_activity/
+    set_video_institucional_activity/set_instructivo_activity/complete_stage
+    (Task 11) -- plus their private helpers -- have been ported so far.
+    Every other @action on this class below `complete_stage`
+    (start_stage_1, activity_timer, stage_results, next_stage, show_results,
+    end, active_session, start_reflection, reflection_qr, teams, lobby,
+    etapa, ...) still calls self.get_serializer()/self.get_object()/
+    self.get_queryset(), which viewsets.ModelViewSet used to provide via
+    GenericViewSet and a plain viewsets.ViewSet does not. Those actions are
+    explicitly out of scope here (ported incrementally in later tasks) and
+    will raise AttributeError until then -- this is expected, not something
+    this task fixes or regresses in spirit.
     """
     permission_classes = [IsAuthenticated]
 
@@ -105,10 +113,12 @@ class GameSessionViewSet(viewsets.ViewSet):
         the viewset was changed from ModelViewSet to ViewSet (Task 10),
         which removed generic mixins that provided get_object().
 
-        This shim is used by actions like show_results, end, and others
-        that still run pure ORM code (lines ~2238-3593 in this file).
-        It will be removed once those actions are ported to DynamoDB
-        (Tasks 11/12 of the cutover plan).
+        This shim is used by actions like start_stage_1, show_results, end,
+        and others that still run pure ORM code. It will be removed once
+        those actions are ported to DynamoDB (Task 12+ of the cutover
+        plan) -- start/sync_teams/next_activity/
+        set_video_institucional_activity/set_instructivo_activity/
+        complete_stage no longer use it as of Task 11.
 
         Do not extend this method or build architecture on it — it is
         meant to be a temporary bridge, not a permanent part of the design.
@@ -782,174 +792,147 @@ class GameSessionViewSet(viewsets.ViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    # ------------------------------------------------------------------
+    # Helpers for game-flow actions (Task 11): start / sync_teams /
+    # next_activity / set_video_institucional_activity /
+    # set_instructivo_activity / complete_stage.
+    # ------------------------------------------------------------------
+
+    # TeamActivityProgress fields upsert_progress() writes as a full
+    # overwrite -- _upsert_progress_preserving() below reads these forward
+    # from any existing item so a status/started_at-only change (this
+    # task's concern) never silently discards previously saved
+    # response_data/pitch/topic fields (a later stage's concern).
+    _PROGRESS_FIELD_NAMES = (
+        'status', 'started_at', 'completed_at', 'progress_percentage', 'response_data',
+        'selected_topic_id', 'selected_challenge_id', 'prototype_image_url',
+        'pitch_intro_problem', 'pitch_solution', 'pitch_value', 'pitch_impact', 'pitch_closing',
+    )
+
+    def _upsert_progress_preserving(self, room_code, team_id, activity_id, **overrides):
+        """upsert_progress() always overwrites the whole TeamActivityProgress
+        item (see its docstring), unlike the ORM's get_or_create() + selective
+        .save(update_fields=[...]). To change just e.g. status/started_at
+        without discarding whatever else was already saved on the row, read
+        the existing item first and carry its other fields forward -- only
+        `overrides` actually changes. Mirrors the ORM code's
+        get_or_create()-then-conditionally-touch-a-few-fields pattern used
+        throughout start/next_activity/set_video_institucional_activity/
+        complete_stage. When there's no existing item, defaults to
+        status='pending', progress_percentage=0 -- the same defaults
+        get_or_create()'s `defaults=` used to supply for a brand new row."""
+        existing = get_progress(room_code, team_id, activity_id)
+        if existing:
+            fields = {name: existing.get(name) for name in self._PROGRESS_FIELD_NAMES}
+            if fields.get('progress_percentage') is None:
+                fields['progress_percentage'] = 0
+        else:
+            fields = {'status': 'pending', 'progress_percentage': 0}
+        fields.update(overrides)
+        return upsert_progress(room_code, team_id, activity_id, **fields)
+
+    def _complete_activity_progress_for_all_teams(self, room_code, activity_id):
+        """Marks every team's TeamActivityProgress row for `activity_id` as
+        completed (progress_percentage=100), leaving completed_at untouched
+        if it was already set (only defaults it to now when previously
+        unset -- matches the ORM's `if not progress.completed_at:` guard)
+        and preserving every other already-saved field via
+        _upsert_progress_preserving. Called from next_activity (both when
+        the stage has no more activities and when advancing to the next
+        one, always for the *outgoing* activity) and from complete_stage.
+
+        STATUS='COMPLETED' CALL SITE for Task 22's future admin_dashboard
+        metric hook (TeamActivityProgress side) -- see _upsert_progress_preserving's
+        `upsert_progress(...)` call below.
+        """
+        now = now_iso()
+        for team in list_teams(room_code):
+            existing = get_progress(room_code, team['team_id'], activity_id)
+            completed_at = (existing.get('completed_at') if existing else None) or now
+            self._upsert_progress_preserving(
+                room_code, team['team_id'], activity_id,
+                status='completed', progress_percentage=100, completed_at=completed_at,
+            )
+
     @action(detail=True, methods=['post'])
     def start(self, request, pk=None):
         """Iniciar una sesión de juego"""
-        try:
-            # Obtener sesión directamente sin usar get_object() para evitar verificación de permisos
-            try:
-                game_session = GameSession.objects.get(id=pk)
-            except GameSession.DoesNotExist:
-                return Response(
-                    {'error': 'Sesión no encontrada'},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-        except Exception as e:
-            import traceback
-            print(f"Error en start al obtener objeto: {e}")
-            print(traceback.format_exc())
-            return Response(
-                {'error': f'Error al obtener sesión: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-        if game_session.status != 'lobby':
+        room_code = pk
+        session = get_session(room_code)
+        if session is None:
+            return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        if session['status'] != 'lobby':
             return Response(
                 {'error': 'La sesión no está en estado lobby'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Verificar que todas las tablets estén conectadas
-        teams = game_session.teams.all()
-        all_teams_connected = all(
-            team.tablet_connections.filter(disconnected_at__isnull=True).exists()
-            for team in teams
-        )
-        
-        if not all_teams_connected:
-            connected_teams = sum(1 for team in teams if team.tablet_connections.filter(disconnected_at__isnull=True).exists())
+        teams = list_teams(room_code)
+        connections = list_connections(room_code)
+
+        def _team_is_connected(team_id):
+            return any(
+                c['team_id'] == team_id and c.get('disconnected_at') is None
+                for c in connections
+            )
+
+        connected_count = sum(1 for team in teams if _team_is_connected(team['team_id']))
+        if connected_count != len(teams):
             return Response(
                 {
                     'error': 'No se puede iniciar el juego. Todas las tablets deben estar conectadas.',
-                    'teams_connected': connected_teams,
-                    'total_teams': teams.count()
+                    'teams_connected': connected_count,
+                    'total_teams': len(teams)
                 },
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # NO establecer etapa ni actividad al iniciar - el video institucional es previo a las etapas
         # La etapa 1 se establecerá cuando se complete el video institucional
-        
-        game_session.status = 'running'
-        game_session.started_at = timezone.now()
-        
-        # Guardar cambios (incluyendo current_stage y current_activity si se establecieron)
-        game_session.save()
-        
+        transitioned = update_session_status(room_code, expected_status='lobby', new_status='running')
+        if not transitioned:
+            return Response(
+                {'error': 'No se pudo iniciar la sesión (conflicto de concurrencia)'},
+                status=status.HTTP_409_CONFLICT
+            )
+        session = update_session(room_code, started_at=now_iso()) or get_session(room_code)
+
         # Inicializar started_at para todos los equipos en la primera actividad
-        if game_session.current_activity:
-            # Verificar que current_stage no sea None
-            if not game_session.current_stage:
+        # (solo aplica si current_activity ya estaba establecido de antemano --
+        # no ocurre en el flujo normal, pero se preserva por fidelidad con el
+        # comportamiento original)
+        current_activity_id = session.get('current_activity_id')
+        if current_activity_id:
+            current_stage_id = session.get('current_stage_id')
+            if not current_stage_id:
                 return Response(
                     {'error': 'No se puede iniciar el juego. La etapa no está establecida.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
-            activity_start_time = timezone.now()
-            from .models import Team, TeamActivityProgress, SessionStage
-            teams = Team.objects.filter(game_session=game_session)
-            
+
+            activity_start_time = now_iso()
+
             # Crear SessionStage para esta etapa si no existe
-            # Usar get_or_create que maneja automáticamente los casos de existencia
-            try:
-                session_stage, created = SessionStage.objects.get_or_create(
-                    game_session=game_session,
-                    stage=game_session.current_stage,
-                    defaults={
-                        'status': 'in_progress',
-                        'started_at': activity_start_time
-                    }
-                )
-            except Exception as e:
-                # Si get_or_create falla, intentar obtener el objeto existente
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f'Error en get_or_create: {e}. Intentando obtener objeto existente.')
-                try:
-                    session_stage = SessionStage.objects.get(
-                        game_session=game_session,
-                        stage=game_session.current_stage
-                    )
-                    created = False
-                except SessionStage.DoesNotExist:
-                    # Si no existe, devolver error
-                    return Response(
-                        {'error': f'No se pudo crear SessionStage: {str(e)}'},
-                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                    )
-            
-            # Si no se creó nuevo, actualizar el status y started_at si es necesario
-            if not created:
-                session_stage.status = 'in_progress'
-                if not session_stage.started_at:
-                    session_stage.started_at = activity_start_time
-                session_stage.save(update_fields=['status', 'started_at'])
-            
-            # Intentar establecer presentation_state si existe (después de guardar)
-            try:
-                if hasattr(session_stage, 'presentation_state') and not session_stage.presentation_state:
-                    # Solo establecer si no tiene valor
-                    SessionStage.objects.filter(id=session_stage.id).update(presentation_state='not_started')
-                    session_stage.refresh_from_db()
-            except Exception:
-                # Si falla, no importa, el objeto ya está guardado
-                pass
-            
+            session_stage = get_session_stage(room_code, current_stage_id)
+            if session_stage is None:
+                create_session_stage(room_code, current_stage_id)
+                update_session_stage(room_code, current_stage_id, status='in_progress', started_at=activity_start_time)
+            else:
+                started_at = session_stage.get('started_at') or activity_start_time
+                update_session_stage(room_code, current_stage_id, status='in_progress', started_at=started_at)
+
             # Inicializar started_at para todos los equipos en la primera actividad
             for team in teams:
-                progress, created = TeamActivityProgress.objects.get_or_create(
-                    team=team,
-                    activity=game_session.current_activity,
-                    session_stage=session_stage,
-                    defaults={
-                        'status': 'pending',
-                        'started_at': activity_start_time
-                    }
+                self._upsert_progress_preserving(
+                    room_code, team['team_id'], current_activity_id,
+                    started_at=activity_start_time,
                 )
-                # SIEMPRE actualizar el started_at para sincronizar
-                if not created:
-                    progress.started_at = activity_start_time
-                    progress.save()
-        
-        # Recargar desde la BD para asegurar que los campos relacionados estén disponibles
-        game_session.refresh_from_db()
-        
-        # Seleccionar campos relacionados explícitamente
-        try:
-            # Refrescar la sesión para asegurar que todos los campos estén actualizados
-            game_session.refresh_from_db()
-            
-            # Intentar obtener con select_related, pero si falla, usar el objeto que ya tenemos
-            try:
-                game_session = GameSession.objects.select_related(
-                    'current_stage', 'current_activity'
-                ).get(id=game_session.id)
-            except GameSession.DoesNotExist:
-                # Si no existe, usar el objeto que ya tenemos
-                pass
-            
-            serializer = self.get_serializer(game_session)
-            return Response(serializer.data)
-        except Exception as e:
-            import traceback
-            error_trace = traceback.format_exc()
-            print(f"Error en start al serializar: {e}")
-            print(error_trace)
-            
-            # Intentar devolver al menos información básica de la sesión
-            try:
-                game_session.refresh_from_db()
-                return Response({
-                    'id': game_session.id,
-                    'status': game_session.status,
-                    'room_code': game_session.room_code,
-                    'error': f'Error al serializar respuesta completa: {str(e)}',
-                    'trace': error_trace
-                })
-            except Exception:
-                return Response(
-                    {'error': f'Error al serializar respuesta: {str(e)}'},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
+
+        annotate_game_session_display_fields(session, teams=list_teams(room_code))
+        serializer = GameSessionSerializer(session)
+        return Response(serializer.data)
 
     @action(detail=True, methods=['post'], parser_classes=[JSONParser])
     def sync_teams(self, request, pk=None):
@@ -958,20 +941,21 @@ class GameSessionViewSet(viewsets.ViewSet):
         Llamado tanto por el botón "Guardar Configuración" como antes de "Lanzar Misión".
 
         Payload esperado:
-          { "teams": [ { "id"?: int, "name": str, "color": str, "student_ids": [int] } ] }
+          { "teams": [ { "id"?: str, "name": str, "color": str, "student_ids": [int] } ] }
 
         Lógica:
         - Equipos con 'id':  se actualizan sus estudiantes.
         - Equipos sin 'id':  se crean nuevos.
         - Equipos del backend no presentes en el payload: se eliminan
-          y sus TabletConnections activas se marcan como desconectadas.
+          (delete_team ya se encarga de limpiar sus TabletConnections y
+          demás items asociados -- ver game_sessions/dynamodb/team.py).
         """
-        try:
-            game_session = GameSession.objects.get(id=pk)
-        except GameSession.DoesNotExist:
+        room_code = pk
+        session = get_session(room_code)
+        if session is None:
             return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
-        if game_session.status != 'lobby':
+        if session['status'] != 'lobby':
             return Response(
                 {'error': 'Solo se puede sincronizar equipos cuando la sesión está en estado lobby'},
                 status=status.HTTP_400_BAD_REQUEST
@@ -985,12 +969,14 @@ class GameSessionViewSet(viewsets.ViewSet):
         frontend_team_ids = {t['id'] for t in teams_data if t.get('id')}
 
         # Eliminar equipos del backend que ya no están en el payload
-        teams_to_delete = game_session.teams.exclude(id__in=frontend_team_ids)
-        for team in teams_to_delete:
-            team.tablet_connections.filter(disconnected_at__isnull=True).update(
-                disconnected_at=timezone.now()
-            )
-        teams_to_delete.delete()
+        current_teams = list_teams(room_code)
+        for team in current_teams:
+            if team['team_id'] not in frontend_team_ids:
+                delete_team(room_code, team['team_id'])
+
+        # Nombres de los equipos que sobreviven (para la comprobación de
+        # duplicados al crear equipos nuevos más abajo)
+        kept_names = {t['name'] for t in current_teams if t['team_id'] in frontend_team_ids}
 
         color_choices = ['Verde', 'Azul', 'Rojo', 'Amarillo', 'Naranja', 'Morado', 'Rosa', 'Cian', 'Gris', 'Marrón']
         updated_team_ids = []
@@ -1000,28 +986,29 @@ class GameSessionViewSet(viewsets.ViewSet):
             student_ids = team_data.get('student_ids', [])
 
             if team_id:
-                try:
-                    team = Team.objects.get(id=team_id, game_session=game_session)
-                except Team.DoesNotExist:
+                team = get_team(room_code, team_id)
+                if team is None:
                     continue
-                TeamStudent.objects.filter(team=team).delete()
             else:
                 color = team_data.get('color') or color_choices[idx % len(color_choices)]
                 name = team_data.get('name') or f'Equipo {idx + 1}'
-                if Team.objects.filter(game_session=game_session, name=name).exists():
+                if name in kept_names:
                     name = f'{name} ({idx + 1})'
-                team = Team.objects.create(game_session=game_session, name=name, color=color)
+                team = create_team(room_code, name=name, color=color)
+                kept_names.add(team['name'])
+                team_id = team['team_id']
 
+            valid_student_ids = []
             for student_id in student_ids:
-                try:
-                    student = Student.objects.get(id=student_id)
-                    TeamStudent.objects.get_or_create(team=team, student=student)
-                except Student.DoesNotExist:
+                if Student.objects.filter(id=student_id).exists():
+                    valid_student_ids.append(student_id)
+                else:
                     logger.warning(f'sync_teams: estudiante {student_id} no encontrado, ignorando')
+            set_roster(room_code, team_id, valid_student_ids)
 
-            updated_team_ids.append(team.id)
+            updated_team_ids.append(team_id)
 
-        final_teams = game_session.teams.prefetch_related('students').filter(id__in=updated_team_ids)
+        final_teams = [t for t in (get_team(room_code, tid) for tid in updated_team_ids) if t is not None]
         serializer = TeamSerializer(final_teams, many=True)
         return Response({
             'message': 'Configuración de equipos guardada',
@@ -1033,204 +1020,138 @@ class GameSessionViewSet(viewsets.ViewSet):
         """
         Avanzar a la siguiente actividad de la etapa actual
         """
-        game_session = self.get_object()
-        
-        if game_session.status != 'running':
+        room_code = pk
+        session = get_session(room_code)
+        if session is None:
+            return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        if session['status'] != 'running':
             return Response(
                 {'error': 'La sesión debe estar en estado running'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        if not game_session.current_stage:
+
+        current_stage_id = session.get('current_stage_id')
+        if not current_stage_id:
             return Response(
                 {'error': 'No hay etapa actual establecida'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        if not game_session.current_activity:
+
+        current_activity_id = session.get('current_activity_id')
+        if not current_activity_id:
             return Response(
                 {'error': 'No hay actividad actual establecida'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        from challenges.models import Activity
-        
+
+        from challenges.models import Stage, Activity
+        from django.db.models import Q
+
+        current_stage = Stage.objects.get(id=current_stage_id)
+        current_activity = Activity.objects.get(id=current_activity_id)
+
         # Buscar la siguiente actividad en la misma etapa
-        current_order = game_session.current_activity.order_number
-        
-        # En Etapa 2: Si estamos en "Seleccionar Tema" (orden 1), saltar "Ver Desafío" (orden 2) 
+        current_order = current_activity.order_number
+
+        # En Etapa 2: Si estamos en "Seleccionar Tema" (orden 1), saltar "Ver Desafío" (orden 2)
         # y ir directo a "Bubble Map"
-        if game_session.current_stage.number == 2 and current_order == 1:
+        if current_stage.number == 2 and current_order == 1:
             # Buscar Bubble Map por nombre (más robusto que asumir orden 3)
-            from django.db.models import Q
             bubble_map_activity = Activity.objects.filter(
-                stage=game_session.current_stage,
+                stage=current_stage,
                 is_active=True
             ).filter(
-                Q(name__icontains='bubble') | 
-                Q(name__icontains='mapa') | 
+                Q(name__icontains='bubble') |
+                Q(name__icontains='mapa') |
                 Q(name__icontains='mapa mental') |
                 Q(name__icontains='bubblemap')
             ).filter(
                 order_number__gt=current_order
             ).order_by('order_number').first()
-            
+
             if bubble_map_activity:
                 next_activity = bubble_map_activity
             else:
                 # Si no se encuentra por nombre, intentar orden 3
                 next_activity = Activity.objects.filter(
-                    stage=game_session.current_stage,
+                    stage=current_stage,
                     order_number=3,
                     is_active=True
                 ).first()
-                
+
                 # Si tampoco existe orden 3, buscar la siguiente actividad normalmente
                 if not next_activity:
                     next_activity = Activity.objects.filter(
-                        stage=game_session.current_stage,
+                        stage=current_stage,
                         order_number__gt=current_order,
                         is_active=True
                     ).order_by('order_number').first()
         else:
             # Para otras etapas o situaciones, buscar la siguiente actividad normalmente
             next_activity = Activity.objects.filter(
-                stage=game_session.current_stage,
+                stage=current_stage,
                 order_number__gt=current_order,
                 is_active=True
             ).order_by('order_number').first()
-        
+
         # Si no hay más actividades en esta etapa, marcar etapa como completada y retornar resultados
         if not next_activity:
             # Marcar la actividad actual como completada para todos los equipos antes de completar la etapa
-            from .models import SessionStage, Team, TeamActivityProgress
-            session_stage = SessionStage.objects.filter(
-                game_session=game_session,
-                stage=game_session.current_stage
-            ).first()
-            
+            session_stage = get_session_stage(room_code, current_stage_id)
             if session_stage:
-                # Marcar la actividad actual como completada para todos los equipos
-                current_activity = game_session.current_activity
-                if current_activity:
-                    teams = Team.objects.filter(game_session=game_session)
-                    for team in teams:
-                        progress, created = TeamActivityProgress.objects.get_or_create(
-                            team=team,
-                            activity=current_activity,
-                            session_stage=session_stage,
-                            defaults={
-                                'status': 'completed',
-                                'progress_percentage': 100,
-                                'completed_at': timezone.now()
-                            }
-                        )
-                        if not created:
-                            # Si ya existía, actualizar a completado
-                            progress.status = 'completed'
-                            progress.progress_percentage = 100
-                            if not progress.completed_at:
-                                progress.completed_at = timezone.now()
-                            progress.save()
-                
-                # Marcar la etapa como completada
-                session_stage.status = 'completed'
-                session_stage.completed_at = timezone.now()
-                session_stage.save()
-            
+                self._complete_activity_progress_for_all_teams(room_code, current_activity_id)
+
+                # Marcar la etapa como completada.
+                # STATUS='COMPLETED' CALL SITE for Task 22's future
+                # admin_dashboard metric hook (SessionStage side).
+                completed_at = session_stage.get('completed_at') or now_iso()
+                update_session_stage(room_code, current_stage_id, status='completed', completed_at=completed_at)
+
             # Limpiar current_activity para indicar que estamos en resultados
-            game_session.current_activity = None
-            game_session.save()
-            
+            update_session(room_code, current_activity_id=None)
+
             # Retornar información de que se completó la etapa
             return Response({
                 'stage_completed': True,
-                'stage_id': game_session.current_stage.id,
-                'stage_name': game_session.current_stage.name,
-                'stage_number': game_session.current_stage.number,
-                'message': f'Etapa {game_session.current_stage.number} completada. Mostrando resultados...'
+                'stage_id': current_stage_id,
+                'stage_name': current_stage.name,
+                'stage_number': current_stage.number,
+                'message': f'Etapa {current_stage.number} completada. Mostrando resultados...'
             })
-        
+
         # Marcar la actividad actual como completada antes de avanzar a la siguiente
-        from .models import SessionStage, Team, TeamActivityProgress
-        session_stage = SessionStage.objects.filter(
-            game_session=game_session,
-            stage=game_session.current_stage
-        ).first()
-        
+        session_stage = get_session_stage(room_code, current_stage_id)
         if session_stage:
-            current_activity = game_session.current_activity
-            if current_activity:
-                teams = Team.objects.filter(game_session=game_session)
-                for team in teams:
-                    progress, created = TeamActivityProgress.objects.get_or_create(
-                        team=team,
-                        activity=current_activity,
-                        session_stage=session_stage,
-                        defaults={
-                            'status': 'completed',
-                            'progress_percentage': 100,
-                            'completed_at': timezone.now()
-                        }
-                    )
-                    if not created:
-                        # Si ya existía, actualizar a completado
-                        progress.status = 'completed'
-                        progress.progress_percentage = 100
-                        if not progress.completed_at:
-                            progress.completed_at = timezone.now()
-                        progress.save()
-        
+            self._complete_activity_progress_for_all_teams(room_code, current_activity_id)
+
         # Actualizar actividad actual
-        game_session.current_activity = next_activity
-        game_session.save()
-        
-        # Crear o actualizar SessionStage si no existe
-        from .models import SessionStage
-        session_stage, created = SessionStage.objects.get_or_create(
-            game_session=game_session,
-            stage=game_session.current_stage,
-            defaults={
-                'status': 'in_progress',
-                'started_at': timezone.now()
-            }
-        )
-        
+        session = update_session(room_code, current_activity_id=next_activity.id) or session
+
+        # Crear SessionStage si no existe
+        activity_start_time = now_iso()
+        session_stage = get_session_stage(room_code, current_stage_id)
+        if session_stage is None:
+            create_session_stage(room_code, current_stage_id)
+            update_session_stage(room_code, current_stage_id, status='in_progress', started_at=activity_start_time)
+
         # Inicializar started_at para todos los equipos cuando cambia la actividad
         # Esto asegura que todos los temporizadores estén sincronizados
-        activity_start_time = timezone.now()
-        from .models import Team, TeamActivityProgress
-        teams = Team.objects.filter(game_session=game_session)
-        for team in teams:
-            progress, created = TeamActivityProgress.objects.get_or_create(
-                team=team,
-                activity=next_activity,
-                session_stage=session_stage,
-                defaults={
-                    'status': 'pending',
-                    'started_at': activity_start_time  # Mismo tiempo para todos
-                }
+        for team in list_teams(room_code):
+            existing = get_progress(room_code, team['team_id'], next_activity.id)
+            # Si ya estaba completado, mantener el estado pero actualizar started_at
+            new_status = 'completed' if (existing and existing.get('status') == 'completed') else 'pending'
+            self._upsert_progress_preserving(
+                room_code, team['team_id'], next_activity.id,
+                status=new_status, started_at=activity_start_time,
             )
-            # SIEMPRE actualizar el started_at para sincronizar (incluso si ya existía)
-            if not created:
-                progress.started_at = activity_start_time
-                if progress.status == 'completed':
-                    # Si ya estaba completado, mantener el estado pero actualizar started_at
-                    pass
-                else:
-                    progress.status = 'pending'
-                progress.save()
-        
-        game_session.refresh_from_db()
-        game_session = GameSession.objects.select_related(
-            'current_stage', 'current_activity'
-        ).get(id=game_session.id)
-        
-        serializer = self.get_serializer(game_session)
+
+        annotate_game_session_display_fields(session, teams=list_teams(room_code))
+        serializer = GameSessionSerializer(session)
         return Response({
             **serializer.data,
             'message': f'Actividad actualizada a: {next_activity.name}',
-            'activity_started_at': activity_start_time.isoformat() if activity_start_time else None,
+            'activity_started_at': activity_start_time,
             'current_activity_id': next_activity.id,
             'current_activity_name': next_activity.name,
             'current_activity_order_number': next_activity.order_number
@@ -1427,17 +1348,18 @@ class GameSessionViewSet(viewsets.ViewSet):
         Esto se usa cuando el profesor está en VideoInstitucional y necesita establecerla como current_activity
         antes de avanzar a Instructivo
         """
-        game_session = self.get_object()
-        
-        if game_session.status != 'running':
+        room_code = pk
+        session = get_session(room_code)
+        if session is None:
+            return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        if session['status'] != 'running':
             return Response(
                 {'error': 'El juego no está en ejecución'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        from challenges.models import Stage, Activity
-        from .models import SessionStage, Team, TeamActivityProgress
-        from django.utils import timezone
+
+        from challenges.models import Stage, Activity, ActivityType
 
         # Obtener o crear Stage 1 (resiliencia ante seeders no ejecutados)
         stage_1, _ = Stage.objects.get_or_create(
@@ -1460,16 +1382,15 @@ class GameSessionViewSet(viewsets.ViewSet):
             name__icontains='Video Institucional',
             is_active=True
         ).first()
-        
+
         if not video_activity:
             return Response(
                 {'error': 'La actividad Video Institucional no existe'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
+
         # Asegurar que la actividad "Instructivo" existe con el order_number correcto
         # Video Institucional = 1, Instructivo = 2, Personalización = 3, Presentación = 4
-        from challenges.models import ActivityType
         instructivo_type, _ = ActivityType.objects.get_or_create(
             code='instructivo',
             defaults={
@@ -1478,13 +1399,13 @@ class GameSessionViewSet(viewsets.ViewSet):
                 'is_active': True
             }
         )
-        
+
         instructivo_activity = Activity.objects.filter(
             stage=stage_1,
             name__icontains='Instructivo',
             is_active=True
         ).first()
-        
+
         if not instructivo_activity:
             # Crear Instructivo con order_number 2
             instructivo_activity = Activity.objects.create(
@@ -1495,69 +1416,52 @@ class GameSessionViewSet(viewsets.ViewSet):
                 order_number=2,
                 is_active=True
             )
-            
+
             # Reorganizar: Personalización -> 3, Presentación -> 4
             personalizacion = Activity.objects.filter(
                 stage=stage_1,
                 name__icontains='Personalización',
                 is_active=True
             ).exclude(id=instructivo_activity.id).first()
-            
+
             if personalizacion and personalizacion.order_number != 3:
                 personalizacion.order_number = 3
                 personalizacion.save()
-            
+
             presentacion = Activity.objects.filter(
                 stage=stage_1,
                 name__icontains='Presentación',
                 is_active=True
             ).exclude(id=instructivo_activity.id).first()
-            
+
             if presentacion and presentacion.order_number != 4:
                 presentacion.order_number = 4
                 presentacion.save()
-        
+
         # Establecer etapa y actividad
-        game_session.current_stage = stage_1
-        game_session.current_activity = video_activity
-        game_session.save()
-        
+        session = update_session(
+            room_code, current_stage_id=stage_1.id, current_activity_id=video_activity.id
+        ) or session
+
         # Crear SessionStage si no existe
-        activity_start_time = timezone.now()
-        session_stage, created = SessionStage.objects.get_or_create(
-            game_session=game_session,
-            stage=stage_1,
-            defaults={
-                'status': 'in_progress',
-                'started_at': activity_start_time
-            }
-        )
-        
-        if not created:
-            session_stage.status = 'in_progress'
-            if not session_stage.started_at:
-                session_stage.started_at = activity_start_time
-            session_stage.save()
-        
+        activity_start_time = now_iso()
+        session_stage = get_session_stage(room_code, stage_1.id)
+        if session_stage is None:
+            create_session_stage(room_code, stage_1.id)
+            update_session_stage(room_code, stage_1.id, status='in_progress', started_at=activity_start_time)
+        else:
+            started_at = session_stage.get('started_at') or activity_start_time
+            update_session_stage(room_code, stage_1.id, status='in_progress', started_at=started_at)
+
         # Inicializar progreso para todos los equipos en Video Institucional
-        teams = Team.objects.filter(game_session=game_session)
-        for team in teams:
-            progress, created = TeamActivityProgress.objects.get_or_create(
-                team=team,
-                activity=video_activity,
-                session_stage=session_stage,
-                defaults={
-                    'status': 'in_progress',
-                    'started_at': activity_start_time
-                }
+        for team in list_teams(room_code):
+            self._upsert_progress_preserving(
+                room_code, team['team_id'], video_activity.id,
+                status='in_progress', started_at=activity_start_time,
             )
-            if not created:
-                progress.status = 'in_progress'
-                progress.started_at = activity_start_time
-                progress.save()
-        
-        game_session.refresh_from_db()
-        serializer = self.get_serializer(game_session)
+
+        annotate_game_session_display_fields(session, teams=list_teams(room_code))
+        serializer = GameSessionSerializer(session)
         return Response({
             **serializer.data,
             'message': 'Actividad Video Institucional establecida',
@@ -1573,16 +1477,18 @@ class GameSessionViewSet(viewsets.ViewSet):
         El Instructivo es previo a las etapas (como Video Institucional)
         NO establece current_stage ni SessionStage - solo current_activity
         """
-        game_session = self.get_object()
-        
-        if game_session.status != 'running':
+        room_code = pk
+        session = get_session(room_code)
+        if session is None:
+            return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        if session['status'] != 'running':
             return Response(
                 {'error': 'El juego no está en ejecución'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         from challenges.models import Stage, Activity, ActivityType
-        from django.utils import timezone
 
         # Obtener o crear Stage 1 (resiliencia ante seeders no ejecutados)
         stage_1, _ = Stage.objects.get_or_create(
@@ -1608,7 +1514,7 @@ class GameSessionViewSet(viewsets.ViewSet):
                 'is_active': True
             }
         )
-        
+
         # Buscar o crear la actividad "Instructivo"
         # Nota: Aunque la actividad está asociada a stage_1 en la BD, no establecemos current_stage
         instructivo_activity = Activity.objects.filter(
@@ -1616,7 +1522,7 @@ class GameSessionViewSet(viewsets.ViewSet):
             name__icontains='Instructivo',
             is_active=True
         ).first()
-        
+
         if not instructivo_activity:
             # Reorganizar actividades existentes para dejar order_number=2 libre para Instructivo.
             # Se busca por activity_type__code (ASCII puro) para evitar fallos de encoding/colación
@@ -1670,7 +1576,7 @@ class GameSessionViewSet(viewsets.ViewSet):
                     name__icontains='Presentaci',
                     is_active=True
                 ).first()
-            
+
             if presentacion and presentacion.order_number != 4:
                 # Verificar que no haya otra actividad en 4
                 conflict_4 = Activity.objects.filter(
@@ -1678,27 +1584,27 @@ class GameSessionViewSet(viewsets.ViewSet):
                     order_number=4,
                     is_active=True
                 ).exclude(id=presentacion.id).first()
-                
+
                 if conflict_4:
                     # Si hay conflicto, mover la actividad en 4 a 5
                     conflict_4.order_number = 5
                     conflict_4.save()
-                
+
                 presentacion.order_number = 4
                 presentacion.save()
-            
+
             # Verificar una última vez que no haya actividad en order_number=2
             existing_activity_2 = Activity.objects.filter(
                 stage=stage_1,
                 order_number=2,
                 is_active=True
             ).exclude(name__icontains='Instructivo').first()
-            
+
             if existing_activity_2:
                 # Si todavía hay una actividad en 2, moverla a un número más alto
                 existing_activity_2.order_number = 5
                 existing_activity_2.save()
-            
+
             # Ahora crear Instructivo con order_number 2
             instructivo_activity = Activity.objects.create(
                 stage=stage_1,
@@ -1708,17 +1614,14 @@ class GameSessionViewSet(viewsets.ViewSet):
                 order_number=2,
                 is_active=True
             )
-        
+
         # Establecer SOLO current_activity (NO current_stage, NO SessionStage)
         # El Instructivo es previo a las etapas, igual que Video Institucional
-        game_session.current_activity = instructivo_activity
+        session = update_session(room_code, current_activity_id=instructivo_activity.id) or session
         # NO establecer current_stage - permanece None hasta que se inicie la Etapa 1
-        game_session.save()
-        
-        # Refrescar desde la base de datos
-        game_session.refresh_from_db()
-        
-        serializer = self.get_serializer(game_session)
+
+        annotate_game_session_display_fields(session, teams=list_teams(room_code))
+        serializer = GameSessionSerializer(session)
         response_data = {
             **serializer.data,
             'message': 'Actividad Instructivo establecida',
@@ -1727,7 +1630,7 @@ class GameSessionViewSet(viewsets.ViewSet):
             'current_stage_number': None,  # No hay etapa aún
             'current_stage_name': None
         }
-        
+
         return Response(response_data)
 
     @action(detail=True, methods=['post'], parser_classes=[JSONParser])
@@ -1736,211 +1639,77 @@ class GameSessionViewSet(viewsets.ViewSet):
         Completar manualmente la etapa actual (usado cuando el profesor va a resultados)
         Esto limpia current_activity y marca la etapa como completada
         """
-        try:
-            print(f'[Backend complete_stage] INICIANDO - Session ID: {pk}')
-            print(f'   - Timestamp: {timezone.now().isoformat()}')
-            print(f'   - Request data: {request.data}')
-        except:
-            pass
-        
-        game_session = self.get_object()
-        
-        try:
-            print(f'[Backend complete_stage] Estado inicial del juego:', {
-            'session_id': game_session.id,
-            'status': game_session.status,
-            'current_stage_id': game_session.current_stage.id if game_session.current_stage else None,
-            'current_stage_number': game_session.current_stage.number if game_session.current_stage else None,
-            'current_activity_id': game_session.current_activity.id if game_session.current_activity else None,
-            'current_activity_name': game_session.current_activity.name if game_session.current_activity else None
-            })
-        except:
-            pass
-        
-        if game_session.status != 'running':
-            try:
-                print(f'[Backend complete_stage] Error: Sesion no esta en estado running')
-            except:
-                pass
+        room_code = pk
+        session = get_session(room_code)
+        if session is None:
+            return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        if session['status'] != 'running':
             return Response(
                 {'error': 'La sesion debe estar en estado running'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        if not game_session.current_stage:
-            try:
-                print(f'[Backend complete_stage] Error: No hay etapa actual')
-            except:
-                pass
+
+        current_stage_id = session.get('current_stage_id')
+        if not current_stage_id:
             return Response(
                 {'error': 'No hay etapa actual establecida'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
+        from challenges.models import Stage
+        current_stage = Stage.objects.get(id=current_stage_id)
+
         stage_id = request.data.get('stage_id')
         # Aceptar tanto stage_id (ID numérico) como stage_number (número de etapa)
         stage_number = request.data.get('stage_number')
-        
+
         # Si se envía stage_number, verificar que coincida con el número de etapa actual
         if stage_number:
-            if game_session.current_stage.number != stage_number:
-                try:
-                    print(f'[Backend complete_stage] Error: stage_number no coincide')
-                    print(f'   - stage_number recibido: {stage_number}')
-                    print(f'   - current_stage.number: {game_session.current_stage.number}')
-                except:
-                    pass
+            if current_stage.number != stage_number:
                 return Response(
                     {'error': 'El stage_number no coincide con la etapa actual'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
         # Si se envía stage_id, verificar que coincida con el ID de etapa actual
-        elif stage_id and game_session.current_stage.id != stage_id:
-            try:
-                print(f'[Backend complete_stage] Error: stage_id no coincide')
-                print(f'   - stage_id recibido: {stage_id}')
-                print(f'   - current_stage.id: {game_session.current_stage.id}')
-            except:
-                pass
+        elif stage_id and current_stage_id != stage_id:
             return Response(
                 {'error': 'El stage_id no coincide con la etapa actual'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        from .models import SessionStage, Team, TeamActivityProgress
-        
-        # Obtener o crear session_stage
-        session_stage = SessionStage.objects.filter(
-            game_session=game_session,
-            stage=game_session.current_stage
-        ).first()
-        
-        try:
-            print(f'[Backend complete_stage] SessionStage encontrado:', {
-                'session_stage_id': session_stage.id if session_stage else None,
-                'status_actual': session_stage.status if session_stage else None,
-                'completed_at_actual': session_stage.completed_at if session_stage else None
-            })
-        except:
-            pass
-        
-        if not session_stage:
-            try:
-                print(f'[Backend complete_stage] Creando nuevo SessionStage...')
-            except:
-                pass
-            session_stage = SessionStage.objects.create(
-                game_session=game_session,
-                stage=game_session.current_stage,
-                status='completed',
-                completed_at=timezone.now()
-            )
-            try:
-                print(f'[Backend complete_stage] SessionStage creado con status=completed')
-            except:
-                pass
+
+        # Obtener o crear session_stage y marcarla como completada.
+        # STATUS='COMPLETED' CALL SITE for Task 22's future admin_dashboard
+        # metric hook (SessionStage side).
+        session_stage = get_session_stage(room_code, current_stage_id)
+        if session_stage is None:
+            create_session_stage(room_code, current_stage_id)
+            update_session_stage(room_code, current_stage_id, status='completed', completed_at=now_iso())
         else:
-            # Marcar la etapa como completada
-            try:
-                print(f'[Backend complete_stage] Actualizando SessionStage existente...')
-                print(f'   - Status anterior: {session_stage.status}')
-            except:
-                pass
-            session_stage.status = 'completed'
-            if not session_stage.completed_at:
-                session_stage.completed_at = timezone.now()
-            session_stage.save()
-            try:
-                print(f'[Backend complete_stage] SessionStage actualizado:', {
-                    'status': session_stage.status,
-                    'completed_at': session_stage.completed_at.isoformat() if session_stage.completed_at else None
-                })
-            except:
-                pass
-        
+            completed_at = session_stage.get('completed_at') or now_iso()
+            update_session_stage(room_code, current_stage_id, status='completed', completed_at=completed_at)
+
         # Si hay una actividad actual, marcarla como completada para todos los equipos
-        if game_session.current_activity:
-            current_activity = game_session.current_activity
-            try:
-                print(f'[Backend complete_stage] Marcando actividad actual como completada para todos los equipos...')
-                print(f'   - Actividad: {current_activity.name} (ID: {current_activity.id})')
-                teams = Team.objects.filter(game_session=game_session)
-                print(f'   - Total equipos: {teams.count()}')
-            except:
-                teams = Team.objects.filter(game_session=game_session)
-            
-            for team in teams:
-                progress, created = TeamActivityProgress.objects.get_or_create(
-                    team=team,
-                    activity=current_activity,
-                    session_stage=session_stage,
-                    defaults={
-                        'status': 'completed',
-                        'progress_percentage': 100,
-                        'completed_at': timezone.now()
-                    }
-                )
-                if not created:
-                    # Si ya existía, actualizar a completado
-                    progress.status = 'completed'
-                    progress.progress_percentage = 100
-                    if not progress.completed_at:
-                        progress.completed_at = timezone.now()
-                    progress.save()
-                try:
-                    print(f'   - Equipo {team.id} ({team.name}): {"Creado" if created else "Actualizado"}')
-                except:
-                    pass
-        
-        # Limpiar current_activity para indicar que estamos en resultados
-        try:
-            print(f'[Backend complete_stage] Limpiando current_activity...')
-            print(f'   - current_activity ANTES: {game_session.current_activity.id if game_session.current_activity else None}')
-        except:
-            pass
-        game_session.current_activity = None
-        
-        # NO finalizar automáticamente la sala cuando se completa la etapa 4
-        # La sala se finaliza manualmente en reflexión
-        # Si se completó la etapa 4, solo marcar la etapa como completada, NO finalizar la sala
-        if game_session.current_stage and game_session.current_stage.number == 4:
-            try:
-                print(f'[Backend complete_stage] Etapa 4 completada - NO finalizando sala automáticamente (se finaliza en reflexión)')
-            except:
-                pass
-        
-        game_session.save()
-        try:
-            print(f'   - current_activity DESPUES: {game_session.current_activity}')
-            print(f'[Backend complete_stage] current_activity limpiado correctamente')
-        except:
-            pass
-        
-        # Refrescar para obtener datos actualizados
-        game_session.refresh_from_db()
-        
-        serializer = self.get_serializer(game_session)
+        current_activity_id = session.get('current_activity_id')
+        if current_activity_id:
+            self._complete_activity_progress_for_all_teams(room_code, current_activity_id)
+
+        # Limpiar current_activity para indicar que estamos en resultados.
+        # NO finalizar automáticamente la sala cuando se completa la etapa 4 --
+        # la sala se finaliza manualmente en reflexión, incluso para la etapa 4.
+        session = update_session(room_code, current_activity_id=None) or session
+
+        annotate_game_session_display_fields(session, teams=list_teams(room_code))
+        serializer = GameSessionSerializer(session)
         response_data = {
             **serializer.data,
             'stage_completed': True,
-            'stage_id': game_session.current_stage.id,
-            'stage_name': game_session.current_stage.name,
-            'stage_number': game_session.current_stage.number,
-            'message': f'Etapa {game_session.current_stage.number} completada. Mostrando resultados...'
+            'stage_id': current_stage_id,
+            'stage_name': current_stage.name,
+            'stage_number': current_stage.number,
+            'message': f'Etapa {current_stage.number} completada. Mostrando resultados...'
         }
-        
-        try:
-            print(f'[Backend complete_stage] COMPLETADO - Respuesta:', {
-                'stage_completed': response_data['stage_completed'],
-                'stage_id': response_data['stage_id'],
-                'stage_number': response_data['stage_number'],
-                'current_activity': response_data.get('current_activity'),
-                'current_activity_name': response_data.get('current_activity_name')
-            })
-            print(f'   - Las tablets deberian detectar current_activity=None en el proximo polling')
-        except:
-            pass
-        
+
         return Response(response_data)
 
     @action(detail=True, methods=['get'], permission_classes=[], authentication_classes=[])
