@@ -72,6 +72,7 @@ django-permissions-policy==4.28.0  # Versión más reciente
 # TESTING
 # ============================================
 pytest==8.3.3  # Versión estable compatible con Python 3.11
+moto[dynamodb]==5.0.20  # Mocked AWS backend for DynamoDB repository tests
 pytest-django==4.9.0  # Compatible con pytest 8.x
 pytest-cov==5.0.0  # Compatible con pytest 8.x
 factory-boy==3.3.1  # Versión más reciente
