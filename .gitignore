@@ -4,3 +4,4 @@ env-vars.local.json
 .aws-sam/
 __pycache__/
 *.pyc
+.superpowers/
