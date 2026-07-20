@@ -244,6 +244,55 @@ class TeamRepositoryTest(DynamoDBTestCase):
         self.assertIn(keys.tablet_connection_sk('token-2'), remaining_sks)
         self.assertIn(keys.team_sk(other_team['team_id']), remaining_sks)
 
+    def test_delete_team_removes_peer_evaluations_referencing_team(self):
+        """Regression guard: PeerEvaluation items reference teams via
+        evaluator_team_id/evaluated_team_id attributes, never a plain
+        team_id attribute, and their SK (PEEREVAL#<evaluator>#<evaluated>)
+        never shares the TEAM#<id># prefix. Both existing filters miss
+        them, so delete_team must check these attributes explicitly."""
+        from game_sessions.dynamodb import keys
+        from game_sessions.dynamodb.client import get_table
+        from game_sessions.dynamodb.game_session import get_room_items
+        from game_sessions.dynamodb.team import create_team, delete_team
+
+        team = create_team('ABC123', name='Rojo', color='red')
+        other_team = create_team('ABC123', name='Azul', color='blue')
+        third_team = create_team('ABC123', name='Verde', color='green')
+        table = get_table()
+        # team is the evaluator.
+        table.put_item(Item={
+            'PK': keys.session_pk('ABC123'),
+            'SK': keys.peer_eval_sk(team['team_id'], other_team['team_id']),
+            'type': 'PeerEvaluation',
+            'evaluator_team_id': team['team_id'],
+            'evaluated_team_id': other_team['team_id'],
+        })
+        # team is the evaluated one.
+        table.put_item(Item={
+            'PK': keys.session_pk('ABC123'),
+            'SK': keys.peer_eval_sk(other_team['team_id'], team['team_id']),
+            'type': 'PeerEvaluation',
+            'evaluator_team_id': other_team['team_id'],
+            'evaluated_team_id': team['team_id'],
+        })
+        # A PeerEvaluation referencing only *other* teams must survive.
+        table.put_item(Item={
+            'PK': keys.session_pk('ABC123'),
+            'SK': keys.peer_eval_sk(other_team['team_id'], third_team['team_id']),
+            'type': 'PeerEvaluation',
+            'evaluator_team_id': other_team['team_id'],
+            'evaluated_team_id': third_team['team_id'],
+        })
+
+        delete_team('ABC123', team['team_id'])
+
+        remaining = get_room_items('ABC123')
+        remaining_sks = {item['SK'] for item in remaining}
+        self.assertNotIn(keys.peer_eval_sk(team['team_id'], other_team['team_id']), remaining_sks)
+        self.assertNotIn(keys.peer_eval_sk(other_team['team_id'], team['team_id']), remaining_sks)
+        # Untouched: the PeerEvaluation between the two surviving teams.
+        self.assertIn(keys.peer_eval_sk(other_team['team_id'], third_team['team_id']), remaining_sks)
+
     def test_delete_team_does_not_leak_across_rooms(self):
         from game_sessions.dynamodb.game_session import get_room_items
         from game_sessions.dynamodb.team import create_team, delete_team

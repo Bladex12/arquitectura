@@ -167,10 +167,13 @@ def set_roster(room_code, team_id, student_ids):
 
 def delete_team(room_code, team_id):
     """Deletes the Team item, every item sharing its TEAM#<id># SK prefix
-    (progress, bubble maps, roulette assignments), and every TabletConnection
+    (progress, bubble maps, roulette assignments), every TabletConnection
     /TokenTransaction item that references team_id as a plain attribute
     without sharing that prefix (their SKs are TABLETCONN#<token> and
-    TOKENTX#..., not TEAM#<id>#...). A prefix query alone would miss
+    TOKENTX#..., not TEAM#<id>#...), and every PeerEvaluation item that
+    references team_id via evaluator_team_id/evaluated_team_id (their SKs
+    are PEEREVAL#<evaluator>#<evaluated>, and they never carry a plain
+    team_id attribute either). A prefix query alone would miss all of
     those, so this pulls the whole room via get_room_items and filters in
     Python instead."""
     table = get_table()
@@ -178,6 +181,7 @@ def delete_team(room_code, team_id):
     items = [
         item for item in get_room_items(room_code)
         if item['SK'].startswith(prefix) or item.get('team_id') == team_id
+        or item.get('evaluator_team_id') == team_id or item.get('evaluated_team_id') == team_id
     ]
     with table.batch_writer() as batch:
         for item in items:
