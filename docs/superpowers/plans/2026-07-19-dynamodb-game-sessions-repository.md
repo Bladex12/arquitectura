@@ -31,7 +31,7 @@
 **Interfaces:**
 - Produces: `game_sessions.dynamodb.client.get_table() -> boto3.resource('dynamodb').Table`; `game_sessions.dynamodb.client.build_update_expression(fields: dict) -> tuple[str, dict, dict]` (returns `update_expression, expression_attribute_names, expression_attribute_values`); `game_sessions.dynamodb.testing.create_test_table(table_name='test-game-sessions', region_name='us-east-1') -> Table` (test-only, must be called inside an active `moto.mock_aws`); `game_sessions.dynamodb.testing.DynamoDBTestCase` (test-only `unittest.TestCase` subclass — every later task's repository test file subclasses this instead of repeating moto setUp/tearDown boilerplate).
 
-- [ ] **Step 1: Add moto to requirements.txt**
+- [x] **Step 1: Add moto to requirements.txt**
 
 Edit `requirements.txt`, after the `pytest==8.3.3` line in the `TESTING` section:
 
@@ -40,16 +40,16 @@ pytest==8.3.3  # Versión estable compatible con Python 3.11
 moto[dynamodb]==5.0.20  # Mocked AWS backend for DynamoDB repository tests
 ```
 
-- [ ] **Step 2: Install it into the worktree's venv**
+- [x] **Step 2: Install it into the worktree's venv**
 
 Run: `.venv/Scripts/python.exe -m pip install -q moto[dynamodb]==5.0.20`
 Expected: no output (quiet install) and exit code 0. Verify with: `.venv/Scripts/python.exe -c "import moto; print(moto.__version__)"` — expect `5.0.20`.
 
-- [ ] **Step 3: Create the package**
+- [x] **Step 3: Create the package**
 
 Create `game_sessions/dynamodb/__init__.py` (empty file).
 
-- [ ] **Step 4: Write the failing test for `get_table`**
+- [x] **Step 4: Write the failing test for `get_table`**
 
 Create `game_sessions/test_dynamodb_client.py`:
 
@@ -100,12 +100,12 @@ class BuildUpdateExpressionTest(TestCase):
         self.assertIn(':updated_at', values)
 ```
 
-- [ ] **Step 5: Run tests to verify they fail**
+- [x] **Step 5: Run tests to verify they fail**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_client -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.testing'` (and `client`)
 
-- [ ] **Step 6: Write `game_sessions/dynamodb/testing.py`**
+- [x] **Step 6: Write `game_sessions/dynamodb/testing.py`**
 
 ```python
 """Shared moto test helpers for the game_sessions DynamoDB schema.
@@ -171,7 +171,7 @@ class DynamoDBTestCase(TestCase):
         self.mock.stop()
 ```
 
-- [ ] **Step 7: Write `game_sessions/dynamodb/client.py`**
+- [x] **Step 7: Write `game_sessions/dynamodb/client.py`**
 
 ```python
 """boto3 DynamoDB table accessor and shared update-expression builder
@@ -213,12 +213,12 @@ def build_update_expression(fields):
     return 'SET ' + ', '.join(set_clauses), names, values
 ```
 
-- [ ] **Step 8: Run tests to verify they pass**
+- [x] **Step 8: Run tests to verify they pass**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_client -v 2`
 Expected: `OK` (3 tests)
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add requirements.txt game_sessions/dynamodb/__init__.py game_sessions/dynamodb/client.py game_sessions/dynamodb/testing.py game_sessions/test_dynamodb_client.py
@@ -237,7 +237,7 @@ git commit -m "feat: add DynamoDB client and moto test infrastructure for game_s
 - Consumes: nothing (pure functions, no dependency on Task 1)
 - Produces: `session_pk`, `session_group_pk`, `tablet_pk`, `metadata_sk`, `team_sk`, `team_prefix`, `stage_sk`, `progress_sk`, `bubble_map_sk`, `tablet_connection_sk`, `roulette_sk`, `token_tx_sk_for_source`, `token_tx_sk_for_manual`, `peer_eval_sk`, `reflection_sk`, `professor_gsi1pk`, `session_gsi1sk` — all pure string-returning functions, used by every later task.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `game_sessions/test_dynamodb_keys.py`:
 
@@ -311,12 +311,12 @@ class KeysTest(TestCase):
         )
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_keys -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.keys'`
 
-- [ ] **Step 3: Write `game_sessions/dynamodb/keys.py`**
+- [x] **Step 3: Write `game_sessions/dynamodb/keys.py`**
 
 ```python
 """Pure key-building functions for the game_sessions single-table schema.
@@ -403,12 +403,12 @@ def session_gsi1sk(status, created_at_iso):
     return f'{status}#{created_at_iso}'
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_keys -v 2`
 Expected: `OK` (16 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add game_sessions/dynamodb/keys.py game_sessions/test_dynamodb_keys.py
@@ -427,7 +427,7 @@ git commit -m "feat: add DynamoDB key-building functions for game_sessions schem
 - Consumes: `game_sessions.dynamodb.client.get_table`, `game_sessions.dynamodb.client.build_update_expression`, `game_sessions.dynamodb.keys.*`
 - Produces: `create_session(room_code, professor_id, course_id, session_group_id=None) -> dict`; `get_session(room_code) -> dict | None`; `update_session_status(room_code, expected_status, new_status) -> bool`; `list_sessions_for_professor(professor_id, status=None) -> list[dict]`; `scan_active_sessions() -> list[dict]`; `get_room_items(room_code) -> list[dict]` — the last one is the dominant hot-path query every later real-time feature (WS hydration) will call.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `game_sessions/test_dynamodb_game_session.py`:
 
@@ -558,12 +558,12 @@ class GameSessionRepositoryTest(DynamoDBTestCase):
         self.assertEqual(items[0]['room_code'], 'ROOM1')
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_game_session -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.game_session'`
 
-- [ ] **Step 3: Write `game_sessions/dynamodb/game_session.py`**
+- [x] **Step 3: Write `game_sessions/dynamodb/game_session.py`**
 
 ```python
 """GameSession repository - create/read/update sessions, and the
@@ -697,12 +697,12 @@ def get_room_items(room_code):
     return response['Items']
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_game_session -v 2`
 Expected: `OK` (9 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add game_sessions/dynamodb/game_session.py game_sessions/test_dynamodb_game_session.py
@@ -721,7 +721,7 @@ git commit -m "feat: add GameSession DynamoDB repository and whole-room query"
 - Consumes: `game_sessions.dynamodb.client.get_table`, `game_sessions.dynamodb.keys.*`
 - Produces: `create_team(room_code, name, color) -> dict`; `get_team(room_code, team_id) -> dict | None`; `list_teams(room_code) -> list[dict]`; `add_student(room_code, team_id, student_id) -> dict | None`; `update_tokens(room_code, team_id, delta) -> int`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `game_sessions/test_dynamodb_team.py`:
 
@@ -824,12 +824,12 @@ class TeamRepositoryTest(DynamoDBTestCase):
         self.assertEqual(total, -5)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_team -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.team'`
 
-- [ ] **Step 3: Write `game_sessions/dynamodb/team.py`**
+- [x] **Step 3: Write `game_sessions/dynamodb/team.py`**
 
 ```python
 """Team repository - embeds TeamPersonalization and the student roster
@@ -945,12 +945,12 @@ def update_tokens(room_code, team_id, delta):
     return int(response['Attributes']['tokens_total'])
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_team -v 2`
 Expected: `OK` (9 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add game_sessions/dynamodb/team.py game_sessions/test_dynamodb_team.py
@@ -969,7 +969,7 @@ git commit -m "feat: add Team DynamoDB repository with roster and token operatio
 - Consumes: `game_sessions.dynamodb.client.get_table`, `game_sessions.dynamodb.client.build_update_expression`, `game_sessions.dynamodb.keys.*`
 - Produces: `create_session_stage(room_code, stage_id) -> dict`; `get_session_stage(room_code, stage_id) -> dict | None`; `update_session_stage(room_code, stage_id, **fields) -> dict`; `upsert_progress(room_code, team_id, activity_id, **fields) -> dict`; `get_progress(room_code, team_id, activity_id) -> dict | None`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `game_sessions/test_dynamodb_stage_progress.py`:
 
@@ -1047,12 +1047,12 @@ class StageProgressRepositoryTest(DynamoDBTestCase):
         self.assertIsNone(get_progress('ABC123', team_id='nope', activity_id='nope'))
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_stage_progress -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.stage_progress'`
 
-- [ ] **Step 3: Write `game_sessions/dynamodb/stage_progress.py`**
+- [x] **Step 3: Write `game_sessions/dynamodb/stage_progress.py`**
 
 ```python
 """SessionStage and TeamActivityProgress repository."""
@@ -1160,12 +1160,12 @@ def get_progress(room_code, team_id, activity_id):
     return response.get('Item')
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_stage_progress -v 2`
 Expected: `OK` (7 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add game_sessions/dynamodb/stage_progress.py game_sessions/test_dynamodb_stage_progress.py
@@ -1184,7 +1184,7 @@ git commit -m "feat: add SessionStage and TeamActivityProgress DynamoDB reposito
 - Consumes: `game_sessions.dynamodb.client.get_table`, `game_sessions.dynamodb.client.build_update_expression`, `game_sessions.dynamodb.keys.*`
 - Produces: `upsert_bubble_map(room_code, team_id, stage_id, map_data) -> dict`; `get_bubble_map(room_code, team_id, stage_id) -> dict | None`; `create_roulette_assignment(room_code, team_id, stage_id, roulette_challenge_id, token_reward=0) -> dict`; `get_roulette_assignment(room_code, team_id, stage_id) -> dict | None`; `update_roulette_assignment(room_code, team_id, stage_id, **fields) -> dict`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `game_sessions/test_dynamodb_bubble_roulette.py`:
 
@@ -1250,12 +1250,12 @@ class BubbleRouletteRepositoryTest(DynamoDBTestCase):
         self.assertEqual(updated['accepted_at'], '2026-07-19T10:00:00+00:00')
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_bubble_roulette -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.bubble_roulette'`
 
-- [ ] **Step 3: Write `game_sessions/dynamodb/bubble_roulette.py`**
+- [x] **Step 3: Write `game_sessions/dynamodb/bubble_roulette.py`**
 
 ```python
 """TeamBubbleMap and TeamRouletteAssignment repository."""
@@ -1350,12 +1350,12 @@ def update_roulette_assignment(room_code, team_id, stage_id, **fields):
     return response['Attributes']
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_bubble_roulette -v 2`
 Expected: `OK` (6 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add game_sessions/dynamodb/bubble_roulette.py game_sessions/test_dynamodb_bubble_roulette.py
@@ -1374,7 +1374,7 @@ git commit -m "feat: add TeamBubbleMap and TeamRouletteAssignment DynamoDB repos
 - Consumes: `game_sessions.dynamodb.client.get_table`, `game_sessions.dynamodb.keys.*`
 - Produces: `create_connection(room_code, team_id, tablet_id=None) -> dict`; `get_connection(room_code, team_session_token) -> dict | None`; `update_heartbeat(room_code, team_session_token, current_screen=None) -> dict`; `disconnect(room_code, team_session_token) -> dict`; `list_connections(room_code) -> list[dict]`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `game_sessions/test_dynamodb_tablet_connection.py`:
 
@@ -1446,12 +1446,12 @@ class TabletConnectionRepositoryTest(DynamoDBTestCase):
         self.assertEqual(len(connections), 2)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_tablet_connection -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.tablet_connection'`
 
-- [ ] **Step 3: Write `game_sessions/dynamodb/tablet_connection.py`**
+- [x] **Step 3: Write `game_sessions/dynamodb/tablet_connection.py`**
 
 ```python
 """TabletConnection repository - "this tablet is in this room/team right
@@ -1544,12 +1544,12 @@ def list_connections(room_code):
     return response['Items']
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_tablet_connection -v 2`
 Expected: `OK` (6 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add game_sessions/dynamodb/tablet_connection.py game_sessions/test_dynamodb_tablet_connection.py
@@ -1568,7 +1568,7 @@ git commit -m "feat: add TabletConnection DynamoDB repository"
 - Consumes: `game_sessions.dynamodb.client.get_table`, `game_sessions.dynamodb.keys.*`
 - Produces: `create_transaction(room_code, team_id, amount, source_type, source_id=None, session_stage_id=None, reason=None, awarded_by_id=None) -> dict | None`; `list_transactions(room_code) -> list[dict]`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `game_sessions/test_dynamodb_token_transaction.py`:
 
@@ -1619,12 +1619,12 @@ class TokenTransactionRepositoryTest(DynamoDBTestCase):
         self.assertEqual({t['team_id'] for t in transactions}, {'team-1', 'team-2'})
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_token_transaction -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.token_transaction'`
 
-- [ ] **Step 3: Write `game_sessions/dynamodb/token_transaction.py`**
+- [x] **Step 3: Write `game_sessions/dynamodb/token_transaction.py`**
 
 ```python
 """TokenTransaction repository - an append-only ledger. Source-tied
@@ -1691,12 +1691,12 @@ def list_transactions(room_code):
     return response['Items']
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_token_transaction -v 2`
 Expected: `OK` (4 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add game_sessions/dynamodb/token_transaction.py game_sessions/test_dynamodb_token_transaction.py
@@ -1715,7 +1715,7 @@ git commit -m "feat: add idempotent TokenTransaction DynamoDB repository"
 - Consumes: `game_sessions.dynamodb.client.get_table`, `game_sessions.dynamodb.keys.*`
 - Produces: `create_peer_evaluation(room_code, evaluator_team_id, evaluated_team_id, criteria_scores, total_score, tokens_awarded=0, feedback=None) -> dict | None`; `list_peer_evaluations(room_code) -> list[dict]`; `create_reflection(room_code, student_name, student_email, value_areas=None, faculty=None, career=None, satisfaction=None, entrepreneurship_interest=None, comments=None) -> dict`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `game_sessions/test_dynamodb_evaluations.py`:
 
@@ -1773,12 +1773,12 @@ class EvaluationsRepositoryTest(DynamoDBTestCase):
         self.assertEqual(created['value_areas'], [])
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_evaluations -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.evaluations'`
 
-- [ ] **Step 3: Write `game_sessions/dynamodb/evaluations.py`**
+- [x] **Step 3: Write `game_sessions/dynamodb/evaluations.py`**
 
 ```python
 """PeerEvaluation and ReflectionEvaluation repository."""
@@ -1858,12 +1858,12 @@ def create_reflection(room_code, student_name, student_email, value_areas=None, 
     return item
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_evaluations -v 2`
 Expected: `OK` (5 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add game_sessions/dynamodb/evaluations.py game_sessions/test_dynamodb_evaluations.py
@@ -1882,7 +1882,7 @@ git commit -m "feat: add PeerEvaluation and ReflectionEvaluation DynamoDB reposi
 - Consumes: `game_sessions.dynamodb.client.get_table`, `game_sessions.dynamodb.keys.*`
 - Produces: `create_session_group(professor_id, course_id, total_students, number_of_sessions) -> dict`; `get_session_group(session_group_id) -> dict | None`; `list_session_groups_for_professor(professor_id) -> list[dict]`; `create_tablet(tablet_code) -> dict | None`; `get_tablet(tablet_code) -> dict | None`; `deactivate_tablet(tablet_code) -> dict`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `game_sessions/test_dynamodb_catalog.py`:
 
@@ -1947,12 +1947,12 @@ class CatalogRepositoryTest(DynamoDBTestCase):
         self.assertFalse(updated['is_active'])
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_catalog -v 2`
 Expected: `ModuleNotFoundError: No module named 'game_sessions.dynamodb.catalog'`
 
-- [ ] **Step 3: Write `game_sessions/dynamodb/catalog.py`**
+- [x] **Step 3: Write `game_sessions/dynamodb/catalog.py`**
 
 ```python
 """SessionGroup and Tablet repository - the two game_sessions entities
@@ -2061,12 +2061,12 @@ def deactivate_tablet(tablet_code):
     return response['Attributes']
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_catalog -v 2`
 Expected: `OK` (6 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add game_sessions/dynamodb/catalog.py game_sessions/test_dynamodb_catalog.py
@@ -2084,17 +2084,17 @@ git commit -m "feat: add SessionGroup and Tablet DynamoDB repository"
 - Consumes: every module from Tasks 1-10.
 - Produces: nothing new — confirms the whole `game_sessions/dynamodb/` package works together.
 
-- [ ] **Step 1: Run the entire DynamoDB test suite together**
+- [x] **Step 1: Run the entire DynamoDB test suite together**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test game_sessions.test_dynamodb_client game_sessions.test_dynamodb_keys game_sessions.test_dynamodb_game_session game_sessions.test_dynamodb_team game_sessions.test_dynamodb_stage_progress game_sessions.test_dynamodb_bubble_roulette game_sessions.test_dynamodb_tablet_connection game_sessions.test_dynamodb_token_transaction game_sessions.test_dynamodb_evaluations game_sessions.test_dynamodb_catalog -v 2`
 Expected: `OK` (61 tests total)
 
-- [ ] **Step 2: Run the full existing test suite to confirm no regressions**
+- [x] **Step 2: Run the full existing test suite to confirm no regressions**
 
 Run: `DATABASE_HOST=127.0.0.1 .venv/Scripts/python.exe manage.py test`
 Expected: `OK` — the new `game_sessions/dynamodb/` package and its tests are additive and don't touch any existing model/view/URL, so every pre-existing test should be unaffected.
 
-- [ ] **Step 3: Commit the plan's checked-off state**
+- [x] **Step 3: Commit the plan's checked-off state**
 
 ```bash
 git add docs/superpowers/plans/2026-07-19-dynamodb-game-sessions-repository.md
