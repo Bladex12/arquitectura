@@ -3,7 +3,8 @@ Comando de gestión para crear las tablets del sistema
 Crea tablets con códigos TAB1, TAB2, TAB3, ..., TAB8
 """
 from django.core.management.base import BaseCommand
-from game_sessions.models import Tablet
+
+from game_sessions.dynamodb.catalog import activate_tablet, create_tablet
 
 
 class Command(BaseCommand):
@@ -25,31 +26,25 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         count = options['count']
         force = options['force']
-        
+
         created_count = 0
         updated_count = 0
         skipped_count = 0
-        
+
         for i in range(1, count + 1):
             tablet_code = f'TAB{i}'
-            
+
             try:
-                tablet, created = Tablet.objects.get_or_create(
-                    tablet_code=tablet_code,
-                    defaults={
-                        'is_active': True
-                    }
-                )
-                
-                if created:
+                tablet = create_tablet(tablet_code)
+
+                if tablet is not None:
                     created_count += 1
                     self.stdout.write(
                         self.style.SUCCESS(f'[OK] Tablet {tablet_code} creada exitosamente')
                     )
                 else:
                     if force:
-                        tablet.is_active = True
-                        tablet.save()
+                        activate_tablet(tablet_code)
                         updated_count += 1
                         self.stdout.write(
                             self.style.WARNING(f'[UPDATE] Tablet {tablet_code} actualizada')
@@ -63,7 +58,7 @@ class Command(BaseCommand):
                 self.stdout.write(
                     self.style.ERROR(f'[ERROR] Error al crear tablet {tablet_code}: {str(e)}')
                 )
-        
+
         # Resumen
         self.stdout.write('\n' + '=' * 50)
         self.stdout.write(self.style.SUCCESS(f'Resumen:'))
@@ -73,4 +68,3 @@ class Command(BaseCommand):
         if skipped_count > 0:
             self.stdout.write(f'  Omitidas: {skipped_count}')
         self.stdout.write('=' * 50)
-
