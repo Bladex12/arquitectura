@@ -3,7 +3,7 @@ that don't belong to a single room's item collection (SessionGroup
 spans multiple sessions, Tablet is reused across sessions over time)."""
 import uuid
 
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 from game_sessions.dynamodb import keys
@@ -55,6 +55,15 @@ def list_session_groups_for_professor(professor_id):
     return [item for item in response['Items'] if item['type'] == 'SessionGroup']
 
 
+def delete_session_group(session_group_id):
+    """Deletes the SessionGroup item. Unlike GameSession, a SessionGroup
+    has no child items under its own PK (its member sessions live under
+    their own SESSION# partitions), so a single delete_item is enough -
+    no batch/cascade needed."""
+    table = get_table()
+    table.delete_item(Key={'PK': keys.session_group_pk(session_group_id), 'SK': keys.metadata_sk()})
+
+
 def create_tablet(tablet_code):
     """Creates a new Tablet catalog item. Returns None instead of
     raising if tablet_code is already registered."""
@@ -88,6 +97,27 @@ def get_tablet(tablet_code):
     return response.get('Item')
 
 
+def list_tablets(is_active=None):
+    """Returns Tablet catalog items across the whole table (a filtered
+    Scan, not a Query - like scan_active_sessions, tablets are a small,
+    low-frequency catalog with no natural partition to query by). Pass
+    is_active to filter to just active or just inactive tablets."""
+    table = get_table()
+    filter_expression = Attr('type').eq('Tablet')
+    if is_active is not None:
+        filter_expression &= Attr('is_active').eq(is_active)
+    response = table.scan(FilterExpression=filter_expression)
+    return response['Items']
+
+
+def delete_tablet(tablet_code):
+    """Deletes the Tablet catalog item outright (as opposed to
+    deactivate_tablet's soft-delete) - for admin cleanup of tablets that
+    should no longer exist at all, not just be marked inactive."""
+    table = get_table()
+    table.delete_item(Key={'PK': keys.tablet_pk(tablet_code), 'SK': keys.metadata_sk()})
+
+
 def deactivate_tablet(tablet_code):
     """Sets is_active to False for a tablet (soft-delete, matching the
     is_active convention used throughout the rest of this codebase).
@@ -100,6 +130,27 @@ def deactivate_tablet(tablet_code):
             UpdateExpression='SET is_active = :false, updated_at = :now',
             ConditionExpression='attribute_exists(PK)',
             ExpressionAttributeValues={':false': False, ':now': now_iso()},
+            ReturnValues='ALL_NEW',
+        )
+        return response['Attributes']
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            return None
+        raise
+
+
+def activate_tablet(tablet_code):
+    """Sets is_active to True for a tablet - the mirror of
+    deactivate_tablet, needed for the admin `--force` reactivate path.
+    Returns None if the tablet doesn't exist (guarded so update_item's
+    default upsert behavior can't create a ghost item missing `type`)."""
+    table = get_table()
+    try:
+        response = table.update_item(
+            Key={'PK': keys.tablet_pk(tablet_code), 'SK': keys.metadata_sk()},
+            UpdateExpression='SET is_active = :true, updated_at = :now',
+            ConditionExpression='attribute_exists(PK)',
+            ExpressionAttributeValues={':true': True, ':now': now_iso()},
             ReturnValues='ALL_NEW',
         )
         return response['Attributes']

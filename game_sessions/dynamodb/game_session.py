@@ -5,7 +5,7 @@ from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 from game_sessions.dynamodb import keys
-from game_sessions.dynamodb.client import get_table, now_iso
+from game_sessions.dynamodb.client import build_update_expression, get_table, now_iso
 
 
 def create_session(room_code, professor_id, course_id, session_group_id=None):
@@ -78,6 +78,59 @@ def update_session_status(room_code, expected_status, new_status):
         if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
             return False
         raise
+
+
+def update_session(room_code, **fields):
+    """Partial update for everything except the status transition, which
+    stays on update_session_status (it also has to keep GSI1SK in sync
+    with status, which a generic field-by-field update can't do safely).
+    Pass any subset of the other GameSession fields (qr_code,
+    current_stage_id, current_activity_id, show_results_stage, etc.) as
+    keyword arguments. Returns None if the GameSession doesn't exist
+    (guarded so update_item's default upsert behavior can't create a
+    ghost item missing `type`)."""
+    table = get_table()
+    update_expression, names, values = build_update_expression(fields)
+    try:
+        response = table.update_item(
+            Key={'PK': keys.session_pk(room_code), 'SK': keys.metadata_sk()},
+            UpdateExpression=update_expression,
+            ConditionExpression='attribute_exists(PK)',
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+            ReturnValues='ALL_NEW',
+        )
+        return response['Attributes']
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            return None
+        raise
+
+
+def delete_session(room_code):
+    """Deletes the GameSession and every child item under its PK (teams,
+    progress, connections, tokens, evaluations) - replicating the ORM's
+    CASCADE chain in a single-table world, where there's no database-level
+    cascade to rely on."""
+    table = get_table()
+    items = get_room_items(room_code)
+    with table.batch_writer() as batch:
+        for item in items:
+            batch.delete_item(Key={'PK': item['PK'], 'SK': item['SK']})
+
+
+def scan_all_sessions(status=None):
+    """Returns GameSession items across every status and every professor -
+    unlike scan_active_sessions, this includes completed/cancelled rooms
+    too. Needed by admin_dashboard's cross-status KPI/time-series
+    endpoints, which report on history rather than just what's live.
+    Pass status to filter to just that status."""
+    table = get_table()
+    filter_expression = Attr('type').eq('GameSession')
+    if status:
+        filter_expression &= Attr('status').eq(status)
+    response = table.scan(FilterExpression=filter_expression)
+    return response['Items']
 
 
 def list_sessions_for_professor(professor_id, status=None):

@@ -70,3 +70,60 @@ class CatalogRepositoryTest(DynamoDBTestCase):
         from game_sessions.dynamodb.catalog import deactivate_tablet
 
         self.assertIsNone(deactivate_tablet('NONEXISTENT-TABLET'))
+
+    def test_delete_session_group(self):
+        from game_sessions.dynamodb.catalog import create_session_group, delete_session_group, get_session_group
+
+        created = create_session_group(professor_id=1, course_id=2, total_students=30, number_of_sessions=4)
+
+        delete_session_group(created['session_group_id'])
+
+        self.assertIsNone(get_session_group(created['session_group_id']))
+
+    def test_list_tablets_without_filter_returns_active_and_inactive(self):
+        from game_sessions.dynamodb.catalog import create_tablet, deactivate_tablet, list_tablets
+
+        create_tablet('TABLET-01')
+        create_tablet('TABLET-02')
+        deactivate_tablet('TABLET-02')
+
+        results = list_tablets()
+
+        self.assertEqual({item['tablet_code'] for item in results}, {'TABLET-01', 'TABLET-02'})
+
+    def test_list_tablets_filtered_by_is_active(self):
+        from game_sessions.dynamodb.catalog import create_tablet, deactivate_tablet, list_tablets
+
+        create_tablet('TABLET-01')
+        create_tablet('TABLET-02')
+        deactivate_tablet('TABLET-02')
+
+        active_only = list_tablets(is_active=True)
+        inactive_only = list_tablets(is_active=False)
+
+        self.assertEqual([item['tablet_code'] for item in active_only], ['TABLET-01'])
+        self.assertEqual([item['tablet_code'] for item in inactive_only], ['TABLET-02'])
+
+    def test_delete_tablet(self):
+        from game_sessions.dynamodb.catalog import create_tablet, delete_tablet, get_tablet
+
+        create_tablet('TABLET-01')
+
+        delete_tablet('TABLET-01')
+
+        self.assertIsNone(get_tablet('TABLET-01'))
+
+    def test_activate_tablet(self):
+        from game_sessions.dynamodb.catalog import activate_tablet, create_tablet, deactivate_tablet
+
+        create_tablet('TABLET-01')
+        deactivate_tablet('TABLET-01')
+
+        updated = activate_tablet('TABLET-01')
+
+        self.assertTrue(updated['is_active'])
+
+    def test_activate_tablet_returns_none_when_missing(self):
+        from game_sessions.dynamodb.catalog import activate_tablet
+
+        self.assertIsNone(activate_tablet('NONEXISTENT-TABLET'))
