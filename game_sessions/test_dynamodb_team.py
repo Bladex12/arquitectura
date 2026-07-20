@@ -94,3 +94,8 @@ class TeamRepositoryTest(DynamoDBTestCase):
         total = update_tokens('ABC123', team['team_id'], delta=-5)
 
         self.assertEqual(total, -5)
+
+    def test_update_tokens_returns_none_when_team_missing(self):
+        from game_sessions.dynamodb.team import update_tokens
+
+        self.assertIsNone(update_tokens('ABC123', 'nonexistent-team', delta=10))

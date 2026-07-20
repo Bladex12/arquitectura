@@ -45,6 +45,11 @@ class TabletConnectionRepositoryTest(DynamoDBTestCase):
 
         self.assertEqual(get_connection('ABC123', created['team_session_token'])['current_screen'], 'lobby')
 
+    def test_update_heartbeat_returns_none_when_connection_missing(self):
+        from game_sessions.dynamodb.tablet_connection import update_heartbeat
+
+        self.assertIsNone(update_heartbeat('ABC123', 'nonexistent-token'))
+
     def test_disconnect_sets_disconnected_at(self):
         from game_sessions.dynamodb.tablet_connection import create_connection, disconnect
 
@@ -53,6 +58,11 @@ class TabletConnectionRepositoryTest(DynamoDBTestCase):
         updated = disconnect('ABC123', created['team_session_token'])
 
         self.assertIsNotNone(updated['disconnected_at'])
+
+    def test_disconnect_returns_none_when_connection_missing(self):
+        from game_sessions.dynamodb.tablet_connection import disconnect
+
+        self.assertIsNone(disconnect('ABC123', 'nonexistent-token'))
 
     def test_list_connections_returns_all_in_room(self):
         from game_sessions.dynamodb.tablet_connection import create_connection, list_connections

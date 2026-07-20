@@ -65,3 +65,8 @@ class CatalogRepositoryTest(DynamoDBTestCase):
         updated = deactivate_tablet('TABLET-01')
 
         self.assertFalse(updated['is_active'])
+
+    def test_deactivate_tablet_returns_none_when_missing(self):
+        from game_sessions.dynamodb.catalog import deactivate_tablet
+
+        self.assertIsNone(deactivate_tablet('NONEXISTENT-TABLET'))

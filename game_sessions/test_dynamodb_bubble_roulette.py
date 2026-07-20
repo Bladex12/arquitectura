@@ -57,3 +57,8 @@ class BubbleRouletteRepositoryTest(DynamoDBTestCase):
 
         self.assertEqual(updated['status'], 'accepted')
         self.assertEqual(updated['accepted_at'], '2026-07-19T10:00:00+00:00')
+
+    def test_update_roulette_assignment_returns_none_when_missing(self):
+        from game_sessions.dynamodb.bubble_roulette import update_roulette_assignment
+
+        self.assertIsNone(update_roulette_assignment('ABC123', team_id='nope', stage_id=1, status='accepted'))

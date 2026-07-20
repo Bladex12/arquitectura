@@ -40,6 +40,11 @@ class StageProgressRepositoryTest(DynamoDBTestCase):
 
         self.assertEqual(updated['status'], 'completed')
 
+    def test_update_session_stage_returns_none_when_missing(self):
+        from game_sessions.dynamodb.stage_progress import update_session_stage
+
+        self.assertIsNone(update_session_stage('ABC123', stage_id=99, status='in_progress'))
+
     def test_upsert_and_get_progress(self):
         from game_sessions.dynamodb.stage_progress import get_progress, upsert_progress
 
