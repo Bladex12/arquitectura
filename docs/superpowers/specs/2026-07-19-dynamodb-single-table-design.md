@@ -60,13 +60,13 @@ item collections instead of living inside a `SESSION#` partition:
 | Entity | PK | SK | GSI1PK | GSI1SK | Notes |
 |---|---|---|---|---|---|
 | GameSession | `SESSION#<room_code>` | `METADATA` | `PROFESSOR#<professor_id>` | `<status>#<created_at_iso>` | `status` transitions use conditional writes (see Concurrency) |
-| Team | `SESSION#<room_code>` | `TEAM#<team_id>` | — | — | Embeds `TeamPersonalization` fields and the student roster (list of student ids) as nested attributes — both are 1:1/tiny and always fetched together with the team, never written independently |
+| Team | `SESSION#<room_code>` | `TEAM#<team_id>#METADATA` | — | — | Embeds `TeamPersonalization` fields and the student roster (list of student ids) as nested attributes — both are 1:1/tiny and always fetched together with the team, never written independently. The `#METADATA` suffix (not bare `TEAM#<team_id>`) matters because `TeamActivityProgress`/`TeamBubbleMap`/`TeamRouletteAssignment` SKs also start with `TEAM#<team_id>#...` — without it, a `begins_with('TEAM#<team_id>')` query couldn't tell the team record apart from its children by key shape alone (use the `type` attribute, see below, to filter a broader `begins_with('TEAM#')` query down to just team records) |
 | SessionStage | `SESSION#<room_code>` | `STAGE#<stage_id>` | — | — | `stage_id` is the RDS `challenges.Stage` id (stable int) |
 | TeamActivityProgress | `SESSION#<room_code>` | `TEAM#<team_id>#PROGRESS#<activity_id>` | — | — | `activity_id` is the RDS `challenges.Activity` id |
 | TeamBubbleMap | `SESSION#<room_code>` | `TEAM#<team_id>#BUBBLEMAP#<stage_id>` | — | — | |
 | TabletConnection | `SESSION#<room_code>` | `TABLETCONN#<team_session_token>` | — | — | `team_session_token` is a UUID4, same as current field |
 | TeamRouletteAssignment | `SESSION#<room_code>` | `TEAM#<team_id>#ROULETTE#<stage_id>` | — | — | |
-| TokenTransaction | `SESSION#<room_code>` | `TOKENTX#<iso_timestamp>#<uuid>` | — | — | Append-only ledger, naturally time-ordered by SK |
+| TokenTransaction | `SESSION#<room_code>` | `TOKENTX#<source_type>#<source_id>` when `source_id` is present; `TOKENTX#<iso_timestamp>#<uuid>` when it's not (`manual_adjustment`/`system` sources, which have no natural `source_id`) | — | — | Append-only ledger. The source-tied key form is what makes idempotency work (see Concurrency) — two writes for the same `(source_type, source_id)` collide on purpose. Listing a room's ledger via `begins_with('TOKENTX#')` returns both key shapes fine; sort by the `created_at` attribute client-side if chronological order matters, since SK is no longer guaranteed time-ordered once source-tied keys are mixed in |
 | PeerEvaluation | `SESSION#<room_code>` | `PEEREVAL#<evaluator_team_id>#<evaluated_team_id>` | — | — | |
 | ReflectionEvaluation | `SESSION#<room_code>` | `REFLECTION#<uuid>` | — | — | Also streamed to Firehose/S3 for analytics; rarely queried live |
 | SessionGroup | `SESSIONGROUP#<uuid>` | `METADATA` | `PROFESSOR#<professor_id>` | `<created_at_iso>` | |
@@ -106,7 +106,7 @@ partition and are told apart by `type`, not by key shape alone.
 - **Team token totals**: atomic `UpdateItem` with `ADD tokens_total :amount`, not read-modify-write, so concurrent token awards from different sources never lose an update.
 - **Session status transitions** (`lobby`→`running`→`completed`/`cancelled`): conditional writes (`ConditionExpression` checking the expected current `status`) so a race between a professor action and the expiry-check Lambda can't double-transition a session.
 - **Room-collection reads**: strongly consistent `Query` on the base table for the live hot path (same partition, no extra cost for strong consistency). `GSI1`-served dashboard queries stay eventually consistent — GSIs can't be strongly consistent in DynamoDB, and "my sessions" isn't a real-time-critical view.
-- **Token ledger idempotency**: a conditional put keyed on `(source_type, source_id)` prevents double-awarding tokens if an EventBridge/Lambda retry re-processes the same source event.
+- **Token ledger idempotency**: when `source_id` is present, the SK itself is `TOKENTX#<source_type>#<source_id>` (see key mapping above), so a `PutItem` with `ConditionExpression=attribute_not_exists(PK)` naturally rejects a retried write for the same source event instead of double-awarding tokens. Sources with no natural `source_id` (`manual_adjustment`, `system`) use a timestamp+uuid SK instead and have no idempotency guarantee — they're one-off human/manual actions, not retryable automated events.
 
 ## Retention
 
