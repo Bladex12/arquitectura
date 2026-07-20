@@ -1,24 +1,18 @@
 """GameSession repository - create/read/update sessions, and the
 whole-room fetch that's the dominant hot path (see the spec's Access
 patterns section)."""
-from datetime import datetime, timezone
-
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 from game_sessions.dynamodb import keys
-from game_sessions.dynamodb.client import get_table
-
-
-def _now_iso():
-    return datetime.now(timezone.utc).isoformat()
+from game_sessions.dynamodb.client import get_table, now_iso
 
 
 def create_session(room_code, professor_id, course_id, session_group_id=None):
     """Creates a new GameSession item in 'lobby' status. Raises
     botocore.exceptions.ClientError (ConditionalCheckFailedException) if
     room_code is already taken."""
-    now = _now_iso()
+    now = now_iso()
     item = {
         'PK': keys.session_pk(room_code),
         'SK': keys.metadata_sk(),
@@ -54,6 +48,7 @@ def get_session(room_code):
     table = get_table()
     response = table.get_item(
         Key={'PK': keys.session_pk(room_code), 'SK': keys.metadata_sk()},
+        ConsistentRead=True,
     )
     return response.get('Item')
 
@@ -63,7 +58,7 @@ def update_session_status(room_code, expected_status, new_status):
     happened, False if expected_status didn't match (someone else
     already transitioned it - e.g. a race between a professor action and
     a future expiry-check job)."""
-    now = _now_iso()
+    now = now_iso()
     table = get_table()
     try:
         table.update_item(
@@ -125,5 +120,6 @@ def get_room_items(room_code):
     table = get_table()
     response = table.query(
         KeyConditionExpression=Key('PK').eq(keys.session_pk(room_code)),
+        ConsistentRead=True,
     )
     return response['Items']

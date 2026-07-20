@@ -1,23 +1,18 @@
 """Team repository - embeds TeamPersonalization and the student roster
 as nested attributes (both 1:1/tiny and always fetched with the team)."""
 import uuid
-from datetime import datetime, timezone
 
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 from game_sessions.dynamodb import keys
-from game_sessions.dynamodb.client import get_table
-
-
-def _now_iso():
-    return datetime.now(timezone.utc).isoformat()
+from game_sessions.dynamodb.client import get_table, now_iso
 
 
 def create_team(room_code, name, color):
     """Creates a new Team item with an empty roster and zero tokens."""
     team_id = str(uuid.uuid4())
-    now = _now_iso()
+    now = now_iso()
     item = {
         'PK': keys.session_pk(room_code),
         'SK': keys.team_sk(team_id),
@@ -43,6 +38,7 @@ def get_team(room_code, team_id):
     table = get_table()
     response = table.get_item(
         Key={'PK': keys.session_pk(room_code), 'SK': keys.team_sk(team_id)},
+        ConsistentRead=True,
     )
     return response.get('Item')
 
@@ -55,6 +51,7 @@ def list_teams(room_code):
     response = table.query(
         KeyConditionExpression=Key('PK').eq(keys.session_pk(room_code)) & Key('SK').begins_with('TEAM#'),
         FilterExpression=Attr('type').eq('Team'),
+        ConsistentRead=True,
     )
     return response['Items']
 
@@ -73,7 +70,7 @@ def add_student(room_code, team_id, student_id):
         if student_id in item['student_ids']:
             return item
         new_roster = item['student_ids'] + [student_id]
-        now = _now_iso()
+        now = now_iso()
         try:
             table.update_item(
                 Key={'PK': keys.session_pk(room_code), 'SK': keys.team_sk(team_id)},
@@ -99,13 +96,21 @@ def add_student(room_code, team_id, student_id):
 def update_tokens(room_code, team_id, delta):
     """Atomically adds delta (can be negative) to tokens_total and
     returns the new total. Uses ADD, not read-modify-write, so
-    concurrent awards from different sources never lose an update."""
+    concurrent awards from different sources never lose an update.
+    Returns None if the team doesn't exist (guarded so update_item's
+    default upsert behavior can't create a ghost item missing `type`)."""
     table = get_table()
-    response = table.update_item(
-        Key={'PK': keys.session_pk(room_code), 'SK': keys.team_sk(team_id)},
-        UpdateExpression='ADD #tokens :delta SET updated_at = :now',
-        ExpressionAttributeNames={'#tokens': 'tokens_total'},
-        ExpressionAttributeValues={':delta': delta, ':now': _now_iso()},
-        ReturnValues='UPDATED_NEW',
-    )
-    return int(response['Attributes']['tokens_total'])
+    try:
+        response = table.update_item(
+            Key={'PK': keys.session_pk(room_code), 'SK': keys.team_sk(team_id)},
+            UpdateExpression='ADD #tokens :delta SET updated_at = :now',
+            ConditionExpression='attribute_exists(PK)',
+            ExpressionAttributeNames={'#tokens': 'tokens_total'},
+            ExpressionAttributeValues={':delta': delta, ':now': now_iso()},
+            ReturnValues='UPDATED_NEW',
+        )
+        return int(response['Attributes']['tokens_total'])
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            return None
+        raise

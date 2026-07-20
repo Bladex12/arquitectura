@@ -1,16 +1,11 @@
 """PeerEvaluation and ReflectionEvaluation repository."""
 import uuid
-from datetime import datetime, timezone
 
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
 from game_sessions.dynamodb import keys
-from game_sessions.dynamodb.client import get_table
-
-
-def _now_iso():
-    return datetime.now(timezone.utc).isoformat()
+from game_sessions.dynamodb.client import get_table, now_iso
 
 
 def create_peer_evaluation(room_code, evaluator_team_id, evaluated_team_id, criteria_scores,
@@ -30,7 +25,7 @@ def create_peer_evaluation(room_code, evaluator_team_id, evaluated_team_id, crit
         'total_score': total_score,
         'tokens_awarded': tokens_awarded,
         'feedback': feedback,
-        'submitted_at': _now_iso(),
+        'submitted_at': now_iso(),
     }
     table = get_table()
     try:
@@ -47,6 +42,7 @@ def list_peer_evaluations(room_code):
     table = get_table()
     response = table.query(
         KeyConditionExpression=Key('PK').eq(keys.session_pk(room_code)) & Key('SK').begins_with('PEEREVAL#'),
+        ConsistentRead=True,
     )
     return response['Items']
 
@@ -68,7 +64,7 @@ def create_reflection(room_code, student_name, student_email, value_areas=None, 
         'satisfaction': satisfaction,
         'entrepreneurship_interest': entrepreneurship_interest,
         'comments': comments,
-        'created_at': _now_iso(),
+        'created_at': now_iso(),
     }
     table = get_table()
     table.put_item(Item=item)

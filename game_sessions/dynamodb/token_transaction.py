@@ -3,17 +3,12 @@ transactions (source_id is not None) are idempotent: a retried write for
 the same (source_type, source_id) is rejected instead of double-awarding
 tokens. See the spec's Concurrency section."""
 import uuid
-from datetime import datetime, timezone
 
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
 from game_sessions.dynamodb import keys
-from game_sessions.dynamodb.client import get_table
-
-
-def _now_iso():
-    return datetime.now(timezone.utc).isoformat()
+from game_sessions.dynamodb.client import get_table, now_iso
 
 
 def create_transaction(room_code, team_id, amount, source_type, source_id=None,
@@ -21,7 +16,7 @@ def create_transaction(room_code, team_id, amount, source_type, source_id=None,
     """Creates a TokenTransaction item. Returns None instead of raising
     if this (source_type, source_id) pair was already recorded - that's
     the expected outcome of a retried write, not an error."""
-    now = _now_iso()
+    now = now_iso()
     if source_id is not None:
         sk = keys.token_tx_sk_for_source(source_type, source_id)
     else:
@@ -58,5 +53,6 @@ def list_transactions(room_code):
     table = get_table()
     response = table.query(
         KeyConditionExpression=Key('PK').eq(keys.session_pk(room_code)) & Key('SK').begins_with('TOKENTX#'),
+        ConsistentRead=True,
     )
     return response['Items']

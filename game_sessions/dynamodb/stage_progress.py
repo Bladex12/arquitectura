@@ -1,19 +1,14 @@
 """SessionStage and TeamActivityProgress repository."""
-from datetime import datetime, timezone
-
 from boto3.dynamodb.conditions import Key
+from botocore.exceptions import ClientError
 
 from game_sessions.dynamodb import keys
-from game_sessions.dynamodb.client import build_update_expression, get_table
-
-
-def _now_iso():
-    return datetime.now(timezone.utc).isoformat()
+from game_sessions.dynamodb.client import build_update_expression, get_table, now_iso
 
 
 def create_session_stage(room_code, stage_id):
     """Creates a new SessionStage item in 'pending' status."""
-    now = _now_iso()
+    now = now_iso()
     item = {
         'PK': keys.session_pk(room_code),
         'SK': keys.stage_sk(stage_id),
@@ -40,6 +35,7 @@ def get_session_stage(room_code, stage_id):
     table = get_table()
     response = table.get_item(
         Key={'PK': keys.session_pk(room_code), 'SK': keys.stage_sk(stage_id)},
+        ConsistentRead=True,
     )
     return response.get('Item')
 
@@ -47,17 +43,26 @@ def get_session_stage(room_code, stage_id):
 def update_session_stage(room_code, stage_id, **fields):
     """Partial update - pass any subset of status/started_at/
     completed_at/presentation_order/current_presentation_team_id/
-    presentation_state/presentation_timestamps as keyword arguments."""
+    presentation_state/presentation_timestamps as keyword arguments.
+    Returns None if the SessionStage doesn't exist (guarded so
+    update_item's default upsert behavior can't create a ghost item
+    missing `type`)."""
     table = get_table()
     update_expression, names, values = build_update_expression(fields)
-    response = table.update_item(
-        Key={'PK': keys.session_pk(room_code), 'SK': keys.stage_sk(stage_id)},
-        UpdateExpression=update_expression,
-        ExpressionAttributeNames=names,
-        ExpressionAttributeValues=values,
-        ReturnValues='ALL_NEW',
-    )
-    return response['Attributes']
+    try:
+        response = table.update_item(
+            Key={'PK': keys.session_pk(room_code), 'SK': keys.stage_sk(stage_id)},
+            UpdateExpression=update_expression,
+            ConditionExpression='attribute_exists(PK)',
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+            ReturnValues='ALL_NEW',
+        )
+        return response['Attributes']
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            return None
+        raise
 
 
 def upsert_progress(room_code, team_id, activity_id, **fields):
@@ -65,7 +70,7 @@ def upsert_progress(room_code, team_id, activity_id, **fields):
     full put (not a partial update) because progress fields are
     typically saved together as one unit, matching how the Django
     serializer currently sets response_data wholesale."""
-    now = _now_iso()
+    now = now_iso()
     item = {
         'PK': keys.session_pk(room_code),
         'SK': keys.progress_sk(team_id, activity_id),
@@ -99,5 +104,6 @@ def get_progress(room_code, team_id, activity_id):
     table = get_table()
     response = table.get_item(
         Key={'PK': keys.session_pk(room_code), 'SK': keys.progress_sk(team_id, activity_id)},
+        ConsistentRead=True,
     )
     return response.get('Item')

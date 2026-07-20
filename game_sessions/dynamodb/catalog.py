@@ -2,23 +2,18 @@
 that don't belong to a single room's item collection (SessionGroup
 spans multiple sessions, Tablet is reused across sessions over time)."""
 import uuid
-from datetime import datetime, timezone
 
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
 from game_sessions.dynamodb import keys
-from game_sessions.dynamodb.client import get_table
-
-
-def _now_iso():
-    return datetime.now(timezone.utc).isoformat()
+from game_sessions.dynamodb.client import get_table, now_iso
 
 
 def create_session_group(professor_id, course_id, total_students, number_of_sessions):
     """Creates a new SessionGroup item."""
     session_group_id = str(uuid.uuid4())
-    now = _now_iso()
+    now = now_iso()
     item = {
         'PK': keys.session_group_pk(session_group_id),
         'SK': keys.metadata_sk(),
@@ -43,6 +38,7 @@ def get_session_group(session_group_id):
     table = get_table()
     response = table.get_item(
         Key={'PK': keys.session_group_pk(session_group_id), 'SK': keys.metadata_sk()},
+        ConsistentRead=True,
     )
     return response.get('Item')
 
@@ -62,7 +58,7 @@ def list_session_groups_for_professor(professor_id):
 def create_tablet(tablet_code):
     """Creates a new Tablet catalog item. Returns None instead of
     raising if tablet_code is already registered."""
-    now = _now_iso()
+    now = now_iso()
     item = {
         'PK': keys.tablet_pk(tablet_code),
         'SK': keys.metadata_sk(),
@@ -87,18 +83,27 @@ def get_tablet(tablet_code):
     table = get_table()
     response = table.get_item(
         Key={'PK': keys.tablet_pk(tablet_code), 'SK': keys.metadata_sk()},
+        ConsistentRead=True,
     )
     return response.get('Item')
 
 
 def deactivate_tablet(tablet_code):
     """Sets is_active to False for a tablet (soft-delete, matching the
-    is_active convention used throughout the rest of this codebase)."""
+    is_active convention used throughout the rest of this codebase).
+    Returns None if the tablet doesn't exist (guarded so update_item's
+    default upsert behavior can't create a ghost item missing `type`)."""
     table = get_table()
-    response = table.update_item(
-        Key={'PK': keys.tablet_pk(tablet_code), 'SK': keys.metadata_sk()},
-        UpdateExpression='SET is_active = :false, updated_at = :now',
-        ExpressionAttributeValues={':false': False, ':now': _now_iso()},
-        ReturnValues='ALL_NEW',
-    )
-    return response['Attributes']
+    try:
+        response = table.update_item(
+            Key={'PK': keys.tablet_pk(tablet_code), 'SK': keys.metadata_sk()},
+            UpdateExpression='SET is_active = :false, updated_at = :now',
+            ConditionExpression='attribute_exists(PK)',
+            ExpressionAttributeValues={':false': False, ':now': now_iso()},
+            ReturnValues='ALL_NEW',
+        )
+        return response['Attributes']
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            return None
+        raise

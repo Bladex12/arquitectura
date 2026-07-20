@@ -16,6 +16,13 @@ def get_table():
     return dynamodb.Table(os.environ['GAME_SESSIONS_TABLE'])
 
 
+def now_iso():
+    """Returns the current UTC time as an ISO-8601 string, the timestamp
+    format used for every created_at/updated_at (and similar) field
+    across the game_sessions DynamoDB schema."""
+    return datetime.now(timezone.utc).isoformat()
+
+
 def build_update_expression(fields):
     """Builds a DynamoDB UpdateExpression + ExpressionAttributeNames +
     ExpressionAttributeValues from a dict of {field_name: new_value},
