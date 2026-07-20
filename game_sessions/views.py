@@ -31,7 +31,7 @@ from .models import (
     TeamRouletteAssignment, TokenTransaction, PeerEvaluation, ReflectionEvaluation
 )
 from .serializers import (
-    GameSessionSerializer, GameSessionCreateSerializer,
+    GameSessionSerializer, GameSessionCreateSerializer, annotate_game_session_display_fields,
     TeamSerializer, TeamPersonalizationSerializer,
     SessionStageSerializer, TeamActivityProgressSerializer,
     TeamBubbleMapSerializer, TabletSerializer, TabletConnectionSerializer,
@@ -39,13 +39,46 @@ from .serializers import (
     PeerEvaluationSerializer, ReflectionEvaluationSerializer
 )
 from users.models import Student
+from botocore.exceptions import ClientError
+from game_sessions.dynamodb.game_session import (
+    create_session, get_session, update_session, update_session_status,
+    delete_session, list_sessions_for_professor, scan_all_sessions,
+)
+from game_sessions.dynamodb.team import create_team, set_roster, list_teams
+from game_sessions.dynamodb.catalog import create_session_group
 
 
-class GameSessionViewSet(viewsets.ModelViewSet):
+class GameSessionViewSet(viewsets.ViewSet):
     """
     ViewSet para Sesiones de Juego
+
+    DynamoDB cutover (Task 10): CRUD + Excel-import actions now read/write
+    game_sessions.dynamodb.game_session / game_sessions.dynamodb.team /
+    game_sessions.dynamodb.catalog instead of the GameSession/Team/
+    TeamStudent ORM models. There is no queryset to back DRF's generic
+    mixins anymore (viewsets.ModelViewSet -> viewsets.ViewSet), so
+    list/retrieve/create/update/partial_update/destroy are hand-implemented
+    below.
+
+    IMPORTANT scope note: only this class's CRUD methods and the
+    process_excel/create_with_excel actions (plus their private helpers)
+    were ported in Task 10 -- per the task brief, views.py:44-592. Every
+    other @action on this same class below `start` (start, sync_teams,
+    next_activity, start_stage_1, set_video_institucional_activity,
+    set_instructivo_activity, complete_stage, activity_timer,
+    stage_results, next_stage, show_results, end, active_session,
+    start_reflection, reflection_qr, teams, lobby, etapa, ...) still calls
+    self.get_serializer()/self.get_object()/self.get_queryset(), which
+    viewsets.ModelViewSet used to provide via GenericViewSet and a plain
+    viewsets.ViewSet does not. Those actions are explicitly out of scope
+    here (ported incrementally in later tasks) and will raise
+    AttributeError until then -- this is expected, not something this task
+    fixes or regresses in spirit (Task 9 already left the whole class
+    non-functional; this task narrows that to "still broken, different
+    exception" for the not-yet-ported actions while making list/retrieve/
+    create/update/partial_update/destroy/process_excel/create_with_excel
+    actually work again).
     """
-    queryset = GameSession.objects.all()
     permission_classes = [IsAuthenticated]
 
     def get_permissions(self):
@@ -61,49 +94,178 @@ class GameSessionViewSet(viewsets.ModelViewSet):
             return [AllowAny()]
         return super().get_permissions()
     parser_classes = [MultiPartParser, FormParser]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['professor', 'course', 'status']
-    search_fields = ['room_code', 'professor__user__username', 'course__name']
-    ordering_fields = ['created_at', 'started_at', 'status']
-    ordering = ['-created_at']
 
-    def get_serializer_class(self):
-        if self.action == 'create':
-            return GameSessionCreateSerializer
-        return GameSessionSerializer
+    # ------------------------------------------------------------------
+    # list / retrieve / create / update / partial_update / destroy
+    # ------------------------------------------------------------------
 
-    def get_queryset(self):
-        queryset = GameSession.objects.select_related('professor__user', 'course', 'current_stage', 'current_activity')
-        # Si el usuario está autenticado
-        if self.request.user.is_authenticated:
-            # Verificar si es administrador y profesor
-            is_administrator = hasattr(self.request.user, 'administrator')
-            is_professor = hasattr(self.request.user, 'professor')
-            
-            # Verificar si se solicita vista de administrador (parámetro admin_view=true)
-            # Si admin_view=true, mostrar todas las sesiones (solo para administradores)
-            # Si admin_view=false o no está presente, y el usuario es profesor, filtrar solo sus sesiones
-            admin_view = self.request.query_params.get('admin_view', 'false').lower() == 'true'
-            
-            if is_professor:
-                # Si el usuario es profesor (incluso si también es administrador)
-                if admin_view and is_administrator:
-                    # Accediendo como administrador: mostrar todas las sesiones
-                    pass  # No filtrar
-                else:
-                    # Accediendo como profesor: mostrar solo sus sesiones
-                    queryset = queryset.filter(professor__user=self.request.user)
-            elif is_administrator and not is_professor:
-                # Usuario es solo administrador (no profesor): mostrar todas las sesiones
-                pass  # No filtrar
-            # Si no es ni administrador ni profesor, no filtrar (aunque esto no debería pasar)
-        return queryset
+    def _batch_annotate_sessions(self, sessions):
+        """Annotates display fields across a whole list of GameSession
+        dicts using batched cross-app queries (professor/course/stage/
+        activity ids collected up front, then one filter(id__in=...) each)
+        instead of calling annotate_game_session_display_fields() once per
+        session -- mirrors the N+1 avoidance the old get_queryset()'s
+        select_related('professor__user', 'course', 'current_stage',
+        'current_activity') gave for free. teams_count still costs one
+        list_teams() Query per room (DynamoDB has no cross-partition batch
+        read for that), same access pattern cost as before."""
+        from academic.models import Course
+        from challenges.models import Stage, Activity
+
+        professor_ids = {s['professor_id'] for s in sessions}
+        course_ids = {s['course_id'] for s in sessions}
+        stage_ids = {s['current_stage_id'] for s in sessions if s.get('current_stage_id')}
+        activity_ids = {s['current_activity_id'] for s in sessions if s.get('current_activity_id')}
+
+        professor_names = {
+            professor.id: (professor.user.get_full_name() or professor.user.username)
+            for professor in Professor.objects.select_related('user').filter(id__in=professor_ids)
+        }
+        course_names = {course.id: course.name for course in Course.objects.filter(id__in=course_ids)}
+        stages = {stage.id: stage for stage in Stage.objects.filter(id__in=stage_ids)}
+        activity_names = {
+            activity.id: activity.name for activity in Activity.objects.filter(id__in=activity_ids)
+        }
+
+        for session in sessions:
+            session['professor_name'] = professor_names.get(session['professor_id'])
+            session['course_name'] = course_names.get(session['course_id'])
+            stage = stages.get(session.get('current_stage_id'))
+            session['current_stage_name'] = stage.name if stage else None
+            session['current_stage_number'] = stage.number if stage else None
+            session['current_activity_name'] = activity_names.get(session.get('current_activity_id'))
+            session['teams_count'] = len(list_teams(session['room_code']))
+        return sessions
+
+    def list(self, request):
+        """Reproduces the old get_queryset()'s scoping exactly: a professor
+        sees only their own sessions unless they pass ?admin_view=true AND
+        are also an administrator, in which case (and in every other case
+        -- anonymous, administrator-only, neither -- exactly like the
+        original code's fallthrough) every session is listed unfiltered by
+        professor. ?status= filters within whichever scope applies."""
+        status_param = request.query_params.get('status')
+        is_professor = hasattr(request.user, 'professor')
+        is_administrator = hasattr(request.user, 'administrator')
+        admin_view = request.query_params.get('admin_view', 'false').lower() == 'true'
+
+        if is_professor and not (admin_view and is_administrator):
+            sessions = list_sessions_for_professor(request.user.professor.id, status=status_param)
+        else:
+            # scan_all_sessions (not scan_active_sessions) to match the old
+            # queryset's "no filter at all" behavior for admin/anonymous
+            # access -- completed/cancelled sessions were visible too.
+            sessions = scan_all_sessions(status=status_param)
+            sessions.sort(key=lambda s: s.get('created_at', ''), reverse=True)
+
+        self._batch_annotate_sessions(sessions)
+        serializer = GameSessionSerializer(sessions, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        session = get_session(pk)
+        if session is None:
+            return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        annotate_game_session_display_fields(session, teams=list_teams(pk))
+        serializer = GameSessionSerializer(session)
+        return Response(serializer.data)
+
+    def create(self, request):
+        serializer = GameSessionCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated = serializer.validated_data
+
+        try:
+            session = create_session(
+                room_code=validated['room_code'],
+                professor_id=validated['professor'],
+                course_id=validated['course'],
+            )
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+                return Response(
+                    {'error': 'El código de sala ya existe'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            raise
+
+        annotate_game_session_display_fields(session, teams=[])
+        out_serializer = GameSessionSerializer(session)
+        return Response(out_serializer.data, status=status.HTTP_201_CREATED)
+
+    # Fields this route allows updating via update_session() (status is
+    # handled separately below through update_session_status(), which also
+    # keeps GSI1SK in sync). Deliberately narrower than the old
+    # ModelSerializer's writable set: `professor`/`course`/`room_code` were
+    # technically writable there too, but room_code is now embedded in the
+    # DynamoDB partition key (renaming it isn't a plain attribute update --
+    # it would need a delete+recreate) and professor_id drives GSI1PK (a
+    # plain field update would desync the professor-scoped GSI1 index
+    # without a repository function to keep it consistent). Neither is
+    # supported by any exposed repository function, so this route no
+    # longer allows changing them.
+    _UPDATABLE_FIELD_MAP = {
+        'started_at': 'started_at',
+        'ended_at': 'ended_at',
+        'current_stage': 'current_stage_id',
+        'current_activity': 'current_activity_id',
+        'cancellation_reason': 'cancellation_reason',
+        'cancellation_reason_other': 'cancellation_reason_other',
+    }
+
+    def update(self, request, pk=None):
+        return self._update_session(request, pk)
+
+    def partial_update(self, request, pk=None):
+        return self._update_session(request, pk)
+
+    def _update_session(self, request, pk):
+        session = get_session(pk)
+        if session is None:
+            return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data
+        plain_fields = {
+            internal_name: data[external_name]
+            for external_name, internal_name in self._UPDATABLE_FIELD_MAP.items()
+            if external_name in data
+        }
+        if plain_fields:
+            updated = update_session(pk, **plain_fields)
+            if updated is not None:
+                session = updated
+
+        new_status = data.get('status')
+        if new_status and new_status != session['status']:
+            transitioned = update_session_status(pk, expected_status=session['status'], new_status=new_status)
+            if not transitioned:
+                return Response(
+                    {'error': 'No se pudo actualizar el estado de la sesión (conflicto de concurrencia)'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            session = get_session(pk)
+
+        annotate_game_session_display_fields(session, teams=list_teams(pk))
+        serializer = GameSessionSerializer(session)
+        return Response(serializer.data)
+
+    def destroy(self, request, pk=None):
+        # No SessionGroup-empty cascade check here -- that's Task 21's job.
+        session = get_session(pk)
+        if session is None:
+            return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        delete_session(pk)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # ------------------------------------------------------------------
+    # Helpers ported from the ORM-based implementation
+    # ------------------------------------------------------------------
 
     def _generate_room_code(self):
         """Generar código de sala único (6 caracteres alfanuméricos)"""
         while True:
             code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-            if not GameSession.objects.filter(room_code=code).exists():
+            if get_session(code) is None:
                 return code
 
     def _generate_qr_code(self, room_code, base_url='http://localhost:8000'):
@@ -113,38 +275,38 @@ class GameSessionViewSet(viewsets.ModelViewSet):
         qr.add_data(qr_url)
         qr.make(fit=True)
         img = qr.make_image(fill_color="black", back_color="white")
-        
+
         # Convertir imagen a base64
         buffer = BytesIO()
         img.save(buffer, format='PNG')
         img_str = base64.b64encode(buffer.getvalue()).decode()
         return f"data:image/png;base64,{img_str}"
 
-    def _create_teams_automatically(self, game_session, students, min_size=3, max_size=8):
+    def _create_teams_automatically(self, room_code, students, min_size=3, max_size=8):
         """
         Crear equipos automáticamente con estudiantes
-        
+
         Args:
-            game_session: Sesión de juego
-            students: Lista de estudiantes
+            room_code: Código de la sala (GameSession) a la que pertenecen los equipos
+            students: Lista de estudiantes (instancias ORM de users.models.Student)
             min_size: Tamaño mínimo por equipo (default: 3)
             max_size: Tamaño máximo por equipo (default: 8)
-        
+
         Returns:
-            Lista de equipos creados
+            Lista de dicts de equipo (game_sessions.dynamodb.team item shape)
         """
         if not students:
             return []
-        
+
         # Colores disponibles para equipos
         team_colors = ['Verde', 'Azul', 'Rojo', 'Amarillo', 'Naranja', 'Morado', 'Rosa', 'Cian', 'Gris', 'Marrón']
-        
+
         # Mezclar estudiantes aleatoriamente
         shuffled_students = list(students)
         random.shuffle(shuffled_students)
-        
+
         total_students = len(shuffled_students)
-        
+
         # Validar que haya suficientes estudiantes
         if total_students < min_size:
             # Si hay menos estudiantes que el mínimo, crear un solo equipo con todos
@@ -154,49 +316,46 @@ class GameSessionViewSet(viewsets.ModelViewSet):
             # Intentar crear equipos de tamaño óptimo (entre min_size y max_size)
             # Calcular cuántos equipos podemos hacer con el tamaño máximo
             num_teams_max = (total_students + max_size - 1) // max_size  # División entera hacia arriba
-            
+
             # Calcular cuántos equipos podemos hacer con el tamaño mínimo
             num_teams_min = total_students // min_size
-            
+
             # Elegir el número de equipos que mejor distribuya los estudiantes
             # Preferir más equipos si es posible, pero asegurando que todos tengan al menos min_size
             num_teams = min(num_teams_max, num_teams_min)
             if num_teams == 0:
                 num_teams = 1
-        
+
         # Calcular tamaño base de cada equipo
         base_team_size = total_students // num_teams
         remainder = total_students % num_teams  # Estudiantes restantes a distribuir
-        
+
         teams = []
         student_index = 0
-        
+
         for i in range(num_teams):
             # Calcular tamaño del equipo actual
             # Distribuir estudiantes restantes en los primeros equipos
             current_team_size = base_team_size + (1 if i < remainder else 0)
-            
+
             # Asegurar que el tamaño esté dentro del rango
             current_team_size = max(min_size, min(max_size, current_team_size))
-            
+
             # Obtener estudiantes para este equipo
             team_students = shuffled_students[student_index:student_index + current_team_size]
             student_index += current_team_size
-            
+
             # Crear equipo
             color = team_colors[i % len(team_colors)]
-            team = Team.objects.create(
-                game_session=game_session,
-                name=f"Equipo {color}",
-                color=color
-            )
-            
-            # Asignar estudiantes al equipo
-            for student in team_students:
-                TeamStudent.objects.create(team=team, student=student)
-            
-            teams.append(team)
-        
+            team = create_team(room_code, name=f"Equipo {color}", color=color)
+
+            # Asignar estudiantes al equipo: una sola escritura con el roster
+            # completo (set_roster), no un create() por estudiante como
+            # hacía el TeamStudent.objects.create() original.
+            student_ids = [student.id for student in team_students]
+            updated_team = set_roster(room_code, team['team_id'], student_ids)
+            teams.append(updated_team if updated_team is not None else team)
+
         return teams
 
     @action(detail=False, methods=['post'], parser_classes=[MultiPartParser, FormParser])
@@ -378,17 +537,17 @@ class GameSessionViewSet(viewsets.ModelViewSet):
             )
         
         # Verificar si el profesor ya tiene sesiones activas (lobby o running) que no estén en un grupo
-        active_sessions = GameSession.objects.filter(
-            professor=professor,
-            status__in=['lobby', 'running'],
-            session_group__isnull=True
-        )
-        
-        if active_sessions.exists():
+        active_sessions = [
+            s for s in list_sessions_for_professor(professor.id)
+            if s['status'] in ('lobby', 'running') and s.get('session_group_id') is None
+        ]
+
+        if active_sessions:
             return Response(
                 {
                     'error': 'Ya tienes sesiones activas sin grupo',
-                    'active_sessions': [{'id': s.id, 'room_code': s.room_code} for s in active_sessions],
+                    # room_code IS the id now (see identifier-surface note).
+                    'active_sessions': [{'id': s['room_code'], 'room_code': s['room_code']} for s in active_sessions],
                     'message': 'Debes finalizar o cancelar las sesiones actuales antes de crear nuevas'
                 },
                 status=status.HTTP_400_BAD_REQUEST
@@ -495,61 +654,72 @@ class GameSessionViewSet(viewsets.ModelViewSet):
                 )
             
             total_students = len(students_list)
-            
+
             # Crear SessionGroup si hay múltiples sesiones
             session_group = None
             if number_of_sessions > 1:
-                session_group = SessionGroup.objects.create(
-                    professor=professor,
-                    course=course,
+                session_group = create_session_group(
+                    professor_id=professor.id,
+                    course_id=course.id,
                     total_students=total_students,
-                    number_of_sessions=number_of_sessions
+                    number_of_sessions=number_of_sessions,
                 )
-            
+
             # Dividir estudiantes en grupos para cada sesión
             students_per_session = total_students // number_of_sessions
             remainder = total_students % number_of_sessions
-            
+
             created_sessions = []
             all_teams = []
+            session_teams_by_room = {}
             student_index = 0
-            
+
             for session_num in range(number_of_sessions):
                 # Calcular cuántos estudiantes van en esta sesión
                 session_students_count = students_per_session + (1 if session_num < remainder else 0)
                 session_students = students_list[student_index:student_index + session_students_count]
                 student_index += session_students_count
-                
+
                 # Crear sesión de juego
                 room_code = self._generate_room_code()
                 qr_code = self._generate_qr_code(room_code)
-                
-                game_session = GameSession.objects.create(
-                    professor=professor,
-                    course=course,
+
+                game_session = create_session(
                     room_code=room_code,
-                    qr_code=qr_code,
-                    status='lobby',
-                    session_group=session_group
+                    professor_id=professor.id,
+                    course_id=course.id,
+                    session_group_id=session_group['session_group_id'] if session_group else None,
                 )
-                
+                # create_session() always starts qr_code=None (it's not a
+                # constructor argument) -- persist the QR generated above
+                # with a follow-up update_session() call.
+                game_session = update_session(room_code, qr_code=qr_code) or game_session
+
                 # Crear equipos automáticamente
                 teams = self._create_teams_automatically(
-                    game_session,
+                    room_code,
                     session_students,
                     min_size=min_team_size,
                     max_size=max_team_size
                 )
-                
+
                 created_sessions.append(game_session)
+                session_teams_by_room[room_code] = teams
                 all_teams.extend(teams)
-            
+
+            # Anotar campos de presentación (batched no es necesario aquí:
+            # como máximo 10 sesiones por request, ver validación arriba)
+            for game_session in created_sessions:
+                annotate_game_session_display_fields(
+                    game_session, teams=session_teams_by_room.get(game_session['room_code'], [])
+                )
+
             # Serializar respuesta
             if number_of_sessions == 1:
                 # Si es una sola sesión, retornar como antes
                 serializer = GameSessionSerializer(created_sessions[0])
                 team_serializer = TeamSerializer(all_teams, many=True)
-                
+
                 return Response({
                     'game_session': serializer.data,
                     'teams': team_serializer.data,
@@ -561,9 +731,9 @@ class GameSessionViewSet(viewsets.ModelViewSet):
             else:
                 # Si son múltiples sesiones, retornar todas
                 sessions_data = [GameSessionSerializer(s).data for s in created_sessions]
-                
+
                 return Response({
-                    'session_group_id': session_group.id,
+                    'session_group_id': session_group['session_group_id'],
                     'game_sessions': sessions_data,
                     'total_students': total_students,
                     'number_of_sessions': number_of_sessions,
