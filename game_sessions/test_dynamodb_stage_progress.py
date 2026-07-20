@@ -82,3 +82,83 @@ class StageProgressRepositoryTest(DynamoDBTestCase):
         from game_sessions.dynamodb.stage_progress import get_progress
 
         self.assertIsNone(get_progress('ABC123', team_id='nope', activity_id='nope'))
+
+    def test_scan_all_stages_returns_items_across_multiple_rooms(self):
+        from game_sessions.dynamodb.stage_progress import create_session_stage, scan_all_stages
+
+        # Create stages in multiple rooms
+        create_session_stage('ROOM1', stage_id=1)
+        create_session_stage('ROOM1', stage_id=2)
+        create_session_stage('ROOM2', stage_id=1)
+        create_session_stage('ROOM2', stage_id=3)
+
+        # Scan all stages across all rooms
+        all_stages = scan_all_stages()
+
+        # Should return all 4 stages
+        self.assertEqual(len(all_stages), 4)
+        # All should be SessionStage type
+        self.assertTrue(all(item['type'] == 'SessionStage' for item in all_stages))
+        # Should have items from multiple rooms
+        room_codes = {item['room_code'] for item in all_stages}
+        self.assertEqual(room_codes, {'ROOM1', 'ROOM2'})
+
+    def test_scan_all_stages_with_stage_id_filter(self):
+        from game_sessions.dynamodb.stage_progress import create_session_stage, scan_all_stages
+
+        # Create stages in multiple rooms
+        create_session_stage('ROOM1', stage_id=1)
+        create_session_stage('ROOM1', stage_id=2)
+        create_session_stage('ROOM2', stage_id=1)
+        create_session_stage('ROOM2', stage_id=3)
+
+        # Scan stages with stage_id=1 filter
+        filtered_stages = scan_all_stages(stage_id=1)
+
+        # Should return only 2 stages (stage_id=1 from ROOM1 and ROOM2)
+        self.assertEqual(len(filtered_stages), 2)
+        # All should be type SessionStage and have stage_id=1
+        self.assertTrue(all(item['type'] == 'SessionStage' and item['stage_id'] == 1 for item in filtered_stages))
+        # Should span multiple rooms
+        room_codes = {item['room_code'] for item in filtered_stages}
+        self.assertEqual(room_codes, {'ROOM1', 'ROOM2'})
+
+    def test_scan_all_progress_returns_items_across_multiple_rooms(self):
+        from game_sessions.dynamodb.stage_progress import scan_all_progress, upsert_progress
+
+        # Create progress items in multiple rooms
+        upsert_progress('ROOM1', team_id='team-1', activity_id='act-1', status='in_progress')
+        upsert_progress('ROOM1', team_id='team-2', activity_id='act-2', status='pending')
+        upsert_progress('ROOM2', team_id='team-3', activity_id='act-1', status='completed')
+        upsert_progress('ROOM2', team_id='team-4', activity_id='act-3', status='in_progress')
+
+        # Scan all progress items across all rooms
+        all_progress = scan_all_progress()
+
+        # Should return all 4 progress items
+        self.assertEqual(len(all_progress), 4)
+        # All should be TeamActivityProgress type
+        self.assertTrue(all(item['type'] == 'TeamActivityProgress' for item in all_progress))
+        # Should have items from multiple rooms
+        room_codes = {item['room_code'] for item in all_progress}
+        self.assertEqual(room_codes, {'ROOM1', 'ROOM2'})
+
+    def test_scan_all_progress_with_activity_id_filter(self):
+        from game_sessions.dynamodb.stage_progress import scan_all_progress, upsert_progress
+
+        # Create progress items in multiple rooms
+        upsert_progress('ROOM1', team_id='team-1', activity_id='act-1', status='in_progress')
+        upsert_progress('ROOM1', team_id='team-2', activity_id='act-2', status='pending')
+        upsert_progress('ROOM2', team_id='team-3', activity_id='act-1', status='completed')
+        upsert_progress('ROOM2', team_id='team-4', activity_id='act-3', status='in_progress')
+
+        # Scan progress items with activity_id='act-1' filter
+        filtered_progress = scan_all_progress(activity_id='act-1')
+
+        # Should return only 2 progress items (act-1 from ROOM1 and ROOM2)
+        self.assertEqual(len(filtered_progress), 2)
+        # All should be type TeamActivityProgress and have activity_id='act-1'
+        self.assertTrue(all(item['type'] == 'TeamActivityProgress' and item['activity_id'] == 'act-1' for item in filtered_progress))
+        # Should span multiple rooms
+        room_codes = {item['room_code'] for item in filtered_progress}
+        self.assertEqual(room_codes, {'ROOM1', 'ROOM2'})

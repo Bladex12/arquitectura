@@ -1,5 +1,5 @@
 """SessionStage and TeamActivityProgress repository."""
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 from game_sessions.dynamodb import keys
@@ -107,3 +107,27 @@ def get_progress(room_code, team_id, activity_id):
         ConsistentRead=True,
     )
     return response.get('Item')
+
+
+def scan_all_stages(stage_id=None):
+    """Returns SessionStage items across every room. Optionally narrows to
+    one stage_id when passed. Needed by admin_dashboard's cross-room
+    stage duration/analysis endpoints."""
+    table = get_table()
+    filter_expression = Attr('type').eq('SessionStage')
+    if stage_id is not None:
+        filter_expression = filter_expression & Attr('stage_id').eq(stage_id)
+    response = table.scan(FilterExpression=filter_expression)
+    return response['Items']
+
+
+def scan_all_progress(activity_id=None):
+    """Returns TeamActivityProgress items across every room. Optionally
+    narrows to one activity_id when passed. Needed by admin_dashboard's
+    cross-room progress/analysis endpoints."""
+    table = get_table()
+    filter_expression = Attr('type').eq('TeamActivityProgress')
+    if activity_id is not None:
+        filter_expression = filter_expression & Attr('activity_id').eq(activity_id)
+    response = table.scan(FilterExpression=filter_expression)
+    return response['Items']
