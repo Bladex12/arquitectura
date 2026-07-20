@@ -49,3 +49,22 @@ class EvaluationsRepositoryTest(DynamoDBTestCase):
         created = create_reflection('ABC123', student_name='Ana Perez', student_email='ana@udd.cl')
 
         self.assertEqual(created['value_areas'], [])
+
+    def test_scan_all_reflections_cross_room(self):
+        from game_sessions.dynamodb.evaluations import create_reflection, scan_all_reflections
+
+        # Create reflections in multiple rooms
+        create_reflection('ROOM1', student_name='Ana', student_email='ana@udd.cl')
+        create_reflection('ROOM1', student_name='Bob', student_email='bob@udd.cl')
+        create_reflection('ROOM2', student_name='Charlie', student_email='charlie@udd.cl')
+
+        results = scan_all_reflections()
+
+        # Verify all 3 reflections are returned from all rooms
+        self.assertEqual(len(results), 3)
+        # Verify all items are ReflectionEvaluation type
+        for item in results:
+            self.assertEqual(item['type'], 'ReflectionEvaluation')
+        # Verify we have reflections from both rooms
+        room_codes = {item['room_code'] for item in results}
+        self.assertEqual(room_codes, {'ROOM1', 'ROOM2'})

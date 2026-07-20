@@ -1,7 +1,7 @@
 """PeerEvaluation and ReflectionEvaluation repository."""
 import uuid
 
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 from game_sessions.dynamodb import keys
@@ -69,3 +69,12 @@ def create_reflection(room_code, student_name, student_email, value_areas=None, 
     table = get_table()
     table.put_item(Item=item)
     return item
+
+
+def scan_all_reflections():
+    """Returns ReflectionEvaluation items across every room. Needed by
+    admin_dashboard's cross-room evaluation endpoints, which report on
+    all reflections regardless of session scoping."""
+    table = get_table()
+    response = table.scan(FilterExpression=Attr('type').eq('ReflectionEvaluation'))
+    return response['Items']
