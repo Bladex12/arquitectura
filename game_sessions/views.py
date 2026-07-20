@@ -23,7 +23,6 @@ from PIL import Image
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
-from django.shortcuts import get_object_or_404
 
 logger = logging.getLogger(__name__)
 from users.models import Professor, Student
@@ -84,13 +83,16 @@ class GameSessionViewSet(viewsets.ViewSet):
     stage_results' per-team token totals. None of these eleven actions call
     self.get_object()/self.get_serializer() anymore either.
 
-    IMPORTANT scope note: `start_stage_1` (between `next_activity` and
-    `set_video_institucional_activity` in this file) was explicitly out of
-    scope for both Task 11's and Task 12's briefs and is still unported --
-    it still calls self.get_object()/self.get_serializer() and will raise
-    AttributeError if invoked. This is a known plan-level gap (flagged in
-    Task 12's report, not fixed there) -- the get_object() shim below is
-    kept alive solely for this one action until a future task ports it.
+    DynamoDB cutover (addendum, post-Task 12): start_stage_1 -- which was
+    explicitly out of scope for both Task 11's and Task 12's briefs, a
+    known plan-level gap flagged in Task 12's report -- is also now
+    ported, reading/writing the same game_sessions.dynamodb.game_session
+    and game_sessions.dynamodb.stage_progress modules as its siblings
+    above. It was the last action on this class still calling
+    self.get_object()/self.get_serializer(), so the Task 10
+    get_object()-compatibility shim that used to live here (kept alive
+    solely for this one action) has been removed -- no action on this
+    class calls self.get_object() anymore.
     """
     permission_classes = [IsAuthenticated]
 
@@ -107,34 +109,6 @@ class GameSessionViewSet(viewsets.ViewSet):
             return [AllowAny()]
         return super().get_permissions()
     parser_classes = [MultiPartParser, FormParser]
-
-    def get_object(self):
-        """
-        TEMPORARY compatibility shim for not-yet-ported legacy ORM actions.
-
-        Retrieves a GameSession object by pk from the request kwargs and
-        returns it after permission checks. This method is needed because
-        the viewset was changed from ModelViewSet to ViewSet (Task 10),
-        which removed generic mixins that provided get_object().
-
-        As of Task 12, `start_stage_1` is the ONLY remaining caller of this
-        shim on this class -- every other action that used to call it
-        (next_stage, show_results, end, start_reflection, teams; plus
-        start/sync_teams/next_activity/set_video_institucional_activity/
-        set_instructivo_activity/complete_stage from Task 11) has been
-        ported to read/write game_sessions.dynamodb.* directly. This shim
-        is being kept alive specifically because `start_stage_1` was
-        excluded from both Task 11's and Task 12's briefs (a known
-        plan-level gap, see the class docstring) -- it is NOT safe to
-        remove until `start_stage_1` is ported by a future task.
-
-        Do not extend this method or build architecture on it — it is
-        meant to be a temporary bridge, not a permanent part of the design.
-        """
-        pk = self.kwargs.get('pk')
-        obj = get_object_or_404(GameSession.objects.all(), pk=pk)
-        self.check_object_permissions(self.request, obj)
-        return obj
 
     # ------------------------------------------------------------------
     # list / retrieve / create / update / partial_update / destroy
@@ -1171,17 +1145,19 @@ class GameSessionViewSet(viewsets.ViewSet):
         Iniciar la Etapa 1 después del video institucional
         Establece la etapa 1 y la primera actividad (Personalización)
         """
-        game_session = self.get_object()
-        
-        if game_session.status != 'running':
+        room_code = pk
+        session = get_session(room_code)
+        if session is None:
+            return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        if session['status'] != 'running':
             return Response(
                 {'error': 'El juego no está en ejecución'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         from challenges.models import Stage, Activity, ActivityType
         from django.db.models import Q
-        from .models import SessionStage, Team, TeamActivityProgress
 
         # Obtener o crear Stage 1 (resiliencia ante seeders no ejecutados)
         stage_1, _ = Stage.objects.get_or_create(
@@ -1289,47 +1265,34 @@ class GameSessionViewSet(viewsets.ViewSet):
             )
         
         # Establecer etapa y actividad
-        game_session.current_stage = stage_1
-        game_session.current_activity = first_activity
-        game_session.save()
-        
-        # Forzar refresh desde la base de datos para asegurar que se guardó correctamente
-        game_session.refresh_from_db()
-        
+        session = update_session(
+            room_code, current_stage_id=stage_1.id, current_activity_id=first_activity.id
+        ) or session
+
         # Crear SessionStage para la Etapa 1
-        activity_start_time = timezone.now()
-        session_stage, created = SessionStage.objects.get_or_create(
-            game_session=game_session,
-            stage=stage_1,
-            defaults={
-                'status': 'in_progress',
-                'started_at': activity_start_time
-            }
-        )
-        
-        if not created:
-            session_stage.status = 'in_progress'
-            if not session_stage.started_at:
-                session_stage.started_at = activity_start_time
-            session_stage.save()
-        
-        # Inicializar progreso para todos los equipos en la primera actividad
-        teams = Team.objects.filter(game_session=game_session)
-        for team in teams:
-            TeamActivityProgress.objects.get_or_create(
-                team=team,
-                activity=first_activity,
-                session_stage=session_stage,
-                defaults={
-                    'status': 'pending',
-                    'started_at': activity_start_time
-                }
-            )
-        
-        # Refrescar nuevamente después de crear los progresos
-        game_session.refresh_from_db()
-        
-        serializer = self.get_serializer(game_session)
+        activity_start_time = now_iso()
+        session_stage = get_session_stage(room_code, stage_1.id)
+        if session_stage is None:
+            create_session_stage(room_code, stage_1.id)
+            update_session_stage(room_code, stage_1.id, status='in_progress', started_at=activity_start_time)
+        else:
+            started_at = session_stage.get('started_at') or activity_start_time
+            update_session_stage(room_code, stage_1.id, status='in_progress', started_at=started_at)
+
+        # Inicializar progreso para todos los equipos en la primera actividad.
+        # Mirrors the ORM's plain get_or_create(): only creates a row when
+        # one doesn't already exist -- an existing row's status/started_at/
+        # etc. is left untouched (unlike next_activity's deliberate reset).
+        for team in list_teams(room_code):
+            existing = get_progress(room_code, team['team_id'], first_activity.id)
+            if existing is None:
+                upsert_progress(
+                    room_code, team['team_id'], first_activity.id,
+                    status='pending', progress_percentage=0, started_at=activity_start_time,
+                )
+
+        annotate_game_session_display_fields(session, teams=list_teams(room_code))
+        serializer = GameSessionSerializer(session)
         response_data = {
             **serializer.data,
             'message': 'Etapa 1 iniciada. Primera actividad: Personalización',
@@ -1339,14 +1302,14 @@ class GameSessionViewSet(viewsets.ViewSet):
             'current_stage_number': stage_1.number,
             'current_stage_name': stage_1.name
         }
-        
+
         # Log para debugging
-        print(f'[start_stage_1] Etapa 1 iniciada - Session: {game_session.id}')
-        print(f'  - current_stage: {game_session.current_stage.name if game_session.current_stage else None} (ID: {game_session.current_stage.id if game_session.current_stage else None})')
-        print(f'  - current_activity: {game_session.current_activity.name if game_session.current_activity else None} (ID: {game_session.current_activity.id if game_session.current_activity else None})')
+        print(f'[start_stage_1] Etapa 1 iniciada - Session: {room_code}')
+        print(f'  - current_stage: {stage_1.name} (ID: {stage_1.id})')
+        print(f'  - current_activity: {first_activity.name} (ID: {first_activity.id})')
         print(f'  - current_stage_number: {response_data.get("current_stage_number")}')
         print(f'  - current_activity_name: {response_data.get("current_activity_name")}')
-        
+
         return Response(response_data)
 
     @action(detail=True, methods=['post'])
