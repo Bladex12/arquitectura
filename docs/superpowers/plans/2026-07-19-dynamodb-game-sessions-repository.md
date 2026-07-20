@@ -29,7 +29,7 @@
 - Test: `game_sessions/test_dynamodb_client.py`
 
 **Interfaces:**
-- Produces: `game_sessions.dynamodb.client.get_table() -> boto3.resource('dynamodb').Table`; `game_sessions.dynamodb.client.build_update_expression(fields: dict) -> tuple[str, dict, dict]` (returns `update_expression, expression_attribute_names, expression_attribute_values`); `game_sessions.dynamodb.testing.create_test_table(table_name='test-game-sessions', region_name='us-east-1') -> Table` (test-only, must be called inside an active `moto.mock_aws`).
+- Produces: `game_sessions.dynamodb.client.get_table() -> boto3.resource('dynamodb').Table`; `game_sessions.dynamodb.client.build_update_expression(fields: dict) -> tuple[str, dict, dict]` (returns `update_expression, expression_attribute_names, expression_attribute_values`); `game_sessions.dynamodb.testing.create_test_table(table_name='test-game-sessions', region_name='us-east-1') -> Table` (test-only, must be called inside an active `moto.mock_aws`); `game_sessions.dynamodb.testing.DynamoDBTestCase` (test-only `unittest.TestCase` subclass — every later task's repository test file subclasses this instead of repeating moto setUp/tearDown boilerplate).
 
 - [ ] **Step 1: Add moto to requirements.txt**
 
@@ -114,7 +114,11 @@ Only imported from tests, never from application code. Mirrors the
 GameSessionTable schema deployed via template.yaml (base PK/SK + GSI1)
 so tests exercise the real key structure, not a simplified stand-in.
 """
+import os
+from unittest import TestCase
+
 import boto3
+from moto import mock_aws
 
 
 def create_test_table(table_name='test-game-sessions', region_name='us-east-1'):
@@ -148,6 +152,23 @@ def create_test_table(table_name='test-game-sessions', region_name='us-east-1'):
     )
     table.wait_until_exists()
     return table
+
+
+class DynamoDBTestCase(TestCase):
+    """Base class for repository tests: starts a moto mock, sets the env
+    vars client.get_table() reads, and creates the GameSessionTable
+    schema - all torn down after each test. Subclass this instead of
+    repeating the same setUp/tearDown in every repository test file."""
+
+    def setUp(self):
+        self.mock = mock_aws()
+        self.mock.start()
+        os.environ['GAME_SESSIONS_TABLE'] = 'test-game-sessions'
+        os.environ['AWS_REGION'] = 'us-east-1'
+        create_test_table('test-game-sessions')
+
+    def tearDown(self):
+        self.mock.stop()
 ```
 
 - [ ] **Step 7: Write `game_sessions/dynamodb/client.py`**
@@ -403,7 +424,7 @@ git commit -m "feat: add DynamoDB key-building functions for game_sessions schem
 - Test: `game_sessions/test_dynamodb_game_session.py`
 
 **Interfaces:**
-- Consumes: `game_sessions.dynamodb.client.get_table`, `game_sessions.dynamodb.client.build_update_expression`, `game_sessions.dynamodb.keys.*`, `game_sessions.dynamodb.testing.create_test_table`
+- Consumes: `game_sessions.dynamodb.client.get_table`, `game_sessions.dynamodb.client.build_update_expression`, `game_sessions.dynamodb.keys.*`
 - Produces: `create_session(room_code, professor_id, course_id, session_group_id=None) -> dict`; `get_session(room_code) -> dict | None`; `update_session_status(room_code, expected_status, new_status) -> bool`; `list_sessions_for_professor(professor_id, status=None) -> list[dict]`; `scan_active_sessions() -> list[dict]`; `get_room_items(room_code) -> list[dict]` — the last one is the dominant hot-path query every later real-time feature (WS hydration) will call.
 
 - [ ] **Step 1: Write the failing tests**
@@ -411,29 +432,10 @@ git commit -m "feat: add DynamoDB key-building functions for game_sessions schem
 Create `game_sessions/test_dynamodb_game_session.py`:
 
 ```python
-from unittest import TestCase
-
-from moto import mock_aws
-
-from game_sessions.dynamodb.testing import create_test_table
+from game_sessions.dynamodb.testing import DynamoDBTestCase
 
 
-def _set_env(monkeypatch_dict):
-    import os
-    os.environ['GAME_SESSIONS_TABLE'] = 'test-game-sessions'
-    os.environ['AWS_REGION'] = 'us-east-1'
-
-
-class GameSessionRepositoryTest(TestCase):
-    def setUp(self):
-        self.mock = mock_aws()
-        self.mock.start()
-        _set_env({})
-        create_test_table('test-game-sessions')
-
-    def tearDown(self):
-        self.mock.stop()
-
+class GameSessionRepositoryTest(DynamoDBTestCase):
     def test_create_and_get_session(self):
         from game_sessions.dynamodb.game_session import create_session, get_session
 
@@ -724,25 +726,10 @@ git commit -m "feat: add GameSession DynamoDB repository and whole-room query"
 Create `game_sessions/test_dynamodb_team.py`:
 
 ```python
-from unittest import TestCase
-
-from moto import mock_aws
-
-from game_sessions.dynamodb.testing import create_test_table
+from game_sessions.dynamodb.testing import DynamoDBTestCase
 
 
-class TeamRepositoryTest(TestCase):
-    def setUp(self):
-        self.mock = mock_aws()
-        self.mock.start()
-        import os
-        os.environ['GAME_SESSIONS_TABLE'] = 'test-game-sessions'
-        os.environ['AWS_REGION'] = 'us-east-1'
-        create_test_table('test-game-sessions')
-
-    def tearDown(self):
-        self.mock.stop()
-
+class TeamRepositoryTest(DynamoDBTestCase):
     def test_create_and_get_team(self):
         from game_sessions.dynamodb.team import create_team, get_team
 
@@ -987,25 +974,10 @@ git commit -m "feat: add Team DynamoDB repository with roster and token operatio
 Create `game_sessions/test_dynamodb_stage_progress.py`:
 
 ```python
-from unittest import TestCase
-
-from moto import mock_aws
-
-from game_sessions.dynamodb.testing import create_test_table
+from game_sessions.dynamodb.testing import DynamoDBTestCase
 
 
-class StageProgressRepositoryTest(TestCase):
-    def setUp(self):
-        self.mock = mock_aws()
-        self.mock.start()
-        import os
-        os.environ['GAME_SESSIONS_TABLE'] = 'test-game-sessions'
-        os.environ['AWS_REGION'] = 'us-east-1'
-        create_test_table('test-game-sessions')
-
-    def tearDown(self):
-        self.mock.stop()
-
+class StageProgressRepositoryTest(DynamoDBTestCase):
     def test_create_and_get_session_stage(self):
         from game_sessions.dynamodb.stage_progress import create_session_stage, get_session_stage
 
@@ -1217,25 +1189,10 @@ git commit -m "feat: add SessionStage and TeamActivityProgress DynamoDB reposito
 Create `game_sessions/test_dynamodb_bubble_roulette.py`:
 
 ```python
-from unittest import TestCase
-
-from moto import mock_aws
-
-from game_sessions.dynamodb.testing import create_test_table
+from game_sessions.dynamodb.testing import DynamoDBTestCase
 
 
-class BubbleRouletteRepositoryTest(TestCase):
-    def setUp(self):
-        self.mock = mock_aws()
-        self.mock.start()
-        import os
-        os.environ['GAME_SESSIONS_TABLE'] = 'test-game-sessions'
-        os.environ['AWS_REGION'] = 'us-east-1'
-        create_test_table('test-game-sessions')
-
-    def tearDown(self):
-        self.mock.stop()
-
+class BubbleRouletteRepositoryTest(DynamoDBTestCase):
     def test_upsert_and_get_bubble_map(self):
         from game_sessions.dynamodb.bubble_roulette import get_bubble_map, upsert_bubble_map
 
@@ -1422,25 +1379,10 @@ git commit -m "feat: add TeamBubbleMap and TeamRouletteAssignment DynamoDB repos
 Create `game_sessions/test_dynamodb_tablet_connection.py`:
 
 ```python
-from unittest import TestCase
-
-from moto import mock_aws
-
-from game_sessions.dynamodb.testing import create_test_table
+from game_sessions.dynamodb.testing import DynamoDBTestCase
 
 
-class TabletConnectionRepositoryTest(TestCase):
-    def setUp(self):
-        self.mock = mock_aws()
-        self.mock.start()
-        import os
-        os.environ['GAME_SESSIONS_TABLE'] = 'test-game-sessions'
-        os.environ['AWS_REGION'] = 'us-east-1'
-        create_test_table('test-game-sessions')
-
-    def tearDown(self):
-        self.mock.stop()
-
+class TabletConnectionRepositoryTest(DynamoDBTestCase):
     def test_create_and_get_connection(self):
         from game_sessions.dynamodb.tablet_connection import create_connection, get_connection
 
@@ -1631,25 +1573,10 @@ git commit -m "feat: add TabletConnection DynamoDB repository"
 Create `game_sessions/test_dynamodb_token_transaction.py`:
 
 ```python
-from unittest import TestCase
-
-from moto import mock_aws
-
-from game_sessions.dynamodb.testing import create_test_table
+from game_sessions.dynamodb.testing import DynamoDBTestCase
 
 
-class TokenTransactionRepositoryTest(TestCase):
-    def setUp(self):
-        self.mock = mock_aws()
-        self.mock.start()
-        import os
-        os.environ['GAME_SESSIONS_TABLE'] = 'test-game-sessions'
-        os.environ['AWS_REGION'] = 'us-east-1'
-        create_test_table('test-game-sessions')
-
-    def tearDown(self):
-        self.mock.stop()
-
+class TokenTransactionRepositoryTest(DynamoDBTestCase):
     def test_create_transaction_with_source_id(self):
         from game_sessions.dynamodb.token_transaction import create_transaction
 
@@ -1793,25 +1720,10 @@ git commit -m "feat: add idempotent TokenTransaction DynamoDB repository"
 Create `game_sessions/test_dynamodb_evaluations.py`:
 
 ```python
-from unittest import TestCase
-
-from moto import mock_aws
-
-from game_sessions.dynamodb.testing import create_test_table
+from game_sessions.dynamodb.testing import DynamoDBTestCase
 
 
-class EvaluationsRepositoryTest(TestCase):
-    def setUp(self):
-        self.mock = mock_aws()
-        self.mock.start()
-        import os
-        os.environ['GAME_SESSIONS_TABLE'] = 'test-game-sessions'
-        os.environ['AWS_REGION'] = 'us-east-1'
-        create_test_table('test-game-sessions')
-
-    def tearDown(self):
-        self.mock.stop()
-
+class EvaluationsRepositoryTest(DynamoDBTestCase):
     def test_create_peer_evaluation(self):
         from game_sessions.dynamodb.evaluations import create_peer_evaluation
 
@@ -1975,25 +1887,10 @@ git commit -m "feat: add PeerEvaluation and ReflectionEvaluation DynamoDB reposi
 Create `game_sessions/test_dynamodb_catalog.py`:
 
 ```python
-from unittest import TestCase
-
-from moto import mock_aws
-
-from game_sessions.dynamodb.testing import create_test_table
+from game_sessions.dynamodb.testing import DynamoDBTestCase
 
 
-class CatalogRepositoryTest(TestCase):
-    def setUp(self):
-        self.mock = mock_aws()
-        self.mock.start()
-        import os
-        os.environ['GAME_SESSIONS_TABLE'] = 'test-game-sessions'
-        os.environ['AWS_REGION'] = 'us-east-1'
-        create_test_table('test-game-sessions')
-
-    def tearDown(self):
-        self.mock.stop()
-
+class CatalogRepositoryTest(DynamoDBTestCase):
     def test_create_and_get_session_group(self):
         from game_sessions.dynamodb.catalog import create_session_group, get_session_group
 
