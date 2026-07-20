@@ -1,4 +1,5 @@
 """TeamBubbleMap and TeamRouletteAssignment repository."""
+from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 from game_sessions.dynamodb import keys
@@ -94,3 +95,39 @@ def update_roulette_assignment(room_code, team_id, stage_id, **fields):
         if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
             return None
         raise
+
+
+def list_roulette_assignments(room_code, team_id=None):
+    """Returns every TeamRouletteAssignment item in a room (not its siblings -
+    bubble maps and progress items all share the TEAM# prefix, so this filters
+    on `type` to exclude them). Optionally narrows to one team when team_id
+    is passed."""
+    table = get_table()
+    key_condition = Key('PK').eq(keys.session_pk(room_code)) & Key('SK').begins_with('TEAM#')
+    filter_expression = Attr('type').eq('TeamRouletteAssignment')
+    if team_id is not None:
+        filter_expression = filter_expression & Attr('team_id').eq(team_id)
+    response = table.query(
+        KeyConditionExpression=key_condition,
+        FilterExpression=filter_expression,
+        ConsistentRead=True,
+    )
+    return response['Items']
+
+
+def list_bubble_maps(room_code, team_id=None):
+    """Returns every TeamBubbleMap item in a room (not its siblings - roulette
+    assignments and progress items all share the TEAM# prefix, so this filters
+    on `type` to exclude them). Optionally narrows to one team when team_id
+    is passed."""
+    table = get_table()
+    key_condition = Key('PK').eq(keys.session_pk(room_code)) & Key('SK').begins_with('TEAM#')
+    filter_expression = Attr('type').eq('TeamBubbleMap')
+    if team_id is not None:
+        filter_expression = filter_expression & Attr('team_id').eq(team_id)
+    response = table.query(
+        KeyConditionExpression=key_condition,
+        FilterExpression=filter_expression,
+        ConsistentRead=True,
+    )
+    return response['Items']
