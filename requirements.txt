@@ -47,6 +47,12 @@ qrcode[pil]==8.0  # Versión más reciente compatible
 gunicorn==23.0.0
 
 # ============================================
+# AWS (Lambda deploy: S3 static/media, DynamoDB)
+# ============================================
+boto3==1.35.36
+django-storages==1.14.4
+
+# ============================================
 # VARIABLES DE ENTORNO
 # ============================================
 python-decouple==3.8  # Versión estable

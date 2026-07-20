@@ -13,8 +13,12 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
     SpectacularRedocView,
 )
+from .views_health import health
 
 urlpatterns = [
+    # Health check (Lambda Web Adapter readiness probe, no DB dependency)
+    path('api/health/', health, name='health'),
+
     # Admin
     path('admin/', admin.site.urls),
     

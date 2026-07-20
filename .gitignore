@@ -1,1 +1,6 @@
 .worktrees/
+secrets.local.txt
+env-vars.local.json
+.aws-sam/
+__pycache__/
+*.pyc

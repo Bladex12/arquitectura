@@ -1,0 +1,43 @@
+# Dockerfile para Backend Django en AWS Lambda (via Lambda Web Adapter)
+# Reutiliza la misma app Django/Gunicorn que Dockerfile.backend; NO ejecuta
+# migrate/collectstatic/seed en el arranque del contenedor -- eso corre por
+# separado (ver docs/deploy) porque en Lambda cada cold start podria disparar
+# invocaciones concurrentes y correr migraciones en paralelo.
+FROM python:3.11-slim-bookworm
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PORT=8000 \
+    AWS_LWA_PORT=8000 \
+    AWS_LWA_READINESS_CHECK_PATH=/api/health/
+
+# Instalar dependencias del sistema
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    default-libmysqlclient-dev \
+    pkg-config \
+    ca-certificates \
+    && apt-get upgrade -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Lambda Web Adapter -- traduce eventos de API Gateway a HTTP plano contra
+# el servidor Gunicorn de abajo, sin tocar el codigo Django/WSGI.
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.8.4 /lambda-adapter /opt/extensions/lambda-adapter
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
+
+COPY . .
+
+RUN mkdir -p /app/media /app/staticfiles
+
+EXPOSE 8000
+
+CMD ["gunicorn", "mision_emprende_backend.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "1", "--threads", "4", "--timeout", "120"]

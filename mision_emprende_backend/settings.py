@@ -26,9 +26,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-=e+*!2!=6b*n+4ey5bi@__07cnh3!^0$(d_kv3%*84g*_kumlr'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 
 # ============================================
@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     
     # Third Party - Utilities
     'django_redis',
+    'storages',
     
     # Project Apps
     'users',
@@ -209,12 +210,42 @@ USE_TZ = True
 # ============================================
 # STATIC FILES & MEDIA
 # ============================================
+# Lambda has no persistent disk, so when STATIC_MEDIA_BUCKET is set
+# (Lambda/SAM deploy), static + media go to S3 via django-storages instead
+# of the local filesystem used by docker-compose dev.
 
-STATIC_URL = '/static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATIC_MEDIA_BUCKET = os.environ.get('STATIC_MEDIA_BUCKET')
 
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+if STATIC_MEDIA_BUCKET:
+    STORAGES = {
+        'default': {
+            'BACKEND': 'storages.backends.s3.S3Storage',
+            'OPTIONS': {
+                'bucket_name': STATIC_MEDIA_BUCKET,
+                'location': 'media',
+                'default_acl': None,
+                'querystring_auth': False,
+            },
+        },
+        'staticfiles': {
+            'BACKEND': 'storages.backends.s3.S3Storage',
+            'OPTIONS': {
+                'bucket_name': STATIC_MEDIA_BUCKET,
+                'location': 'static',
+                'default_acl': None,
+                'querystring_auth': False,
+            },
+        },
+    }
+    AWS_S3_REGION_NAME = os.environ.get('AWS_REGION', 'us-east-1')
+    STATIC_URL = f'https://{STATIC_MEDIA_BUCKET}.s3.{AWS_S3_REGION_NAME}.amazonaws.com/static/'
+    MEDIA_URL = f'https://{STATIC_MEDIA_BUCKET}.s3.{AWS_S3_REGION_NAME}.amazonaws.com/media/'
+else:
+    STATIC_URL = '/static/'
+    STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+    MEDIA_URL = '/media/'
+    MEDIA_ROOT = BASE_DIR / 'media'
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -360,6 +391,10 @@ if DEBUG:
 # LOGGING CONFIGURATION
 # ============================================
 
+# Lambda's filesystem is read-only outside /tmp, so the file handler is
+# skipped there -- CloudWatch already captures the console handler's output.
+IS_LAMBDA = bool(os.environ.get('AWS_LAMBDA_FUNCTION_NAME'))
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -378,11 +413,13 @@ LOGGING = {
             'class': 'logging.StreamHandler',
             'formatter': 'verbose',
         },
-        'file': {
-            'class': 'logging.FileHandler',
-            'filename': BASE_DIR / 'logs' / 'django.log',
-            'formatter': 'verbose',
-        },
+        **({} if IS_LAMBDA else {
+            'file': {
+                'class': 'logging.FileHandler',
+                'filename': BASE_DIR / 'logs' / 'django.log',
+                'formatter': 'verbose',
+            },
+        }),
     },
     'root': {
         'handlers': ['console'],
@@ -390,12 +427,12 @@ LOGGING = {
     },
     'loggers': {
         'django': {
-            'handlers': ['console', 'file'],
+            'handlers': ['console'] if IS_LAMBDA else ['console', 'file'],
             'level': 'INFO',
             'propagate': False,
         },
         'mision_emprende': {
-            'handlers': ['console', 'file'],
+            'handlers': ['console'] if IS_LAMBDA else ['console', 'file'],
             'level': 'DEBUG' if DEBUG else 'INFO',
             'propagate': False,
         },

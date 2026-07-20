@@ -1,0 +1,438 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Mision Emprende -- serverless stack (AWS Academy Learner Lab).
+  Django REST API on Lambda (Web Adapter), WebSocket real-time layer,
+  DynamoDB for game_sessions runtime data, RDS MySQL for users/academic/
+  challenges, S3+Firehose+Athena for admin_dashboard analytics.
+
+  NOTE: WS handlers (lambda/ws-*) and the stream-to-firehose Lambda are
+  stubs -- see the migration plan for which tasks fill them in. Canary
+  (AutoPublishAlias/DeploymentPreference) is intentionally left off every
+  function until the base stack deploys successfully once.
+
+Parameters:
+  LabRoleArn:
+    Type: String
+    Description: >
+      ARN of the pre-provisioned AWS Academy Learner Lab execution role.
+      IAM role creation is typically blocked on these accounts, so every
+      Lambda below is pinned to this role instead of letting SAM
+      auto-generate one.
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Default VPC id (Lambda needs VPC access to reach RDS).
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private/default subnets for the Django Lambda and RDS.
+  DBPassword:
+    Type: String
+    NoEcho: true
+  DjangoSecretKey:
+    Type: String
+    NoEcho: true
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+
+Resources:
+
+  # ==========================================================
+  # Networking (RDS + Lambda-in-VPC)
+  # ==========================================================
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: MySQL access from the Django Lambda only
+      VpcId: !Ref VpcId
+
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Django Lambda outbound (to RDS)
+      VpcId: !Ref VpcId
+
+  DBSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DBSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      SourceSecurityGroupId: !Ref LambdaSecurityGroup
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnets for the RDS MySQL instance
+      SubnetIds: !Ref SubnetIds
+
+  # ==========================================================
+  # Relational data: users / academic / challenges catalog
+  # ==========================================================
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Metadata:
+      # DBPassword is a NoEcho parameter, not a Secrets Manager dynamic
+      # reference, because Learner Lab's restricted IAM role typically
+      # can't create/read secrets. Suppress the lint suggestion.
+      cfn-lint:
+        config:
+          ignore_checks:
+            - W1011
+    Properties:
+      Engine: mysql
+      EngineVersion: '8.0.43'
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: '20'
+      DBName: mision_emprende2
+      MasterUsername: admin
+      MasterUserPassword: !Ref DBPassword
+      VPCSecurityGroups:
+        - !Ref DBSecurityGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      MultiAZ: false
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 1
+      # Stop this instance between work sessions (Learner Lab $50 cap) --
+      # unlike Aurora Serverless v2, plain RDS can be stopped to ~$0 compute.
+
+  # ==========================================================
+  # Django REST API (Lambda Web Adapter, container image)
+  # ==========================================================
+
+  DjangoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Role: !Ref LabRoleArn
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds: !Ref SubnetIds
+      Environment:
+        Variables:
+          DATABASE_HOST: !GetAtt RDSInstance.Endpoint.Address
+          DATABASE_PORT: !GetAtt RDSInstance.Endpoint.Port
+          DATABASE_NAME: mision_emprende2
+          DATABASE_USER: admin
+          DATABASE_PASSWORD: !Ref DBPassword
+          SECRET_KEY: !Ref DjangoSecretKey
+          DEBUG: 'False'
+          # 127.0.0.1 required so the Lambda Web Adapter's internal readiness
+          # probe (curls localhost inside the container) isn't rejected.
+          ALLOWED_HOSTS: !Sub "127.0.0.1,localhost,.execute-api.${AWS::Region}.amazonaws.com"
+          STATIC_MEDIA_BUCKET: !Ref StaticMediaBucket
+          GAME_SESSIONS_TABLE: !Ref GameSessionTable
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+      Events:
+        RootApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DjangoApi
+            Path: /
+            Method: ANY
+        ProxyApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DjangoApi
+            Path: /{proxy+}
+            Method: ANY
+    Metadata:
+      Dockerfile: Dockerfile.lambda
+      DockerContext: .
+      DockerTag: latest
+
+  DjangoApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+
+  # ==========================================================
+  # Static / media (Lambda has no persistent disk)
+  # ==========================================================
+
+  StaticMediaBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ==========================================================
+  # DynamoDB: game_sessions runtime data (single-table)
+  # ==========================================================
+  # PK/SK scheme filled in by the "DynamoDB single-table design for
+  # game_sessions" task. Placeholder generic key names below so every
+  # entity (GameSession/Team/TeamStudent/TeamActivityProgress/SessionStage/
+  # ReflectionEvaluation/TokenTransaction/TeamBubbleMap/TeamPersonalization/
+  # Tablet/SessionGroup) can share this one table.
+
+  GameSessionTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+
+  # ==========================================================
+  # DynamoDB: WebSocket connection tracking
+  # ==========================================================
+
+  ConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: connectionId
+          AttributeType: S
+        - AttributeName: room_code
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connectionId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: RoomCodeIndex
+          KeySchema:
+            - AttributeName: room_code
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # ==========================================================
+  # WebSocket API (raw ApiGatewayV2 -- not expressible via SAM's
+  # Api/HttpApi event types)
+  # ==========================================================
+
+  WebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: mision-emprende-ws
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+
+  WsConnectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: index.handler
+      CodeUri: lambda/ws-connect/
+      Role: !Ref LabRoleArn
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+
+  WsDisconnectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: index.handler
+      CodeUri: lambda/ws-disconnect/
+      Role: !Ref LabRoleArn
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+
+  WsDefaultFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: index.handler
+      CodeUri: lambda/ws-default/
+      Role: !Ref LabRoleArn
+
+  WsConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WsConnectFunction.Arn}/invocations
+
+  WsDisconnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WsDisconnectFunction.Arn}/invocations
+
+  WsDefaultIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WsDefaultFunction.Arn}/invocations
+
+  WsConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $connect
+      Target: !Sub integrations/${WsConnectIntegration}
+
+  WsDisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $disconnect
+      Target: !Sub integrations/${WsDisconnectIntegration}
+
+  WsDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $default
+      Target: !Sub integrations/${WsDefaultIntegration}
+
+  WsConnectPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WsConnectFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*
+
+  WsDisconnectPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WsDisconnectFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*
+
+  WsDefaultPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WsDefaultFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*
+
+  WebSocketDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+      - WsConnectRoute
+      - WsDisconnectRoute
+      - WsDefaultRoute
+    Properties:
+      ApiId: !Ref WebSocketApi
+
+  WebSocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref WebSocketApi
+      DeploymentId: !Ref WebSocketDeployment
+      StageName: prod
+
+  # ==========================================================
+  # admin_dashboard analytics: DynamoDB Streams -> Firehose -> S3 -> Athena
+  # ==========================================================
+
+  AnalyticsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  AnalyticsDeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamType: DirectPut
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt AnalyticsBucket.Arn
+        RoleARN: !Ref LabRoleArn
+        Prefix: "game_sessions/dt=!{timestamp:yyyy-MM-dd}/"
+        ErrorOutputPrefix: "errors/"
+        BufferingHints:
+          IntervalInSeconds: 300
+          SizeInMBs: 5
+
+  StreamToFirehoseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: index.handler
+      CodeUri: lambda/stream-to-firehose/
+      Role: !Ref LabRoleArn
+      Environment:
+        Variables:
+          DELIVERY_STREAM_NAME: !Ref AnalyticsDeliveryStream
+      Events:
+        GameSessionStream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt GameSessionTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize: 100
+            MaximumBatchingWindowInSeconds: 30
+
+  AthenaWorkGroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: mision-emprende-analytics
+      WorkGroupConfiguration:
+        ResultConfiguration:
+          OutputLocation: !Sub s3://${AnalyticsBucket}/athena-results/
+
+  AnalyticsGlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: mision_emprende_analytics
+
+Outputs:
+  DjangoApiUrl:
+    Value: !Sub https://${DjangoApi}.execute-api.${AWS::Region}.amazonaws.com/prod/
+  WebSocketUrl:
+    Value: !Sub wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/prod/
+  RDSEndpoint:
+    Value: !GetAtt RDSInstance.Endpoint.Address
+  GameSessionTableName:
+    Value: !Ref GameSessionTable
+  ConnectionsTableName:
+    Value: !Ref ConnectionsTable
+  StaticMediaBucketName:
+    Value: !Ref StaticMediaBucket
+  AnalyticsBucketName:
+    Value: !Ref AnalyticsBucket
