@@ -22,6 +22,7 @@ import os
 from PIL import Image
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
+from django.shortcuts import get_object_or_404
 
 logger = logging.getLogger(__name__)
 from users.models import Professor, Student
@@ -94,6 +95,28 @@ class GameSessionViewSet(viewsets.ViewSet):
             return [AllowAny()]
         return super().get_permissions()
     parser_classes = [MultiPartParser, FormParser]
+
+    def get_object(self):
+        """
+        TEMPORARY compatibility shim for not-yet-ported legacy ORM actions.
+
+        Retrieves a GameSession object by pk from the request kwargs and
+        returns it after permission checks. This method is needed because
+        the viewset was changed from ModelViewSet to ViewSet (Task 10),
+        which removed generic mixins that provided get_object().
+
+        This shim is used by actions like show_results, end, and others
+        that still run pure ORM code (lines ~2238-3593 in this file).
+        It will be removed once those actions are ported to DynamoDB
+        (Tasks 11/12 of the cutover plan).
+
+        Do not extend this method or build architecture on it — it is
+        meant to be a temporary bridge, not a permanent part of the design.
+        """
+        pk = self.kwargs.get('pk')
+        obj = get_object_or_404(GameSession.objects.all(), pk=pk)
+        self.check_object_permissions(self.request, obj)
+        return obj
 
     # ------------------------------------------------------------------
     # list / retrieve / create / update / partial_update / destroy
