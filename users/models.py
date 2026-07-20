@@ -124,18 +124,21 @@ class Professor(models.Model):
         """
         Calcula el número de estudiantes únicos que han participado
         en todas las sesiones completadas del profesor.
+
+        Portado a DynamoDB (game_sessions cutover, Task 6): la lista de
+        estudiantes ahora vive embebida en cada item Team
+        (`student_ids`), así que ya no hace falta el join a través de
+        TeamStudent - basta con recorrer las sesiones completadas del
+        profesor y unir los rosters de sus equipos.
         """
-        from game_sessions.models import TeamStudent
-        
-        # Obtener todas las sesiones completadas del profesor
-        completed_sessions = self.game_sessions.filter(status='completed')
-        
-        # Contar estudiantes únicos usando TeamStudent (tabla intermedia)
-        unique_students = TeamStudent.objects.filter(
-            team__game_session__in=completed_sessions
-        ).values('student').distinct().count()
-        
-        return unique_students
+        from game_sessions.dynamodb.game_session import list_sessions_for_professor
+        from game_sessions.dynamodb.team import list_teams
+
+        unique_student_ids = set()
+        for session in list_sessions_for_professor(self.id, status='completed'):
+            for team in list_teams(session['room_code']):
+                unique_student_ids.update(team['student_ids'])
+        return len(unique_student_ids)
 
 
 class Student(models.Model):
