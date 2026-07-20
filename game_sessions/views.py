@@ -22,6 +22,7 @@ import os
 from PIL import Image
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.shortcuts import get_object_or_404
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,7 @@ from .serializers import (
     TeamSerializer, TeamPersonalizationSerializer,
     SessionStageSerializer, TeamActivityProgressSerializer,
     TeamBubbleMapSerializer, TabletSerializer, TabletConnectionSerializer,
+    annotate_tablet_connection_display_fields,
     TeamRouletteAssignmentSerializer, TokenTransactionSerializer,
     PeerEvaluationSerializer, ReflectionEvaluationSerializer
 )
@@ -50,7 +52,8 @@ from game_sessions.dynamodb.catalog import create_session_group
 from game_sessions.dynamodb.stage_progress import (
     create_session_stage, get_session_stage, update_session_stage, upsert_progress, get_progress,
 )
-from game_sessions.dynamodb.tablet_connection import list_connections
+from game_sessions.dynamodb.tablet_connection import list_connections, disconnect
+from game_sessions.dynamodb.token_transaction import list_transactions
 from game_sessions.dynamodb.client import now_iso
 
 
@@ -74,19 +77,20 @@ class GameSessionViewSet(viewsets.ViewSet):
     game_session/team modules Task 10 already wired up. None of these six
     actions call self.get_object() anymore.
 
-    IMPORTANT scope note: only this class's CRUD methods, process_excel/
-    create_with_excel (Task 10), and start/sync_teams/next_activity/
-    set_video_institucional_activity/set_instructivo_activity/complete_stage
-    (Task 11) -- plus their private helpers -- have been ported so far.
-    Every other @action on this class below `complete_stage`
-    (start_stage_1, activity_timer, stage_results, next_stage, show_results,
-    end, active_session, start_reflection, reflection_qr, teams, lobby,
-    etapa, ...) still calls self.get_serializer()/self.get_object()/
-    self.get_queryset(), which viewsets.ModelViewSet used to provide via
-    GenericViewSet and a plain viewsets.ViewSet does not. Those actions are
-    explicitly out of scope here (ported incrementally in later tasks) and
-    will raise AttributeError until then -- this is expected, not something
-    this task fixes or regresses in spirit.
+    DynamoDB cutover (Task 12): activity_timer, stage_results, next_stage,
+    show_results, end, active_session, start_reflection, reflection_qr,
+    teams, lobby and etapa are also now ported -- same repository modules
+    as Task 11, plus game_sessions.dynamodb.token_transaction for
+    stage_results' per-team token totals. None of these eleven actions call
+    self.get_object()/self.get_serializer() anymore either.
+
+    IMPORTANT scope note: `start_stage_1` (between `next_activity` and
+    `set_video_institucional_activity` in this file) was explicitly out of
+    scope for both Task 11's and Task 12's briefs and is still unported --
+    it still calls self.get_object()/self.get_serializer() and will raise
+    AttributeError if invoked. This is a known plan-level gap (flagged in
+    Task 12's report, not fixed there) -- the get_object() shim below is
+    kept alive solely for this one action until a future task ports it.
     """
     permission_classes = [IsAuthenticated]
 
@@ -113,12 +117,16 @@ class GameSessionViewSet(viewsets.ViewSet):
         the viewset was changed from ModelViewSet to ViewSet (Task 10),
         which removed generic mixins that provided get_object().
 
-        This shim is used by actions like start_stage_1, show_results, end,
-        and others that still run pure ORM code. It will be removed once
-        those actions are ported to DynamoDB (Task 12+ of the cutover
-        plan) -- start/sync_teams/next_activity/
-        set_video_institucional_activity/set_instructivo_activity/
-        complete_stage no longer use it as of Task 11.
+        As of Task 12, `start_stage_1` is the ONLY remaining caller of this
+        shim on this class -- every other action that used to call it
+        (next_stage, show_results, end, start_reflection, teams; plus
+        start/sync_teams/next_activity/set_video_institucional_activity/
+        set_instructivo_activity/complete_stage from Task 11) has been
+        ported to read/write game_sessions.dynamodb.* directly. This shim
+        is being kept alive specifically because `start_stage_1` was
+        excluded from both Task 11's and Task 12's briefs (a known
+        plan-level gap, see the class docstring) -- it is NOT safe to
+        remove until `start_stage_1` is ported by a future task.
 
         Do not extend this method or build architecture on it — it is
         meant to be a temporary bridge, not a permanent part of the design.
@@ -1720,63 +1728,53 @@ class GameSessionViewSet(viewsets.ViewSet):
         Permite acceso sin autenticación para tablets
         """
         try:
-            # Obtener sesión directamente sin verificar permisos
-            try:
-                game_session = GameSession.objects.get(id=pk)
-            except GameSession.DoesNotExist:
+            room_code = pk
+            session = get_session(room_code)
+            if session is None:
                 return Response(
                     {'error': 'Sesión no encontrada'},
                     status=status.HTTP_404_NOT_FOUND
                 )
-            
-            if not game_session.current_activity:
+
+            current_activity_id = session.get('current_activity_id')
+            if not current_activity_id:
                 return Response(
                     {'error': 'No hay actividad actual'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
-            activity = game_session.current_activity
-            
+
+            from challenges.models import Activity
+            activity = Activity.objects.get(id=current_activity_id)
+
             # Manejar timer_duration de forma segura (puede ser None)
             timer_duration = getattr(activity, 'timer_duration', None)
-            
-            # Obtener el started_at más temprano de todos los equipos para esta actividad
-            from .models import SessionStage, TeamActivityProgress
-            session_stage = None
-            if game_session.current_stage:
-                session_stage = SessionStage.objects.filter(
-                    game_session=game_session,
-                    stage=game_session.current_stage
-                ).first()
-            
+
+            # Obtener el started_at (ISO string) mas temprano de todos los
+            # equipos para esta actividad, dentro de la etapa actual
             earliest_start = None
-            if session_stage:
-                try:
-                    progress_list = TeamActivityProgress.objects.filter(
-                        activity=activity,
-                        session_stage=session_stage
-                    ).exclude(started_at__isnull=True).order_by('started_at')
-                    
-                    if progress_list.exists():
-                        earliest_start = progress_list.first().started_at
-                except Exception as e:
-                    print(f"Error obteniendo progress_list: {e}")
-            
+            if session.get('current_stage_id'):
+                for team in list_teams(room_code):
+                    progress = get_progress(room_code, team['team_id'], current_activity_id)
+                    started_at = progress.get('started_at') if progress else None
+                    if started_at and (earliest_start is None or started_at < earliest_start):
+                        earliest_start = started_at
+
             # Si no hay started_at, usar el started_at de la sesión
-            if not earliest_start and game_session.started_at:
-                earliest_start = game_session.started_at
+            if not earliest_start and session.get('started_at'):
+                earliest_start = session['started_at']
 
             remaining_seconds = None
             now = timezone.now()
-            if timer_duration is not None and earliest_start:
-                elapsed_seconds = int((now - earliest_start).total_seconds())
+            earliest_start_dt = parse_datetime(earliest_start) if earliest_start else None
+            if timer_duration is not None and earliest_start_dt:
+                elapsed_seconds = int((now - earliest_start_dt).total_seconds())
                 remaining_seconds = max(0, timer_duration - elapsed_seconds)
 
             return Response({
                 'activity_id': activity.id,
                 'activity_name': activity.name,
                 'timer_duration': timer_duration,  # En segundos (puede ser None)
-                'started_at': earliest_start.isoformat() if earliest_start else None,
+                'started_at': earliest_start,
                 'current_time': now.isoformat(),
                 'remaining_seconds': remaining_seconds
             })
@@ -1795,88 +1793,78 @@ class GameSessionViewSet(viewsets.ViewSet):
         Obtener resultados de una etapa completada
         Permite acceso sin autenticación para tablets
         """
-        # Obtener sesión directamente sin verificar permisos
-        try:
-            game_session = GameSession.objects.get(id=pk)
-        except GameSession.DoesNotExist:
+        room_code = pk
+        session = get_session(room_code)
+        if session is None:
             return Response(
                 {'error': 'Sesión no encontrada'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
         stage_id = request.query_params.get('stage_id')
-        
         if not stage_id:
             # Si no se especifica stage_id, usar la etapa actual
-            if not game_session.current_stage:
+            if not session.get('current_stage_id'):
                 return Response(
                     {'error': 'No hay etapa actual establecida'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            stage_id = game_session.current_stage.id
-        
-        from challenges.models import Stage
-        from .models import SessionStage, Team, TokenTransaction
-        
+            stage_id = session['current_stage_id']
+
+        from challenges.models import Stage, Activity
+
         try:
+            stage_id = int(stage_id)
             stage = Stage.objects.get(id=stage_id)
-        except Stage.DoesNotExist:
+        except (ValueError, TypeError, Stage.DoesNotExist):
             return Response(
                 {'error': 'Etapa no encontrada'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
+
         # Obtener SessionStage para esta etapa
-        session_stage = SessionStage.objects.filter(
-            game_session=game_session,
-            stage=stage
-        ).first()
-        
+        session_stage = get_session_stage(room_code, stage_id)
         if not session_stage:
             return Response(
                 {'error': 'No se encontró información de esta etapa para esta sesión'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
-        # Obtener todos los equipos con su personalización
-        teams = Team.objects.filter(game_session=game_session).select_related('personalization')
-        
+
+        # Obtener todos los equipos y las transacciones de tokens de la sala
+        # de una sola vez (una Query cada una) en lugar de una agregación
+        # por equipo -- DynamoDB no tiene un equivalente directo a
+        # aggregate(Sum(...)) filtrado por FK, así que se agrupa en Python.
+        teams = list_teams(room_code)
+        transactions = list_transactions(room_code)
+        activities = Activity.objects.filter(stage=stage, is_active=True).order_by('order_number')
+
         # Calcular resultados para cada equipo
         results = []
         for team in teams:
             # Tokens ganados en esta etapa
-            from django.db.models import Sum
-            stage_tokens = TokenTransaction.objects.filter(
-                team=team,
-                game_session=game_session,
-                session_stage=session_stage
-            ).aggregate(total=Sum('amount'))['total'] or 0
-            
+            stage_tokens = sum(
+                tx['amount'] for tx in transactions
+                if tx['team_id'] == team['team_id'] and tx.get('session_stage_id') == stage_id
+            )
+
             # Tokens totales acumulados
-            total_tokens = team.tokens_total
-            
+            total_tokens = team.get('tokens_total', 0)
+
             # Progreso de actividades en esta etapa
-            from .models import TeamActivityProgress
-            from challenges.models import Activity
-            activities = Activity.objects.filter(stage=stage, is_active=True).order_by('order_number')
-            
             activities_progress = []
             for activity in activities:
-                progress = TeamActivityProgress.objects.filter(
-                    team=team,
-                    activity=activity,
-                    session_stage=session_stage
-                ).first()
-                
+                progress = get_progress(room_code, team['team_id'], activity.id)
+
                 # Si no hay progreso pero la etapa está completada, considerar todas las actividades como completadas
                 # Si hay progreso, usar su estado real
                 if progress:
-                    activity_status = progress.status
-                    progress_percentage = progress.progress_percentage
-                    completed_at = progress.completed_at.isoformat() if progress.completed_at else None
+                    activity_status = progress['status']
+                    progress_percentage = progress['progress_percentage']
+                    completed_at = progress.get('completed_at')
                 else:
                     # Si no hay registro de progreso pero estamos en resultados de etapa completada,
                     # considerar como completada (puede que no se haya registrado correctamente)
-                    if session_stage.status == 'completed':
+                    if session_stage['status'] == 'completed':
                         activity_status = 'completed'
                         progress_percentage = 100
                         completed_at = None
@@ -1884,7 +1872,7 @@ class GameSessionViewSet(viewsets.ViewSet):
                         activity_status = 'pending'
                         progress_percentage = 0
                         completed_at = None
-                
+
                 activities_progress.append({
                     'activity_id': activity.id,
                     'activity_name': activity.name,
@@ -1892,38 +1880,32 @@ class GameSessionViewSet(viewsets.ViewSet):
                     'progress_percentage': progress_percentage,
                     'completed_at': completed_at
                 })
-            
+
             # Obtener el nombre personalizado si existe, sino usar el nombre del equipo
-            personalized_name = team.name  # Por defecto: "Equipo Rojo", "Equipo Verde", etc.
-            try:
-                # Intentar acceder a la personalización (OneToOneField)
-                if hasattr(team, 'personalization'):
-                    personalization = getattr(team, 'personalization', None)
-                    if personalization and personalization.team_name:
-                        personalized_name = personalization.team_name
-            except Exception as e:
-                # Si no hay personalización o hay algún error, usar el nombre del equipo
-                pass
-            
+            personalized_name = team.get('personalization_team_name') or team['name']
+
             results.append({
-                'team_id': team.id,
+                'team_id': team['team_id'],
                 'team_name': personalized_name,
-                'team_color': team.color,
+                'team_color': team['color'],
                 'tokens_stage': stage_tokens,
                 'tokens_total': total_tokens,
                 'activities_progress': activities_progress
             })
-        
+
         # Ordenar por tokens totales (ranking)
         results.sort(key=lambda x: x['tokens_total'], reverse=True)
-        
+
         return Response({
             'stage_id': stage.id,
             'stage_name': stage.name,
             'stage_number': stage.number,
-            'session_stage_id': session_stage.id,
-            'session_stage_status': session_stage.status,
-            'session_stage_completed_at': session_stage.completed_at.isoformat() if session_stage.completed_at else None,
+            # SessionStage has no synthetic id of its own in the new schema
+            # (it's identified by (room_code, stage_id)) -- stage.id plays
+            # the same role SessionStageSerializer.id does elsewhere.
+            'session_stage_id': stage.id,
+            'session_stage_status': session_stage['status'],
+            'session_stage_completed_at': session_stage.get('completed_at'),
             'teams_results': results
         })
 
@@ -1932,98 +1914,83 @@ class GameSessionViewSet(viewsets.ViewSet):
         """
         Avanzar a la siguiente etapa
         """
-        game_session = self.get_object()
-        
-        if game_session.status != 'running':
+        room_code = pk
+        session = get_session(room_code)
+        if session is None:
+            return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        if session['status'] != 'running':
             return Response(
                 {'error': 'La sesión debe estar en estado running'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        if not game_session.current_stage:
+
+        current_stage_id = session.get('current_stage_id')
+        if not current_stage_id:
             return Response(
                 {'error': 'No hay etapa actual establecida'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        from challenges.models import Stage
-        current_stage_number = game_session.current_stage.number
-        next_stage = Stage.objects.filter(
-            number=current_stage_number + 1,
+
+        from challenges.models import Stage, Activity
+
+        current_stage = Stage.objects.get(id=current_stage_id)
+        next_stage_obj = Stage.objects.filter(
+            number=current_stage.number + 1,
             is_active=True
         ).first()
-        
-        if not next_stage:
+
+        if not next_stage_obj:
             return Response(
                 {'error': 'No hay más etapas disponibles'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Actualizar etapa actual
-        game_session.current_stage = next_stage
 
         # Obtener la primera actividad de la nueva etapa
-        from challenges.models import Activity
         first_activity = Activity.objects.filter(
-            stage=next_stage,
+            stage=next_stage_obj,
             is_active=True
         ).order_by('order_number').first()
 
-        if first_activity:
-            game_session.current_activity = first_activity
-        else:
-            game_session.current_activity = None
+        session = update_session(
+            room_code,
+            current_stage_id=next_stage_obj.id,
+            current_activity_id=first_activity.id if first_activity else None,
+            show_results_stage=0,
+        ) or session
 
-        game_session.show_results_stage = 0
-        game_session.save()
-        
         # Crear SessionStage para la nueva etapa
-        from .models import SessionStage, Team, TeamActivityProgress
-        session_stage, created = SessionStage.objects.get_or_create(
-            game_session=game_session,
-            stage=next_stage,
-            defaults={
-                'status': 'in_progress',
-                'started_at': timezone.now()
-            }
-        )
-        
-        # Si la etapa ya existía pero estaba completada, actualizar su estado
-        if not created and session_stage.status == 'completed':
-            session_stage.status = 'in_progress'
-            session_stage.completed_at = None
-            session_stage.save()
-        
+        activity_start_time = now_iso()
+        session_stage = get_session_stage(room_code, next_stage_obj.id)
+        if session_stage is None:
+            create_session_stage(room_code, next_stage_obj.id)
+            update_session_stage(room_code, next_stage_obj.id, status='in_progress', started_at=activity_start_time)
+        elif session_stage['status'] == 'completed':
+            # Si la etapa ya existía pero estaba completada, actualizar su estado
+            update_session_stage(room_code, next_stage_obj.id, status='in_progress', completed_at=None)
+
         # Si hay una primera actividad, inicializar started_at para todos los equipos
         if first_activity:
-            teams = Team.objects.filter(game_session=game_session)
-            for team in teams:
-                progress, created = TeamActivityProgress.objects.get_or_create(
-                    team=team,
-                    activity=first_activity,
-                    session_stage=session_stage,
-                    defaults={
-                        'status': 'in_progress',
-                        'started_at': timezone.now(),
-                        'progress_percentage': 0
-                    }
-                )
-                # Si ya existía, actualizar started_at si no tenía
-                if not created and not progress.started_at:
-                    progress.started_at = timezone.now()
-                    progress.status = 'in_progress'
-                    progress.save()
-        
-        game_session.refresh_from_db()
-        game_session = GameSession.objects.select_related(
-            'current_stage', 'current_activity'
-        ).get(id=game_session.id)
-        
-        serializer = self.get_serializer(game_session)
+            for team in list_teams(room_code):
+                existing = get_progress(room_code, team['team_id'], first_activity.id)
+                if existing is None:
+                    upsert_progress(
+                        room_code, team['team_id'], first_activity.id,
+                        status='in_progress', started_at=activity_start_time, progress_percentage=0,
+                    )
+                elif not existing.get('started_at'):
+                    # Si ya existía, actualizar started_at si no tenía
+                    self._upsert_progress_preserving(
+                        room_code, team['team_id'], first_activity.id,
+                        status='in_progress', started_at=activity_start_time,
+                    )
+
+        annotate_game_session_display_fields(session, teams=list_teams(room_code))
+        serializer = GameSessionSerializer(session)
         return Response({
             **serializer.data,
-            'message': f'Avanzando a Etapa {next_stage.number}: {next_stage.name}',
-            'next_stage_number': next_stage.number
+            'message': f'Avanzando a Etapa {next_stage_obj.number}: {next_stage_obj.name}',
+            'next_stage_number': next_stage_obj.number
         })
 
     @action(detail=True, methods=['post'], parser_classes=[JSONParser])
@@ -2032,7 +1999,11 @@ class GameSessionViewSet(viewsets.ViewSet):
         Activar/desactivar la pantalla de resultados en tablets.
         Payload: {"stage": 1-4} para activar, {"stage": 0} para limpiar.
         """
-        game_session = self.get_object()
+        room_code = pk
+        session = get_session(room_code)
+        if session is None:
+            return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
         stage = request.data.get('stage', 0)
         try:
             stage = int(stage)
@@ -2040,39 +2011,38 @@ class GameSessionViewSet(viewsets.ViewSet):
             return Response({'error': 'stage debe ser un entero 0-4'}, status=status.HTTP_400_BAD_REQUEST)
         if stage < 0 or stage > 4:
             return Response({'error': 'stage debe estar entre 0 y 4'}, status=status.HTTP_400_BAD_REQUEST)
-        game_session.show_results_stage = stage
-        game_session.save(update_fields=['show_results_stage'])
-        return Response({'show_results_stage': game_session.show_results_stage})
+
+        session = update_session(room_code, show_results_stage=stage) or session
+        return Response({'show_results_stage': session['show_results_stage']})
 
     @action(detail=True, methods=['post'], parser_classes=[JSONParser])
     def end(self, request, pk=None):
         """Finalizar una sesión de juego manualmente"""
-        game_session = self.get_object()
-        
+        room_code = pk
+        session = get_session(room_code)
+        if session is None:
+            return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
         # Verificar si estamos en reflexión
-        from .models import SessionStage
         from challenges.models import Stage
         stage_4 = Stage.objects.filter(number=4, is_active=True).first()
         in_reflection = False
         if stage_4:
-            session_stage = SessionStage.objects.filter(
-                game_session=game_session,
-                stage=stage_4
-            ).first()
-            if session_stage and session_stage.presentation_timestamps:
-                in_reflection = session_stage.presentation_timestamps.get('_reflection', False)
-        
+            session_stage = get_session_stage(room_code, stage_4.id)
+            if session_stage and session_stage.get('presentation_timestamps'):
+                in_reflection = session_stage['presentation_timestamps'].get('_reflection', False)
+
         # Permitir finalizar si está en lobby, running, o en reflexión
-        if game_session.status not in ['lobby', 'running', 'completed'] and not in_reflection:
+        if session['status'] not in ['lobby', 'running', 'completed'] and not in_reflection:
             return Response(
                 {'error': 'La sesión no está activa'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Obtener motivo de cancelación del request
         cancellation_reason = request.data.get('cancellation_reason', '')
         cancellation_reason_other = request.data.get('cancellation_reason_other', '')
-        
+
         # Si está en reflexión, usar valores por defecto si no se proporcionan
         if in_reflection:
             if not cancellation_reason:
@@ -2086,44 +2056,40 @@ class GameSessionViewSet(viewsets.ViewSet):
                     {'error': 'Debe proporcionar un motivo de cancelación'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
+
             # Si el motivo es "Otro", validar que se proporcione la descripción
             if cancellation_reason == 'Otro' and not cancellation_reason_other:
                 return Response(
                     {'error': 'Debe proporcionar una descripción cuando selecciona "Otro"'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-        
+
         # Si estamos en reflexión, NO desconectar las tablets automáticamente
         # Las tablets deben permanecer en la pantalla de reflexión para que los estudiantes completen la encuesta
         tablets_disconnected = 0
         if not in_reflection:
             # Solo desconectar tablets si NO estamos en reflexión
-            from .models import TabletConnection
-            active_connections = TabletConnection.objects.filter(
-                game_session=game_session,
-                disconnected_at__isnull=True
-            )
-            
-            disconnect_time = timezone.now()
-            for connection in active_connections:
-                connection.disconnected_at = disconnect_time
-                connection.save()
-            tablets_disconnected = active_connections.count()
-        
+            for connection in list_connections(room_code):
+                if connection.get('disconnected_at') is None:
+                    disconnect(room_code, connection['team_session_token'])
+                    tablets_disconnected += 1
+
         # Marcar como completada (no cancelada) si está en reflexión
-        if in_reflection:
-            game_session.status = 'completed'
-        else:
-            game_session.status = 'cancelled'
-        
-        game_session.ended_at = timezone.now()
-        game_session.cancellation_reason = cancellation_reason
+        new_status = 'completed' if in_reflection else 'cancelled'
+        transitioned = update_session_status(room_code, expected_status=session['status'], new_status=new_status)
+        if not transitioned:
+            return Response(
+                {'error': 'No se pudo finalizar la sesión (conflicto de concurrencia)'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        extra_fields = {'ended_at': now_iso(), 'cancellation_reason': cancellation_reason}
         if cancellation_reason == 'Otro':
-            game_session.cancellation_reason_other = cancellation_reason_other
-        game_session.save()
-        
-        serializer = self.get_serializer(game_session)
+            extra_fields['cancellation_reason_other'] = cancellation_reason_other
+        session = update_session(room_code, **extra_fields) or get_session(room_code)
+
+        annotate_game_session_display_fields(session, teams=list_teams(room_code))
+        serializer = GameSessionSerializer(session)
         return Response({
             **serializer.data,
             'tablets_disconnected': tablets_disconnected,
@@ -2136,7 +2102,6 @@ class GameSessionViewSet(viewsets.ViewSet):
         Obtener la(s) sesión(es) activa(s) del profesor (lobby o running)
         Puede retornar múltiples sesiones si están en un grupo
         Prioriza sesiones en estado 'running' sobre 'lobby'
-        OPTIMIZADO: Una sola consulta con select_related y prefetch_related
         """
         try:
             professor = request.user.professor
@@ -2145,57 +2110,37 @@ class GameSessionViewSet(viewsets.ViewSet):
                 {'error': 'El usuario no es un profesor'},
                 status=status.HTTP_403_FORBIDDEN
             )
-        
-        # Optimizar: Una sola consulta para ambas condiciones usando Q objects
-        from django.db.models import Q
-        
-        # Buscar sesiones activas (running primero, luego lobby) con optimizaciones
-        active_sessions = GameSession.objects.filter(
-            professor=professor,
-            status__in=['running', 'lobby']
-        ).select_related(
-            'professor__user', 
-            'course', 
-            'current_stage', 
-            'current_activity',
-            'session_group'
-        ).prefetch_related(
-            'teams'  # Prefetch teams para evitar consultas adicionales en teams_count
-        ).order_by(
-            '-status',  # 'running' antes que 'lobby' (orden alfabético inverso)
-            '-created_at'
-        )
-        
-        if not active_sessions.exists():
+
+        # Buscar sesiones activas (running primero, luego lobby) -- dos
+        # Query por GSI1 (una por status) en vez de una única consulta con
+        # OR, porque GSI1SK codifica el status como prefijo (ver
+        # list_sessions_for_professor); cada Query ya devuelve sus
+        # resultados newest-created-first.
+        running_sessions = list_sessions_for_professor(professor.id, status='running')
+        lobby_sessions = list_sessions_for_professor(professor.id, status='lobby')
+        sessions_list = running_sessions + lobby_sessions
+
+        if not sessions_list:
             return Response(
                 {'active_session': None},
                 status=status.HTTP_200_OK
             )
-        
-        # Obtener todas las sesiones activas
-        sessions_list = list(active_sessions)
-        
+
+        self._batch_annotate_sessions(sessions_list)
+
         # Si hay múltiples sesiones activas, retornar todas (independientemente del grupo)
         if len(sessions_list) > 1:
-            # Ordenar: 'running' primero, luego 'lobby'
-            sessions_list.sort(key=lambda s: (s.status != 'running', -s.created_at.timestamp() if s.created_at else 0))
-            serializer = self.get_serializer(sessions_list, many=True)
-            session_group = sessions_list[0].session_group if sessions_list else None
+            serializer = GameSessionSerializer(sessions_list, many=True)
+            session_group_id = sessions_list[0].get('session_group_id')
             return Response({
                 'active_sessions': serializer.data,
-                'session_group_id': session_group.id if session_group else None,
+                'session_group_id': session_group_id,
                 'number_of_sessions': len(sessions_list)
             })
-        elif len(sessions_list) == 1:
-            # Una sola sesión activa
-            serializer = self.get_serializer(sessions_list[0])
-            return Response(serializer.data)
         else:
-            # No hay sesión activa
-            return Response(
-                {'active_session': None},
-                status=status.HTTP_200_OK
-            )
+            # Una sola sesión activa
+            serializer = GameSessionSerializer(sessions_list[0])
+            return Response(serializer.data)
     
     @action(detail=True, methods=['post'])
     def start_reflection(self, request, pk=None):
@@ -2205,11 +2150,13 @@ class GameSessionViewSet(viewsets.ViewSet):
         Usamos presentation_timestamps como señal temporal
         IMPORTANTE: Al iniciar reflexión, la sala se marca como completada automáticamente
         """
-        game_session = self.get_object()
-        
-        from .models import SessionStage
+        room_code = pk
+        session = get_session(room_code)
+        if session is None:
+            return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
         from challenges.models import Stage
-        
+
         # Obtener la etapa 4
         stage_4 = Stage.objects.filter(number=4, is_active=True).first()
         if not stage_4:
@@ -2217,91 +2164,86 @@ class GameSessionViewSet(viewsets.ViewSet):
                 {'error': 'No se encontró la Etapa 4'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
+
         # Obtener SessionStage para etapa 4
-        session_stage = SessionStage.objects.filter(
-            game_session=game_session,
-            stage=stage_4
-        ).first()
-        
+        session_stage = get_session_stage(room_code, stage_4.id)
         if not session_stage:
             return Response(
                 {'error': 'No se encontró la etapa 4 para esta sesión'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
+
         # Usar presentation_timestamps como señal temporal para indicar reflexión
-        if not session_stage.presentation_timestamps:
-            session_stage.presentation_timestamps = {}
-        
+        presentation_timestamps = session_stage.get('presentation_timestamps') or {}
+
         # Agregar un flag especial para indicar reflexión
-        session_stage.presentation_timestamps['_reflection'] = True
-        session_stage.presentation_timestamps['_reflection_started_at'] = timezone.now().isoformat()
-        session_stage.save()
-        
+        presentation_timestamps['_reflection'] = True
+        presentation_timestamps['_reflection_started_at'] = now_iso()
+        update_session_stage(room_code, stage_4.id, presentation_timestamps=presentation_timestamps)
+
         # Marcar la sala como completada automáticamente al iniciar reflexión
         # Esto permite que profesor y tablets permanezcan en reflexión sin redirigirse
-        if game_session.status == 'running':
-            game_session.status = 'completed'
-            game_session.ended_at = timezone.now()
-            game_session.save()
-        
+        if session['status'] == 'running':
+            update_session_status(room_code, expected_status='running', new_status='completed')
+            update_session(room_code, ended_at=now_iso())
+
         return Response({
             'message': 'Fase de reflexión iniciada',
             'reflection_started': True,
             'session_completed': True
         })
-    
+
     @action(detail=True, methods=['get'], permission_classes=[], authentication_classes=[])
     def reflection_qr(self, request, pk=None):
         """Generar QR para evaluación de reflexión"""
         try:
             # Obtener sesión directamente sin verificar permisos (para tablets)
-            try:
-                game_session = GameSession.objects.get(id=pk)
-            except GameSession.DoesNotExist:
+            room_code = pk
+            session = get_session(room_code)
+            if session is None:
                 return Response(
                     {'error': 'Sesión no encontrada'},
                     status=status.HTTP_404_NOT_FOUND
                 )
-            
+
             # URL del formulario de evaluación
             base_url = request.build_absolute_uri('/').rstrip('/')
             # Usar la URL del frontend si está disponible, sino usar la base_url
             frontend_url = getattr(settings, 'FRONTEND_URL', base_url.replace(':8000', ':5173'))
-            evaluation_url = f"{frontend_url}/evaluacion/{game_session.room_code}"
-            
+            evaluation_url = f"{frontend_url}/evaluacion/{session['room_code']}"
+
             # Generar QR
             qr = qrcode.QRCode(version=1, box_size=10, border=5)
             qr.add_data(evaluation_url)
             qr.make(fit=True)
             img = qr.make_image(fill_color="black", back_color="white")
-            
+
             # Convertir a base64
             buffer = BytesIO()
             img.save(buffer, format='PNG')
             img_str = base64.b64encode(buffer.getvalue()).decode()
             qr_code = f"data:image/png;base64,{img_str}"
-            
+
             return Response({
                 'qr_code': qr_code,
                 'evaluation_url': evaluation_url,
-                'room_code': game_session.room_code
+                'room_code': session['room_code']
             })
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.error(f'Error generando QR de reflexión: {str(e)}')
             return Response(
                 {'error': f'Error al generar QR: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-    
+
     @action(detail=True, methods=['get'])
     def teams(self, request, pk=None):
         """Obtener equipos de una sesión"""
-        game_session = self.get_object()
-        teams = game_session.teams.all()
+        room_code = pk
+        session = get_session(room_code)
+        if session is None:
+            return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        teams = list_teams(room_code)
         serializer = TeamSerializer(teams, many=True)
         return Response(serializer.data)
 
@@ -2315,49 +2257,55 @@ class GameSessionViewSet(viewsets.ViewSet):
         (permite acceso en reflexión aunque la sesión esté finalizada)
         """
         # Obtener sesión directamente sin verificar permisos
-        try:
-            game_session = GameSession.objects.get(id=pk)
-        except GameSession.DoesNotExist:
+        room_code = pk
+        session = get_session(room_code)
+        if session is None:
             return Response(
                 {'error': 'Sesión no encontrada'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
+
         # Permitir acceso si la sesión está activa o finalizada (necesario para reflexión)
         # Solo bloquear si está en un estado inválido
-        if game_session.status not in ['lobby', 'running', 'finished', 'completed']:
+        if session['status'] not in ['lobby', 'running', 'finished', 'completed']:
             return Response(
                 {
                     'error': 'Estado de sesión inválido',
-                    'status': game_session.status
+                    'status': session['status']
                 },
                 status=status.HTTP_403_FORBIDDEN
             )
-        
-        # Obtener equipos con estudiantes
-        teams = game_session.teams.prefetch_related('students', 'tablet_connections__tablet').all()
+
+        # Obtener equipos con estudiantes (students es un SerializerMethodField
+        # dentro de TeamSerializer -- ver game_sessions/serializers.py)
+        teams = list_teams(room_code)
         team_serializer = TeamSerializer(teams, many=True)
-        
+
         # Obtener conexiones de tablets activas
-        tablet_connections = game_session.tablet_connections.filter(disconnected_at__isnull=True)
-        tablet_serializer = TabletConnectionSerializer(tablet_connections, many=True)
-        
+        active_connections = [
+            connection for connection in list_connections(room_code)
+            if connection.get('disconnected_at') is None
+        ]
+        for connection in active_connections:
+            annotate_tablet_connection_display_fields(connection)
+        tablet_serializer = TabletConnectionSerializer(active_connections, many=True)
+
         # Verificar si todas las tablets están conectadas
-        all_teams_have_tablets = all(
-            team.tablet_connections.filter(disconnected_at__isnull=True).exists()
-            for team in teams
-        )
-        
+        teams_with_tablets = {connection['team_id'] for connection in active_connections}
+        all_teams_have_tablets = all(team['team_id'] in teams_with_tablets for team in teams)
+        connected_teams = sum(1 for team in teams if team['team_id'] in teams_with_tablets)
+
         # Serializar sesión
-        session_serializer = GameSessionSerializer(game_session)
-        
+        annotate_game_session_display_fields(session, teams=teams)
+        session_serializer = GameSessionSerializer(session)
+
         return Response({
             'game_session': session_serializer.data,
             'teams': team_serializer.data,
             'tablet_connections': tablet_serializer.data,
             'all_teams_connected': all_teams_have_tablets,
-            'total_teams': teams.count(),
-            'connected_teams': sum(1 for team in teams if team.tablet_connections.filter(disconnected_at__isnull=True).exists())
+            'total_teams': len(teams),
+            'connected_teams': connected_teams
         })
 
     @action(detail=True, methods=['get'], url_path='etapa/(?P<etapa_id>[^/.]+)')
@@ -2366,9 +2314,9 @@ class GameSessionViewSet(viewsets.ViewSet):
         Obtener detalles de una etapa y sus actividades para una sesión dada.
         Retorna 404 controlado si la etapa no existe o no está vinculada a la sesión.
         """
-        try:
-            game_session = GameSession.objects.get(id=pk)
-        except GameSession.DoesNotExist:
+        room_code = pk
+        session = get_session(room_code)
+        if session is None:
             return Response(
                 {'error': 'Sesión no encontrada.'},
                 status=status.HTTP_404_NOT_FOUND
