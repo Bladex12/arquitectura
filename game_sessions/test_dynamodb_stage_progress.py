@@ -58,12 +58,20 @@ class StageProgressRepositoryTest(DynamoDBTestCase):
     def test_upsert_progress_overwrites_previous_value(self):
         from game_sessions.dynamodb.stage_progress import get_progress, upsert_progress
 
-        upsert_progress('ABC123', team_id='team-1', activity_id='act-1', status='in_progress', progress_percentage=50)
+        # First call: set status, progress_percentage, AND response_data
+        upsert_progress('ABC123', team_id='team-1', activity_id='act-1', status='in_progress', progress_percentage=50, response_data={'foo': 'bar'})
+
+        # Second call: update status and progress_percentage, but omit response_data
+        # This verifies that upsert_progress does a full overwrite (put_item),
+        # not a partial merge (update_item) — if it were merge-based,
+        # response_data would still be {'foo': 'bar'} after the second call
         upsert_progress('ABC123', team_id='team-1', activity_id='act-1', status='completed', progress_percentage=100)
 
         fetched = get_progress('ABC123', team_id='team-1', activity_id='act-1')
         self.assertEqual(fetched['status'], 'completed')
         self.assertEqual(fetched['progress_percentage'], 100)
+        # Assert that response_data was cleared (full overwrite, not merge)
+        self.assertIsNone(fetched['response_data'])
 
     def test_get_progress_returns_none_when_missing(self):
         from game_sessions.dynamodb.stage_progress import get_progress
