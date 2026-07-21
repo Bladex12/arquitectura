@@ -447,9 +447,24 @@ class TeamRouletteAssignmentSerializer(serializers.Serializer):
     game_sessions.dynamodb.bubble_roulette. Expects display fields already
     attached via annotate_team_roulette_assignment_display_fields(). No
     standalone id attribute exists on this item (addressed by the
-    composite (team_id, stage_id) key) -- `id` is sourced from the item's
-    own SK."""
-    id = serializers.CharField(source='SK', read_only=True)
+    composite (team_id, stage_id) key).
+
+    `id` is NOT sourced from the item's own SK ("TEAM#<team_id>#ROULETTE#
+    <stage_id>") -- Task 15 found that raw SK is unusable as a URL path
+    segment ('#' is the URL fragment delimiter, silently truncating any
+    client-built "/roulette-assignments/<id>/" request at the first '#')
+    and fixed the same dormant issue on TeamActivityProgressSerializer;
+    this serializer had the identical issue (flagged, unfixed, by a prior
+    task's audit) and is fixed here the same way: `id` is a colon-joined
+    "<team_id>:<session_stage_id>" -- team_id is a UUID4 (no colons),
+    session_stage_id is a plain int, and ':' is not a URL reserved
+    character. TeamRouletteAssignmentViewSet._parse_pk (game_sessions/
+    views.py) is the corresponding parser."""
+    id = serializers.SerializerMethodField()
+
+    def get_id(self, obj):
+        return f"{obj['team_id']}:{obj['stage_id']}"
+
     team = serializers.CharField(source='team_id')
     team_name = serializers.CharField(read_only=True, default=None, allow_null=True)
     session_stage = serializers.IntegerField(source='stage_id')
@@ -522,7 +537,17 @@ class TokenTransactionSerializer(serializers.Serializer):
     stage_number = serializers.IntegerField(read_only=True, default=None, allow_null=True)
     amount = serializers.IntegerField()
     source_type = serializers.CharField()
-    source_id = serializers.IntegerField(allow_null=True, required=False)
+    # NOT an IntegerField (as it was under the ORM, where TokenTransaction.
+    # source_id was a plain IntegerField): the Task 15/16 token-award
+    # convention (see TeamActivityProgressViewSet._award_tokens) and this
+    # task's roulette-assignment award both write source_id as a composite
+    # string like "<team_id>:<activity_id>:<reason_tag>" or
+    # "<team_id>:<session_stage_id>", never a bare int. This field was
+    # dormant (never exercised end-to-end) until this task ported
+    # TokenTransactionViewSet off the ORM -- IntegerField.to_representation
+    # would raise on any 'activity'/'roulette_challenge' transaction's
+    # string source_id.
+    source_id = serializers.CharField(allow_null=True, required=False)
     reason = serializers.CharField(allow_null=True, required=False, allow_blank=True)
     awarded_by = serializers.IntegerField(source='awarded_by_id', allow_null=True, required=False)
     awarded_by_name = serializers.CharField(read_only=True, default=None, allow_null=True)

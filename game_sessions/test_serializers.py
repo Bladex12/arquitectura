@@ -391,7 +391,7 @@ class TeamRouletteAssignmentSerializerTest(GameSessionsSerializersTestCase):
 
         data = TeamRouletteAssignmentSerializer(assignment).data
 
-        self.assertEqual(data['id'], assignment['SK'])
+        self.assertEqual(data['id'], f"team-uuid-1:{self.stage.id}")
         self.assertEqual(data['team'], 'team-uuid-1')
         self.assertEqual(data['team_name'], 'Rojo')
         self.assertEqual(data['session_stage'], self.stage.id)

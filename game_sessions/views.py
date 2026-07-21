@@ -38,7 +38,8 @@ from .serializers import (
     TeamActivityProgressSerializer, annotate_team_activity_progress_display_fields,
     TeamBubbleMapSerializer, TabletSerializer, TabletConnectionSerializer,
     annotate_tablet_connection_display_fields,
-    TeamRouletteAssignmentSerializer, TokenTransactionSerializer,
+    TeamRouletteAssignmentSerializer, annotate_team_roulette_assignment_display_fields,
+    TokenTransactionSerializer, annotate_token_transaction_display_fields,
     PeerEvaluationSerializer, ReflectionEvaluationSerializer
 )
 from users.models import Student
@@ -64,6 +65,10 @@ from game_sessions.dynamodb.tablet_connection import (
     reactivate, find_connection_by_token,
 )
 from game_sessions.dynamodb.token_transaction import list_transactions, create_transaction
+from game_sessions.dynamodb.bubble_roulette import (
+    create_roulette_assignment, get_roulette_assignment, update_roulette_assignment,
+    list_roulette_assignments,
+)
 from game_sessions.dynamodb.evaluations import list_peer_evaluations
 from game_sessions.dynamodb.client import now_iso
 
@@ -5337,114 +5342,383 @@ class TabletConnectionViewSet(viewsets.ViewSet):
         })
 
 
-class TeamRouletteAssignmentViewSet(viewsets.ModelViewSet):
+class TeamRouletteAssignmentViewSet(viewsets.ViewSet):
     """
     ViewSet para Asignaciones de Retos de Ruleta
-    """
-    queryset = TeamRouletteAssignment.objects.all()
-    serializer_class = TeamRouletteAssignmentSerializer
-    permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['team', 'session_stage', 'roulette_challenge', 'status']
-    search_fields = ['team__name', 'roulette_challenge__description']
-    ordering_fields = ['assigned_at', 'accepted_at', 'completed_at']
-    ordering = ['-assigned_at']
 
-    def get_queryset(self):
-        return TeamRouletteAssignment.objects.select_related(
-            'team', 'session_stage', 'roulette_challenge', 'validated_by__user'
+    DynamoDB cutover (Task 18): list/retrieve/create/accept/reject/validate
+    now read/write game_sessions.dynamodb.bubble_roulette instead of the
+    TeamRouletteAssignment ORM model. viewsets.ModelViewSet -> viewsets.
+    ViewSet, same shape change as every other Task 13+ viewset -- there's
+    no queryset left to back DRF's generic mixins.
+
+    list/retrieve regression check (Task 14's mistake, re-verified here):
+    permission_classes stays [IsAuthenticated] class-wide, unchanged from
+    the ORM version -- that class never had a get_permissions() override
+    opening any action to tablets (contrast TeamActivityProgressViewSet),
+    and `validate` reads request.user.professor directly, so this has
+    always been a professor-only surface. A repo-wide grep of frontend/src
+    for "roulette" and "ruleta" (case-insensitive) found zero API callers
+    of any roulette-assignment endpoint -- the only hit is an unrelated
+    Spanish UI string in PresentacionPitch.tsx. So converting list/retrieve
+    alongside the custom actions carries no live-regression risk (unlike
+    Task 14's TokenTransactionViewSet-adjacent mistake, which broke a
+    *used* list/retrieve) -- ported anyway, for completeness and parity
+    with the ORM version's full surface, not left stubbed.
+
+    id-format fix (this task): TeamRouletteAssignmentSerializer.id used to
+    be sourced from the raw SK ("TEAM#<team_id>#ROULETTE#<stage_id>"),
+    unusable as a URL path segment ('#' truncates it). Fixed on the
+    serializer to a colon-joined "<team_id>:<session_stage_id>" -- see
+    _parse_pk below, the corresponding parser, same pattern Task 15 used
+    for TeamActivityProgressSerializer.
+
+    Token-award convention (the DIRECTLY relevant lesson from Tasks 15/16):
+    `validate` awards token_reward tokens to the assigning team. Per this
+    class's own established convention (mirrored from
+    TeamActivityProgressViewSet._award_tokens), source_type stays
+    'roulette_challenge' (unchanged from the ORM version) and source_id is
+    a composite f'{team_id}:{session_stage_id}' -- NOT a bare per-room
+    value. team_id MUST lead the composite because create_transaction()'s
+    uniqueness check is keyed on (room_code, source_type, source_id) --
+    room-scoped, not team-scoped -- so without team_id in source_id, two
+    different teams validating a roulette challenge for the same
+    session_stage in the same room would collide on one DynamoDB key and
+    only the first team would ever be awarded (the exact cross-team bug
+    Tasks 15/16 found and fixed elsewhere; see
+    test_two_teams_validating_roulette_both_get_awarded for the regression
+    test proving this doesn't happen here). Unlike the old ORM version --
+    which had no idempotency guard at all and would silently re-award
+    tokens on a second `validate` call against an already-'completed'
+    assignment (its status check accepts 'accepted' OR 'completed') --
+    create_transaction()'s real (source_type, source_id) uniqueness
+    constraint now makes repeat validate() calls idempotent for free: the
+    status/completed_at/validated_by fields still update on every call,
+    but the token award itself only happens once. This is a strict
+    improvement, not a behavior change anyone depends on (no frontend
+    caller retries `validate` today).
+
+    One-assignment-per-(team, session_stage) note: bubble_roulette.py's
+    create_roulette_assignment/roulette_sk key a TeamRouletteAssignment by
+    (team_id, stage_id) alone (Task 3's design, unchanged here) -- calling
+    `create` again for the same team+stage silently overwrites the
+    existing item via put_item. The old ORM model had no such constraint
+    (auto-increment PK, multiple rows allowed), but this narrowing is
+    inherited from Task 3's repository, not introduced by this task, and
+    no current caller creates more than one roulette assignment per
+    team/stage anyway.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _resolve_team(self, request, team_id):
+        """Resolves a Team dict from a bare team_id, same fallback
+        TeamActivityProgressViewSet._resolve_team established (Task 15):
+        prefer a direct get_team (O(1)) when the caller supplies
+        room_code/game_session, otherwise scan every team in every room."""
+        room_code = (
+            request.data.get('game_session') or request.data.get('room_code')
+            or request.query_params.get('game_session') or request.query_params.get('room_code')
         )
+        if room_code:
+            return get_team(room_code, team_id)
+        return next((t for t in scan_all_teams() if t['team_id'] == team_id), None)
+
+    def _parse_pk(self, pk):
+        """Parses a TeamRouletteAssignment detail-route pk, which is
+        "<team_id>:<session_stage_id>" (see TeamRouletteAssignmentSerializer's
+        id field). rsplit on the last ':' since team_id is a UUID4 and
+        therefore never contains one. Returns (team_id, session_stage_id),
+        or None if pk doesn't match that shape."""
+        if not pk or ':' not in pk:
+            return None
+        team_id, _, stage_id_str = pk.rpartition(':')
+        try:
+            stage_id = int(stage_id_str)
+        except ValueError:
+            return None
+        return team_id, stage_id
+
+    def list(self, request):
+        team_id = request.query_params.get('team')
+        room_code = request.query_params.get('game_session') or request.query_params.get('room_code')
+        status_filter = request.query_params.get('status')
+
+        if team_id:
+            team = self._resolve_team(request, team_id)
+            if team is None:
+                return Response([])
+            items = list_roulette_assignments(team['room_code'], team_id=team_id)
+        elif room_code:
+            items = list_roulette_assignments(room_code)
+        else:
+            # No repository-level scan-all-rooms exists for this entity
+            # (out of this task's brief, which named exactly four consumer
+            # functions) -- no current caller needs unscoped listing.
+            items = []
+
+        if status_filter:
+            items = [i for i in items if i['status'] == status_filter]
+
+        team_cache = {}
+        for item in items:
+            team = team_cache.get(item['team_id'])
+            if team is None:
+                team = get_team(item['room_code'], item['team_id'])
+                team_cache[item['team_id']] = team
+            annotate_team_roulette_assignment_display_fields(item, team=team)
+
+        serializer = TeamRouletteAssignmentSerializer(items, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        parsed = self._parse_pk(pk)
+        if parsed is None:
+            return Response({'error': 'Asignación no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        team_id, stage_id = parsed
+
+        team = self._resolve_team(request, team_id)
+        if team is None:
+            return Response({'error': 'Asignación no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        assignment = get_roulette_assignment(team['room_code'], team_id, stage_id)
+        if assignment is None:
+            return Response({'error': 'Asignación no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        annotate_team_roulette_assignment_display_fields(assignment, team=team)
+        serializer = TeamRouletteAssignmentSerializer(assignment)
+        return Response(serializer.data)
+
+    def create(self, request):
+        team_id = request.data.get('team')
+        session_stage_id = request.data.get('session_stage')
+        roulette_challenge_id = request.data.get('roulette_challenge')
+        token_reward = request.data.get('token_reward', 0)
+
+        if not all([team_id, session_stage_id, roulette_challenge_id]):
+            return Response(
+                {'error': 'Se requieren team, session_stage y roulette_challenge'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        team = self._resolve_team(request, team_id)
+        if team is None:
+            return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        room_code = team['room_code']
+
+        try:
+            session_stage_id = int(session_stage_id)
+        except (TypeError, ValueError):
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        if get_session_stage(room_code, session_stage_id) is None:
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        from challenges.models import RouletteChallenge
+        try:
+            roulette_challenge_id = int(roulette_challenge_id)
+            RouletteChallenge.objects.get(id=roulette_challenge_id)
+        except (RouletteChallenge.DoesNotExist, TypeError, ValueError):
+            return Response({'error': 'Reto de ruleta no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            token_reward = int(token_reward)
+        except (TypeError, ValueError):
+            token_reward = 0
+
+        assignment = create_roulette_assignment(
+            room_code, team_id, session_stage_id, roulette_challenge_id, token_reward=token_reward,
+        )
+        annotate_team_roulette_assignment_display_fields(assignment, team=team)
+        serializer = TeamRouletteAssignmentSerializer(assignment)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def _get_assignment_or_404(self, request, pk):
+        """Shared lookup for the three detail actions below. Returns
+        (team, stage_id, assignment) on success, or a 404 Response to
+        return directly from the caller."""
+        parsed = self._parse_pk(pk)
+        if parsed is None:
+            return Response({'error': 'Asignación no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        team_id, stage_id = parsed
+
+        team = self._resolve_team(request, team_id)
+        if team is None:
+            return Response({'error': 'Asignación no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        assignment = get_roulette_assignment(team['room_code'], team_id, stage_id)
+        if assignment is None:
+            return Response({'error': 'Asignación no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        return team, stage_id, assignment
 
     @action(detail=True, methods=['post'])
     def accept(self, request, pk=None):
         """Aceptar un reto de ruleta"""
-        assignment = self.get_object()
-        if assignment.status != 'assigned':
+        result = self._get_assignment_or_404(request, pk)
+        if isinstance(result, Response):
+            return result
+        team, stage_id, assignment = result
+
+        if assignment['status'] != 'assigned':
             return Response(
                 {'error': 'El reto no está en estado asignado'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        assignment.status = 'accepted'
-        assignment.accepted_at = timezone.now()
-        assignment.save()
-        serializer = self.get_serializer(assignment)
+
+        assignment = update_roulette_assignment(
+            team['room_code'], assignment['team_id'], stage_id,
+            status='accepted', accepted_at=now_iso(),
+        )
+        annotate_team_roulette_assignment_display_fields(assignment, team=team)
+        serializer = TeamRouletteAssignmentSerializer(assignment)
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):
         """Rechazar un reto de ruleta"""
-        assignment = self.get_object()
-        if assignment.status != 'assigned':
+        result = self._get_assignment_or_404(request, pk)
+        if isinstance(result, Response):
+            return result
+        team, stage_id, assignment = result
+
+        if assignment['status'] != 'assigned':
             return Response(
                 {'error': 'El reto no está en estado asignado'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        assignment.status = 'rejected'
-        assignment.rejected_at = timezone.now()
-        assignment.save()
-        serializer = self.get_serializer(assignment)
+
+        assignment = update_roulette_assignment(
+            team['room_code'], assignment['team_id'], stage_id,
+            status='rejected', rejected_at=now_iso(),
+        )
+        annotate_team_roulette_assignment_display_fields(assignment, team=team)
+        serializer = TeamRouletteAssignmentSerializer(assignment)
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
     def validate(self, request, pk=None):
-        """Validar completación de un reto (por profesor)"""
-        assignment = self.get_object()
-        if assignment.status not in ['accepted', 'completed']:
+        """Validar completación de un reto (por profesor) -- otorga
+        token_reward tokens al equipo, team-scoped per this class's
+        source_id convention (see class docstring)."""
+        result = self._get_assignment_or_404(request, pk)
+        if isinstance(result, Response):
+            return result
+        team, stage_id, assignment = result
+        room_code = team['room_code']
+        team_id = assignment['team_id']
+
+        if assignment['status'] not in ('accepted', 'completed'):
             return Response(
                 {'error': 'El reto debe estar aceptado para ser validado'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        assignment.status = 'completed'
-        assignment.completed_at = timezone.now()
-        assignment.validated_by = request.user.professor
-        assignment.save()
-        
-        # Crear transacción de tokens
-        TokenTransaction.objects.create(
-            team=assignment.team,
-            game_session=assignment.session_stage.game_session,
-            session_stage=assignment.session_stage,
-            amount=assignment.token_reward,
-            source_type='roulette_challenge',
-            source_id=assignment.id,
-            reason=f'Reto de ruleta completado: {assignment.roulette_challenge.description[:50]}',
-            awarded_by=request.user.professor
+
+        professor = request.user.professor
+        assignment = update_roulette_assignment(
+            room_code, team_id, stage_id,
+            status='completed', completed_at=now_iso(), validated_by_id=professor.id,
         )
-        
-        # Actualizar tokens del equipo
-        assignment.team.tokens_total += assignment.token_reward
-        assignment.team.save()
-        
-        serializer = self.get_serializer(assignment)
+        annotate_team_roulette_assignment_display_fields(assignment, team=team)
+
+        # Otorgar tokens -- team-scoped source_id (team_id leads the
+        # composite) so two teams validating a roulette challenge for the
+        # same session_stage in the same room never collide on the same
+        # DynamoDB key (see class docstring / this task's cross-team test).
+        tx = create_transaction(
+            room_code, team_id, assignment['token_reward'], source_type='roulette_challenge',
+            source_id=f'{team_id}:{stage_id}', session_stage_id=stage_id,
+            reason=f"Reto de ruleta completado: {(assignment.get('challenge_description') or '')[:50]}",
+            awarded_by_id=professor.id,
+        )
+        if tx is not None:
+            update_tokens(room_code, team_id, assignment['token_reward'])
+
+        serializer = TeamRouletteAssignmentSerializer(assignment)
         return Response(serializer.data)
 
 
-class TokenTransactionViewSet(viewsets.ReadOnlyModelViewSet):
+class TokenTransactionViewSet(viewsets.ViewSet):
     """
     ViewSet para Transacciones de Tokens (solo lectura)
+
+    DynamoDB cutover (Task 18): list reads game_sessions.dynamodb.
+    token_transaction.list_transactions instead of the TokenTransaction ORM
+    model. viewsets.ReadOnlyModelViewSet -> viewsets.ViewSet.
+
+    retrieve is a 404 stub, not a real per-id lookup, per the task brief's
+    own suggestion ("check whether the frontend actually calls transaction
+    detail-by-id anywhere; if unused, a 404/501 stub is fine"). Checked:
+    frontend/src/services/tokenTransactions.ts (the sole wrapper around
+    this endpoint anywhere in the frontend) exports only `list` -- no
+    caller anywhere builds a "/token-transactions/<id>/" URL. A real
+    detail route would need (room_code, source_type/source_id-or-
+    timestamp+uuid) encoded into pk, same shape problem TeamRouletteAssignment
+    solved with a colon composite -- not worth building for zero live
+    callers.
+
+    list's team-only scope is a REAL, currently live call shape, not a
+    hypothetical -- this is this task's own version of Task 14's "list
+    left broken for a live caller" mistake, caught here instead of shipped:
+    frontend/src/pages/tablets/etapa2/BubbleMapV2.tsx (a tablet page, no
+    auth) and frontend/src/pages/profesor/etapa2/BubbleMap.tsx both call
+    tokenTransactionsAPI.list({ team: teamId, session_stage: stageId })
+    with NO game_session/room_code param at all, to detect whether a
+    team's bubble map was already finalized. list() below resolves
+    room_code from team_id via the same scan-all-teams fallback
+    TeamActivityProgressViewSet._resolve_team uses (Task 15) whenever
+    game_session/room_code isn't supplied in the request.
     """
-    queryset = TokenTransaction.objects.all()
-    serializer_class = TokenTransactionSerializer
-    permission_classes = [IsAuthenticated]
-    authentication_classes = []  # No requerir autenticación (se controla con get_permissions)
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['team', 'game_session', 'session_stage', 'source_type']
-    search_fields = ['team__name', 'game_session__room_code', 'reason']
-    ordering_fields = ['created_at', 'amount']
-    ordering = ['-created_at']
+    permission_classes = []  # Sin autenticación (list/retrieve eran las
+    # únicas acciones de ReadOnlyModelViewSet, y ambas ya estaban abiertas
+    # a tablets vía el get_permissions() de la versión ORM -- ver arriba).
 
-    def get_permissions(self):
-        """
-        Permite leer sin autenticación para tablets
-        """
-        if self.action in ['list', 'retrieve']:
-            return []  # Sin autenticación para tablets
-        return super().get_permissions()
+    def _resolve_room_code(self, request, team_id, room_code):
+        if room_code:
+            return room_code
+        if team_id:
+            team = next((t for t in scan_all_teams() if t['team_id'] == team_id), None)
+            return team['room_code'] if team else None
+        return None
 
-    def get_queryset(self):
-        return TokenTransaction.objects.select_related(
-            'team', 'game_session', 'session_stage', 'awarded_by__user'
-        )
+    def list(self, request):
+        team_id = request.query_params.get('team')
+        room_code = request.query_params.get('game_session') or request.query_params.get('room_code')
+        session_stage_id = request.query_params.get('session_stage')
+        source_type = request.query_params.get('source_type')
+
+        resolved_room_code = self._resolve_room_code(request, team_id, room_code)
+        if resolved_room_code is None:
+            return Response([])
+
+        items = list_transactions(resolved_room_code)
+
+        if team_id:
+            items = [i for i in items if i['team_id'] == team_id]
+
+        if session_stage_id not in (None, ''):
+            try:
+                stage_id_int = int(session_stage_id)
+            except (TypeError, ValueError):
+                stage_id_int = None
+            items = [i for i in items if i.get('session_stage_id') == stage_id_int]
+
+        if source_type:
+            items = [i for i in items if i['source_type'] == source_type]
+
+        items.sort(key=lambda i: i.get('created_at') or '', reverse=True)
+
+        team_cache = {}
+        for item in items:
+            team = team_cache.get(item['team_id'])
+            if team is None:
+                team = get_team(item['room_code'], item['team_id'])
+                team_cache[item['team_id']] = team
+            annotate_token_transaction_display_fields(item, team=team)
+
+        serializer = TokenTransactionSerializer(items, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        return Response({'error': 'No implementado'}, status=status.HTTP_404_NOT_FOUND)
 
 
 class PeerEvaluationViewSet(viewsets.ModelViewSet):
