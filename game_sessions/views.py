@@ -46,7 +46,9 @@ from game_sessions.dynamodb.game_session import (
     create_session, get_session, update_session, update_session_status,
     delete_session, list_sessions_for_professor, scan_all_sessions,
 )
-from game_sessions.dynamodb.team import create_team, set_roster, list_teams, get_team, delete_team
+from game_sessions.dynamodb.team import (
+    create_team, set_roster, list_teams, get_team, update_team, delete_team, scan_all_teams,
+)
 from game_sessions.dynamodb.catalog import create_session_group
 from game_sessions.dynamodb.stage_progress import (
     create_session_stage, get_session_stage, update_session_stage, upsert_progress, get_progress,
@@ -2306,78 +2308,166 @@ class GameSessionViewSet(viewsets.ViewSet):
         })
 
 
-class TeamViewSet(viewsets.ModelViewSet):
+class TeamViewSet(viewsets.ViewSet):
     """
     ViewSet para Equipos
-    """
-    queryset = Team.objects.all()
-    serializer_class = TeamSerializer
-    permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['game_session', 'color']
-    search_fields = ['name', 'game_session__room_code']
 
-    def get_queryset(self):
-        queryset = Team.objects.select_related('game_session').prefetch_related('students')
-        game_session_id = self.request.query_params.get('game_session')
-        if game_session_id:
-            queryset = queryset.filter(game_session_id=game_session_id)
-        return queryset
+    DynamoDB cutover (Task 13): CRUD + move_student/shuffle_all now
+    read/write game_sessions.dynamodb.team instead of the Team/TeamStudent
+    ORM models. There is no queryset to back DRF's generic mixins anymore
+    (viewsets.ModelViewSet -> viewsets.ViewSet), so
+    list/retrieve/create/update/partial_update/destroy are hand-implemented
+    below, same pattern as GameSessionViewSet (Task 10).
+
+    Identifier-surface note: a Team's real key is (room_code, team_id), not
+    team_id alone (team_id is a UUID4 string with no cross-room index -- see
+    game_sessions/dynamodb/keys.py). The old int pk was globally unique, so
+    a bare `pk` was enough to find a team; that's no longer true. Detail
+    routes (retrieve/update/partial_update/destroy) accept the owning room
+    via `?game_session=<room_code>` (retrieve) or a `game_session` field in
+    the request body (mutations) -- falling back to a full-table
+    scan_all_teams() scoped by team_id for `retrieve` only, so a bare GET
+    still resolves. `list` accepts `?game_session=<room_code>` to scope to
+    one room (matches the frontend's actual usage) and falls back to
+    scan_all_teams() when omitted, mirroring the old unfiltered queryset.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request):
+        room_code = request.query_params.get('game_session')
+        if room_code:
+            teams = list_teams(room_code)
+        else:
+            teams = scan_all_teams()
+        serializer = TeamSerializer(teams, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        room_code = request.query_params.get('game_session')
+        if room_code:
+            team = get_team(room_code, pk)
+        else:
+            team = next((t for t in scan_all_teams() if t['team_id'] == pk), None)
+        if team is None:
+            return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = TeamSerializer(team)
+        return Response(serializer.data)
+
+    def create(self, request):
+        serializer = TeamSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated = serializer.validated_data
+
+        team = create_team(validated['room_code'], name=validated['name'], color=validated['color'])
+        student_ids = validated.get('student_ids')
+        if student_ids:
+            updated = set_roster(validated['room_code'], team['team_id'], student_ids)
+            team = updated if updated is not None else team
+
+        out_serializer = TeamSerializer(team)
+        return Response(out_serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, pk=None):
+        return self._update_team(request, pk)
+
+    def partial_update(self, request, pk=None):
+        return self._update_team(request, pk)
+
+    def _update_team(self, request, pk):
+        room_code = request.data.get('game_session') or request.query_params.get('game_session')
+        if not room_code:
+            return Response({'error': 'Se requiere game_session'}, status=status.HTTP_400_BAD_REQUEST)
+
+        team = get_team(room_code, pk)
+        if team is None:
+            return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+        plain_fields = {
+            field: request.data[field] for field in ('name', 'color') if field in request.data
+        }
+        if plain_fields:
+            updated = update_team(room_code, pk, **plain_fields)
+            if updated is not None:
+                team = updated
+
+        if 'student_ids' in request.data:
+            updated = set_roster(room_code, pk, request.data['student_ids'])
+            if updated is not None:
+                team = updated
+
+        serializer = TeamSerializer(team)
+        return Response(serializer.data)
+
+    def destroy(self, request, pk=None):
+        room_code = request.data.get('game_session') or request.query_params.get('game_session')
+        if not room_code:
+            return Response({'error': 'Se requiere game_session'}, status=status.HTTP_400_BAD_REQUEST)
+
+        team = get_team(room_code, pk)
+        if team is None:
+            return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+        delete_team(room_code, pk)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=['post'])
     def move_student(self, request, pk=None):
         """
         Mover un estudiante de un equipo a otro
-        
+
         Requiere:
+        - game_session: room_code de la sesión a la que pertenecen ambos
+          equipos (nuevo campo requerido -- ver nota de identifier-surface
+          en la clase; el pk de la URL ya no basta para ubicar un equipo)
         - student_id: ID del estudiante a mover
         - target_team_id: ID del equipo destino
         """
-        team = self.get_object()
+        room_code = request.data.get('game_session')
         student_id = request.data.get('student_id')
         target_team_id = request.data.get('target_team_id')
-        
-        if not student_id or not target_team_id:
+
+        if not room_code or student_id is None or not target_team_id:
             return Response(
-                {'error': 'Se requiere student_id y target_team_id'},
+                {'error': 'Se requiere game_session, student_id y target_team_id'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        try:
-            student = Student.objects.get(id=student_id)
-            target_team = Team.objects.get(id=target_team_id)
-        except (Student.DoesNotExist, Team.DoesNotExist):
+
+        team = get_team(room_code, pk)
+        target_team = get_team(room_code, target_team_id)
+        if team is None or target_team is None:
+            # Cubre tanto "equipo no encontrado" como el antiguo chequeo
+            # "los equipos deben estar en la misma sesión" -- ambos se
+            # buscan con el mismo room_code, así que un target_team en otra
+            # sala simplemente no se encuentra.
             return Response(
                 {'error': 'Estudiante o equipo no encontrado'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
-        # Verificar que el estudiante esté en el equipo actual
-        if not team.students.filter(id=student_id).exists():
+
+        if not Student.objects.filter(id=student_id).exists():
+            return Response(
+                {'error': 'Estudiante o equipo no encontrado'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if student_id not in team['student_ids']:
             return Response(
                 {'error': 'El estudiante no está en este equipo'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Verificar que el equipo destino esté en la misma sesión
-        if team.game_session != target_team.game_session:
-            return Response(
-                {'error': 'Los equipos deben estar en la misma sesión'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Mover estudiante
-        TeamStudent.objects.filter(team=team, student=student).delete()
-        TeamStudent.objects.get_or_create(team=target_team, student=student)
-        
-        # Serializar equipos actualizados
-        team_serializer = TeamSerializer(team)
-        target_team_serializer = TeamSerializer(target_team)
-        
+
+        source_roster = [sid for sid in team['student_ids'] if sid != student_id]
+        target_roster = list(target_team['student_ids'])
+        if student_id not in target_roster:
+            target_roster.append(student_id)
+
+        updated_source = set_roster(room_code, pk, source_roster)
+        updated_target = set_roster(room_code, target_team_id, target_roster)
+
         return Response({
             'message': 'Estudiante movido exitosamente',
-            'source_team': team_serializer.data,
-            'target_team': target_team_serializer.data
+            'source_team': TeamSerializer(updated_source or team).data,
+            'target_team': TeamSerializer(updated_target or target_team).data
         })
 
     @action(detail=False, methods=['post'])
@@ -2385,132 +2475,168 @@ class TeamViewSet(viewsets.ModelViewSet):
         """
         Reorganizar todos los estudiantes de una sesión aleatoriamente
         Mantiene el número de equipos y el tamaño mínimo/máximo
+
+        Requiere:
+        - game_session: room_code de la sesión (reemplaza al antiguo
+          game_session_id numérico -- ver nota de identifier-surface)
         """
-        game_session_id = request.data.get('game_session_id')
-        if not game_session_id:
+        room_code = request.data.get('game_session')
+        if not room_code:
             return Response(
-                {'error': 'Se requiere game_session_id'},
+                {'error': 'Se requiere game_session'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        try:
-            game_session = GameSession.objects.get(id=game_session_id)
-        except GameSession.DoesNotExist:
+
+        session = get_session(room_code)
+        if session is None:
             return Response(
                 {'error': 'Sesión no encontrada'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
-        # Obtener todos los estudiantes de la sesión
-        all_students = list(
-            Student.objects.filter(teams__game_session=game_session).distinct()
-        )
-        
-        if not all_students:
-            return Response(
-                {'error': 'No hay estudiantes en esta sesión'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Obtener equipos existentes
-        teams = list(game_session.teams.all())
-        
+
+        teams = list_teams(room_code)
         if not teams:
             return Response(
                 {'error': 'No hay equipos en esta sesión'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Eliminar todas las asignaciones actuales
-        TeamStudent.objects.filter(team__game_session=game_session).delete()
-        
+
+        # Todos los estudiantes actualmente asignados a algún equipo de la
+        # sesión (equivalente al Student.objects.filter(teams__game_session=...)
+        # .distinct() original, pero leído directamente de los rosters --
+        # ya no existe una relación M2M para consultar).
+        all_students = list({sid for team in teams for sid in team['student_ids']})
+
+        if not all_students:
+            return Response(
+                {'error': 'No hay estudiantes en esta sesión'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         # Mezclar estudiantes aleatoriamente
         random.shuffle(all_students)
-        
-        # Redistribuir estudiantes
+
+        # Redistribuir estudiantes (misma lógica de balanceo que
+        # GameSessionViewSet._create_teams_automatically, pero aplicada a
+        # equipos ya existentes vía set_roster en vez de crear equipos)
         min_size = 3
         max_size = 8
         num_teams = len(teams)
         total_students = len(all_students)
-        
+
         base_team_size = total_students // num_teams
         remainder = total_students % num_teams
-        
+
         student_index = 0
+        updated_teams = []
         for i, team in enumerate(teams):
             current_team_size = base_team_size + (1 if i < remainder else 0)
             current_team_size = max(min_size, min(max_size, current_team_size))
-            
-            team_students = all_students[student_index:student_index + current_team_size]
+
+            team_student_ids = all_students[student_index:student_index + current_team_size]
             student_index += current_team_size
-            
-            # Asignar estudiantes al equipo
-            for student in team_students:
-                TeamStudent.objects.create(team=team, student=student)
-        
-        # Serializar equipos actualizados
-        teams_serializer = TeamSerializer(teams, many=True)
-        
+
+            updated = set_roster(room_code, team['team_id'], team_student_ids)
+            updated_teams.append(updated if updated is not None else team)
+
+        teams_serializer = TeamSerializer(updated_teams, many=True)
+
         return Response({
             'message': 'Estudiantes reorganizados aleatoriamente',
             'teams': teams_serializer.data
         })
 
 
-class TeamPersonalizationViewSet(viewsets.ModelViewSet):
+class TeamPersonalizationViewSet(viewsets.ViewSet):
     """
     ViewSet para Personalización de Equipos
+
+    DynamoDB cutover (Task 13): TeamPersonalization is not a separate
+    DynamoDB entity -- its fields live directly on the Team item
+    (personalization_team_name / personalization_members_know_each_other,
+    see game_sessions.dynamodb.team.create_team). There's no longer a
+    per-personalization pk distinct from the team itself (the serializer
+    carries no `id` field), so this drops the ModelViewSet's
+    retrieve/update/partial_update/destroy detail routes entirely -- only
+    list/create are implemented, matching actual frontend usage
+    (frontend/src/services/teamPersonalizations.ts only calls list/create).
+
+    Identifier-surface note: `create`'s old ORM version could find a Team
+    by its bare int id alone; DynamoDB needs (room_code, team_id), so
+    `create` now also requires a `room_code` field in the request body --
+    a genuinely new required field (frontend not yet updated, per Task 13's
+    brief this is backend-only scope). `list`, by contrast, is called from
+    ~13 frontend call sites with only `?team=<team_id>` (no room_code), so
+    it keeps working via scan_all_teams() filtered by team_id in Python
+    when no `game_session`/`room_code` query param is given -- a future
+    caller that does know the room can pass one to avoid the scan.
     """
-    queryset = TeamPersonalization.objects.all()
-    serializer_class = TeamPersonalizationSerializer
     permission_classes = [IsAuthenticated]
     authentication_classes = []  # No requerir autenticación (se controla con get_permissions)
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['team']
 
     def get_permissions(self):
         """
-        Permite crear/actualizar/listar sin autenticación para tablets
+        Permite crear/listar sin autenticación para tablets
         """
-        if self.action in ['create', 'update', 'partial_update', 'list']:
+        if self.action in ['create', 'list']:
             return []
         return super().get_permissions()
 
-    def create(self, request, *args, **kwargs):
+    def list(self, request):
+        room_code = request.query_params.get('game_session') or request.query_params.get('room_code')
+        team_id = request.query_params.get('team')
+
+        if room_code:
+            teams = list_teams(room_code)
+        else:
+            teams = scan_all_teams()
+
+        if team_id:
+            teams = [t for t in teams if t['team_id'] == team_id]
+
+        serializer = TeamPersonalizationSerializer(teams, many=True)
+        return Response(serializer.data)
+
+    def create(self, request):
         """
         Crear o actualizar personalización (permite sin autenticación para tablets)
         """
+        room_code = request.data.get('room_code')
         team_id = request.data.get('team')
-        
-        if not team_id:
+
+        if not room_code or not team_id:
             return Response(
-                {'error': 'Se requiere team'},
+                {'error': 'Se requiere room_code y team'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        try:
-            team = Team.objects.get(id=team_id)
-        except Team.DoesNotExist:
+
+        team = get_team(room_code, team_id)
+        if team is None:
             return Response(
                 {'error': 'Equipo no encontrado'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
-        # Crear o actualizar personalización
-        personalization, created = TeamPersonalization.objects.update_or_create(
-            team=team,
-            defaults={
-                'team_name': request.data.get('team_name', ''),
-                'team_members_know_each_other': request.data.get('team_members_know_each_other')
-            }
+
+        # "created" == la personalización aún no se había fijado (los
+        # campos nacen en None desde create_team), igual que el
+        # update_or_create original distinguía creación de actualización.
+        is_new = (
+            team.get('personalization_team_name') is None
+            and team.get('personalization_members_know_each_other') is None
         )
-        
-        serializer = self.get_serializer(personalization)
-        
-        if created:
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        else:
-            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        updated = update_team(
+            room_code, team_id,
+            personalization_team_name=request.data.get('team_name', ''),
+            personalization_members_know_each_other=request.data.get('team_members_know_each_other'),
+        )
+        team = updated if updated is not None else team
+
+        serializer = TeamPersonalizationSerializer(team)
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED if is_new else status.HTTP_200_OK,
+        )
 
 
 class SessionStageViewSet(viewsets.ModelViewSet):
