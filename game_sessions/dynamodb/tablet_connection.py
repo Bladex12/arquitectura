@@ -2,7 +2,7 @@
 now", distinct from the Tablet catalog entity (see catalog.py)."""
 import uuid
 
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 from game_sessions.dynamodb import keys
@@ -101,3 +101,44 @@ def list_connections(room_code):
         ConsistentRead=True,
     )
     return response['Items']
+
+
+def reactivate(room_code, team_session_token):
+    """Clears disconnected_at (the mirror of disconnect()), for the
+    reconnect flow when a tablet comes back online after being marked
+    disconnected. Returns None if the connection doesn't exist (guarded
+    so update_item's default upsert behavior can't create a ghost item
+    missing `type`)."""
+    table = get_table()
+    try:
+        response = table.update_item(
+            Key={'PK': keys.session_pk(room_code), 'SK': keys.tablet_connection_sk(team_session_token)},
+            UpdateExpression='SET disconnected_at = :null',
+            ConditionExpression='attribute_exists(PK)',
+            ExpressionAttributeValues={':null': None},
+            ReturnValues='ALL_NEW',
+        )
+        return response['Attributes']
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            return None
+        raise
+
+
+def find_connection_by_token(team_session_token):
+    """Scan fallback for locating a TabletConnection by its token alone,
+    when the caller doesn't know the owning room_code (see
+    TabletConnectionViewSet's reconnect/status/update_screen/disconnect
+    actions in views.py - the BYOD frontend's localStorage only ever
+    persists the connection's team_session_token, never room_code, so
+    those detail routes can't resolve (room_code, token) via
+    get_connection's direct key lookup). Accepts losing the single-table
+    design's room-scoped-query benefit here - it's the only option since
+    team_session_token isn't indexed by a GSI. Returns the item dict, or
+    None if no connection has this token."""
+    table = get_table()
+    response = table.scan(
+        FilterExpression=Attr('type').eq('TabletConnection') & Attr('team_session_token').eq(team_session_token)
+    )
+    items = response['Items']
+    return items[0] if items else None

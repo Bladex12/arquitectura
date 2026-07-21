@@ -73,3 +73,35 @@ class TabletConnectionRepositoryTest(DynamoDBTestCase):
         connections = list_connections('ABC123')
 
         self.assertEqual(len(connections), 2)
+
+    def test_reactivate_clears_disconnected_at(self):
+        from game_sessions.dynamodb.tablet_connection import create_connection, disconnect, reactivate
+
+        created = create_connection('ABC123', team_id='team-1')
+        disconnect('ABC123', created['team_session_token'])
+
+        reactivated = reactivate('ABC123', created['team_session_token'])
+
+        self.assertIsNone(reactivated['disconnected_at'])
+
+    def test_reactivate_returns_none_when_connection_missing(self):
+        from game_sessions.dynamodb.tablet_connection import reactivate
+
+        self.assertIsNone(reactivate('ABC123', 'nonexistent-token'))
+
+    def test_find_connection_by_token_locates_across_rooms(self):
+        from game_sessions.dynamodb.tablet_connection import create_connection, find_connection_by_token
+
+        create_connection('ABC123', team_id='team-1')
+        created = create_connection('XYZ789', team_id='team-2')
+
+        found = find_connection_by_token(created['team_session_token'])
+
+        self.assertIsNotNone(found)
+        self.assertEqual(found['room_code'], 'XYZ789')
+        self.assertEqual(found['team_id'], 'team-2')
+
+    def test_find_connection_by_token_returns_none_when_missing(self):
+        from game_sessions.dynamodb.tablet_connection import find_connection_by_token
+
+        self.assertIsNone(find_connection_by_token('nonexistent-token'))

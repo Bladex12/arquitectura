@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 from users.models import Professor, Student
 from .models import (
     GameSession, SessionGroup, Team, TeamStudent, TeamPersonalization, SessionStage,
-    TeamActivityProgress, TeamBubbleMap, Tablet, TabletConnection,
+    TeamActivityProgress, TeamBubbleMap,
     TeamRouletteAssignment, TokenTransaction, PeerEvaluation, ReflectionEvaluation
 )
 from .serializers import (
@@ -51,12 +51,18 @@ from game_sessions.dynamodb.team import (
     create_team, set_roster, list_teams, get_team, update_team, delete_team, scan_all_teams,
     update_tokens,
 )
-from game_sessions.dynamodb.catalog import create_session_group
+from game_sessions.dynamodb.catalog import (
+    create_session_group, list_tablets, create_tablet, get_tablet,
+    deactivate_tablet, activate_tablet, delete_tablet,
+)
 from game_sessions.dynamodb.stage_progress import (
     create_session_stage, get_session_stage, update_session_stage, upsert_progress, get_progress,
     list_session_stages, scan_all_stages, list_progress_for_team, scan_all_progress,
 )
-from game_sessions.dynamodb.tablet_connection import list_connections, disconnect
+from game_sessions.dynamodb.tablet_connection import (
+    list_connections, disconnect, create_connection, get_connection, update_heartbeat,
+    reactivate, find_connection_by_token,
+)
 from game_sessions.dynamodb.token_transaction import list_transactions, create_transaction
 from game_sessions.dynamodb.evaluations import list_peer_evaluations
 from game_sessions.dynamodb.client import now_iso
@@ -4909,31 +4915,152 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
-class TabletViewSet(viewsets.ModelViewSet):
+class TabletViewSet(viewsets.ViewSet):
     """
-    ViewSet para Tablets
+    ViewSet para Tablets (catálogo de dispositivos físicos)
+
+    DynamoDB cutover (Task 17): list/retrieve/create/update/partial_update/
+    destroy now read/write game_sessions.dynamodb.catalog instead of the
+    Tablet ORM model. viewsets.ModelViewSet -> viewsets.ViewSet, same shape
+    change as every other viewset already ported in this cutover -- there's
+    no queryset left to back DRF's generic mixins.
+
+    No current frontend caller consumes this endpoint at all (grepped
+    frontend/src -- only /tablet-connections/ is used by the BYOD flow, see
+    TabletConnectionViewSet below); it exists for admin/ops tooling around
+    physical tablet inventory that has no UI yet. tablet_code is the item's
+    own natural key (see TabletSerializer, catalog.create_tablet), so it
+    doubles as the URL pk -- update/partial_update only support toggling
+    is_active (the only mutable field besides the key itself) via
+    catalog.activate_tablet/deactivate_tablet; tablet_code itself is
+    immutable once created (matches the old model's `unique=True`, which
+    the ORM version never exposed a rename path for either).
     """
-    queryset = Tablet.objects.all()
-    serializer_class = TabletSerializer
     permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['is_active']
-    search_fields = ['tablet_code']
+
+    def list(self, request):
+        is_active_param = request.query_params.get('is_active')
+        is_active = None
+        if is_active_param is not None:
+            is_active = is_active_param.lower() in ('true', '1')
+        tablets = list_tablets(is_active=is_active)
+
+        search = request.query_params.get('search')
+        if search:
+            tablets = [t for t in tablets if search.lower() in t['tablet_code'].lower()]
+
+        serializer = TabletSerializer(tablets, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        tablet = get_tablet(pk)
+        if tablet is None:
+            return Response({'error': 'Tablet no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = TabletSerializer(tablet)
+        return Response(serializer.data)
+
+    def create(self, request):
+        tablet_code = str(request.data.get('tablet_code', '')).strip()
+        if not tablet_code:
+            return Response({'error': 'Se requiere tablet_code'}, status=status.HTTP_400_BAD_REQUEST)
+
+        tablet = create_tablet(tablet_code)
+        if tablet is None:
+            return Response(
+                {'error': 'Ya existe una tablet con ese código'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        serializer = TabletSerializer(tablet)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, pk=None):
+        return self._update_tablet(request, pk)
+
+    def partial_update(self, request, pk=None):
+        return self._update_tablet(request, pk)
+
+    def _update_tablet(self, request, pk):
+        tablet = get_tablet(pk)
+        if tablet is None:
+            return Response({'error': 'Tablet no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        if 'is_active' in request.data:
+            is_active = request.data['is_active']
+            if isinstance(is_active, str):
+                is_active = is_active.lower() in ('true', '1')
+            updated = activate_tablet(pk) if is_active else deactivate_tablet(pk)
+            if updated is not None:
+                tablet = updated
+
+        serializer = TabletSerializer(tablet)
+        return Response(serializer.data)
+
+    def destroy(self, request, pk=None):
+        tablet = get_tablet(pk)
+        if tablet is None:
+            return Response({'error': 'Tablet no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        delete_tablet(pk)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class TabletConnectionViewSet(viewsets.ModelViewSet):
+class TabletConnectionViewSet(viewsets.ViewSet):
     """
     ViewSet para Conexiones de Tablets
-    """
-    queryset = TabletConnection.objects.all()
-    serializer_class = TabletConnectionSerializer
-    permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['tablet', 'team', 'game_session']
-    search_fields = ['tablet__tablet_code', 'team__name', 'game_session__room_code']
 
-    def get_queryset(self):
-        return TabletConnection.objects.select_related('tablet', 'team', 'game_session')
+    DynamoDB cutover (Task 17): connect/reconnect/update_screen/disconnect/
+    by_team/status now read/write game_sessions.dynamodb.tablet_connection
+    instead of the TabletConnection ORM model. viewsets.ModelViewSet ->
+    viewsets.ViewSet, same shape change as every other viewset already
+    ported in this cutover -- there's no queryset left to back DRF's
+    generic mixins, so plain list/retrieve/create/update/destroy (never
+    used by the frontend for this entity -- only the @action routes below
+    are called, per frontend/src/services/tabletConnections.ts) are
+    dropped entirely rather than hand-implemented, matching
+    TeamPersonalizationViewSet's precedent (Task 13) for a viewset whose
+    real API surface is 100% custom actions.
+
+    Identifier-surface note (the one flagged in this task's brief):
+    team_session_token is the item's own key component alongside room_code
+    (see game_sessions/dynamodb/keys.py's tablet_connection_sk) and is also
+    TabletConnectionSerializer's `id` (a bare UUID4 string -- URL-safe, no
+    '#' or other reserved characters, unlike a prior task's SK-sourced id
+    bug). The old ORM's team_session_token was globally unique on its own,
+    so a bare pk was always enough; DynamoDB's real key is
+    (room_code, token). Checked the actual frontend flow (Join.tsx's
+    silent-reconnect effect, tabletConnections.ts, profesor/Lobby.tsx's
+    disconnectTablet) before deciding: it *never* sends room_code alongside
+    the token/connection id for reconnect, status, update_screen, or
+    disconnect -- only ever the bare token (localStorage's
+    'team_session_token'/'tabletConnectionId'), even though a room_code IS
+    separately cached in localStorage from the original connect call. Since
+    every currently-deployed frontend build only ever sends the bare token,
+    hand-waving that room_code "could" be added client-side would still
+    leave a hard requirement on a synchronized frontend redeploy -- so
+    `_get_connection` below (used by update_screen/disconnect) and
+    reconnect/status directly resolve pk -> item via
+    find_connection_by_token's Scan fallback when no room_code is given,
+    accepting the loss of the single-table design's room-scoped-query
+    benefit for these routes (this is the option the brief pointed at).
+    A future caller that does pass room_code/game_session explicitly still
+    gets the cheaper direct get_connection lookup.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _get_connection(self, request, pk):
+        """Resolves a TabletConnection dict from a bare pk (the
+        team_session_token, per TabletConnectionSerializer's id field).
+        Prefers a direct get_connection (O(1)) when the caller supplies
+        room_code/game_session (a future caller, or an explicit override);
+        otherwise falls back to find_connection_by_token's Scan -- see this
+        class's identifier-surface note for why that's the common path
+        today."""
+        room_code = (
+            request.data.get('room_code') or request.data.get('game_session')
+            or request.query_params.get('room_code') or request.query_params.get('game_session')
+        )
+        if room_code:
+            return get_connection(room_code, pk)
+        return find_connection_by_token(pk)
 
     @action(detail=False, methods=['post'], permission_classes=[], authentication_classes=[])
     def connect(self, request):
@@ -4965,40 +5092,37 @@ class TabletConnectionViewSet(viewsets.ModelViewSet):
         room_code = str(room_code).strip().upper()
 
         try:
-            game_session = GameSession.objects.get(room_code=room_code)
+            game_session = get_session(room_code)
+            if game_session is None:
+                return Response(
+                    {'error': 'Código de sala inválido'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
 
             # Verificar que la sesión esté activa
-            if game_session.status not in ['lobby', 'running']:
+            if game_session['status'] not in ['lobby', 'running']:
                 return Response(
                     {
                         'error': 'La sesión ya ha finalizado',
-                        'status': game_session.status,
+                        'status': game_session['status'],
                     },
                     status=status.HTTP_403_FORBIDDEN
                 )
 
             # Si ya está en running, no permitir nuevas conexiones
             # (reconexión debe hacerse via /reconnect/ con team_session_token)
-            if game_session.status == 'running':
+            if game_session['status'] == 'running':
                 return Response(
                     {'error': 'No se pueden conectar nuevos equipos. El juego ya ha comenzado. Usa tu token de reconexión.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
             # Buscar primer equipo sin conexión activa
-            teams = game_session.teams.all()
-            available_team = None
-
-            for team in teams:
-                has_active_connection = TabletConnection.objects.filter(
-                    team=team,
-                    game_session=game_session,
-                    disconnected_at__isnull=True
-                ).exists()
-
-                if not has_active_connection:
-                    available_team = team
-                    break
+            teams = list_teams(room_code)
+            connected_team_ids = {
+                c['team_id'] for c in list_connections(room_code) if c.get('disconnected_at') is None
+            }
+            available_team = next((t for t in teams if t['team_id'] not in connected_team_ids), None)
 
             if not available_team:
                 return Response(
@@ -5007,16 +5131,12 @@ class TabletConnectionViewSet(viewsets.ModelViewSet):
                 )
 
             # Actualizar identidad del equipo con los datos del alumno
-            available_team.name = team_name
-            available_team.color = team_color
-            available_team.save()
+            updated_team = update_team(room_code, available_team['team_id'], name=team_name, color=team_color)
+            available_team = updated_team if updated_team is not None else available_team
 
             # Crear conexión sin tablet física (BYOD)
-            connection = TabletConnection.objects.create(
-                tablet=None,
-                team=available_team,
-                game_session=game_session
-            )
+            connection = create_connection(room_code, available_team['team_id'], tablet_id=None)
+            annotate_tablet_connection_display_fields(connection, team=available_team)
 
             serializer = TabletConnectionSerializer(connection)
             team_serializer = TeamSerializer(available_team)
@@ -5025,19 +5145,14 @@ class TabletConnectionViewSet(viewsets.ModelViewSet):
                 'connection': serializer.data,
                 'team': team_serializer.data,
                 'game_session': {
-                    'id': game_session.id,
-                    'room_code': game_session.room_code,
-                    'status': game_session.status
+                    'id': game_session['room_code'],
+                    'room_code': game_session['room_code'],
+                    'status': game_session['status']
                 },
-                'team_session_token': str(connection.team_session_token),
+                'team_session_token': connection['team_session_token'],
                 'message': 'Conectado exitosamente'
             }, status=status.HTTP_201_CREATED)
 
-        except GameSession.DoesNotExist:
-            return Response(
-                {'error': 'Código de sala inválido'},
-                status=status.HTTP_404_NOT_FOUND
-            )
         except Exception as e:
             return Response(
                 {'error': f'Error inesperado: {str(e)}'},
@@ -5050,24 +5165,35 @@ class TabletConnectionViewSet(viewsets.ModelViewSet):
         Las tablets reportan su pantalla actual (sin autenticación).
         Payload: {"screen": "results_1"} o {"screen": "lobby"}
         """
-        connection = self.get_object()
-        screen = request.data.get('screen', '')
-        connection.current_screen = str(screen)[:50]
-        connection.save(update_fields=['current_screen'])
-        return Response({'current_screen': connection.current_screen})
+        connection = self._get_connection(request, pk)
+        if connection is None:
+            return Response({'error': 'Conexión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        screen = str(request.data.get('screen', ''))[:50]
+        updated = update_heartbeat(connection['room_code'], connection['team_session_token'], current_screen=screen)
+        if updated is None:
+            return Response({'error': 'Conexión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'current_screen': updated['current_screen']})
 
     @action(detail=True, methods=['post'])
     def disconnect(self, request, pk=None):
         """Desconectar una tablet"""
-        connection = self.get_object()
-        if connection.disconnected_at is not None:
+        connection = self._get_connection(request, pk)
+        if connection is None:
+            return Response({'error': 'Conexión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        if connection.get('disconnected_at') is not None:
             return Response(
                 {'error': 'La tablet ya está desconectada'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        connection.disconnected_at = timezone.now()
-        connection.save()
-        serializer = self.get_serializer(connection)
+
+        updated = disconnect(connection['room_code'], connection['team_session_token'])
+        if updated is None:
+            return Response({'error': 'Conexión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        annotate_tablet_connection_display_fields(updated)
+        serializer = TabletConnectionSerializer(updated)
         return Response(serializer.data)
 
     @action(detail=False, methods=['post'], permission_classes=[], authentication_classes=[])
@@ -5088,44 +5214,47 @@ class TabletConnectionViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            connection = TabletConnection.objects.select_related('team', 'game_session').get(
-                team_session_token=token
-            )
+            # No room_code available from the frontend at reconnect time
+            # (see class docstring) -- Scan fallback is the only option.
+            connection = find_connection_by_token(token)
+            if connection is None:
+                return Response(
+                    {'error': 'Token de sesión inválido o expirado'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
 
-            game_session = connection.game_session
+            room_code = connection['room_code']
+            game_session = get_session(room_code)
 
-            if game_session.status not in ['lobby', 'running']:
+            if game_session is None or game_session['status'] not in ['lobby', 'running']:
                 return Response(
                     {'error': 'La sesión ha finalizado'},
                     status=status.HTTP_403_FORBIDDEN
                 )
 
             # Reactivar conexión si estaba desconectada
-            if connection.disconnected_at is not None:
-                connection.disconnected_at = None
-                connection.save()
+            if connection.get('disconnected_at') is not None:
+                reactivated = reactivate(room_code, token)
+                if reactivated is not None:
+                    connection = reactivated
 
-            team = connection.team
+            team = get_team(room_code, connection['team_id']) if connection.get('team_id') else None
+            annotate_tablet_connection_display_fields(connection, team=team)
             serializer = TabletConnectionSerializer(connection)
-            team_serializer = TeamSerializer(team)
+            team_serializer = TeamSerializer(team) if team else None
 
             return Response({
                 'connection': serializer.data,
-                'team': team_serializer.data,
+                'team': team_serializer.data if team_serializer else None,
                 'game_session': {
-                    'id': game_session.id,
-                    'room_code': game_session.room_code,
-                    'status': game_session.status
+                    'id': game_session['room_code'],
+                    'room_code': game_session['room_code'],
+                    'status': game_session['status']
                 },
-                'team_session_token': str(connection.team_session_token),
+                'team_session_token': connection['team_session_token'],
                 'message': 'Reconectado exitosamente'
             }, status=status.HTTP_200_OK)
 
-        except TabletConnection.DoesNotExist:
-            return Response(
-                {'error': 'Token de sesión inválido o expirado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
         except Exception as e:
             return Response(
                 {'error': f'Error inesperado: {str(e)}'},
@@ -5134,21 +5263,24 @@ class TabletConnectionViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def by_team(self, request):
-        """Obtener conexiones de tablets por equipo"""
+        """Obtener conexiones de tablets activas por equipo"""
         team_id = request.query_params.get('team')
-        game_session_id = request.query_params.get('game_session')
-        
-        queryset = self.get_queryset()
-        
-        if team_id:
-            queryset = queryset.filter(team_id=team_id)
-        if game_session_id:
-            queryset = queryset.filter(game_session_id=game_session_id)
-        
-        # Solo conexiones activas
-        queryset = queryset.filter(disconnected_at__isnull=True)
-        
-        serializer = self.get_serializer(queryset, many=True)
+        room_code = request.query_params.get('game_session') or request.query_params.get('room_code')
+
+        if not room_code:
+            return Response(
+                {'error': 'Se requiere game_session (room_code)'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        connections = [
+            c for c in list_connections(room_code)
+            if c.get('disconnected_at') is None and (not team_id or c.get('team_id') == team_id)
+        ]
+        for connection in connections:
+            annotate_tablet_connection_display_fields(connection)
+
+        serializer = TabletConnectionSerializer(connections, many=True)
         return Response(serializer.data)
 
     @action(detail=False, methods=['get'], permission_classes=[], authentication_classes=[])
@@ -5158,45 +5290,51 @@ class TabletConnectionViewSet(viewsets.ModelViewSet):
         No requiere autenticación
         """
         connection_id = request.query_params.get('connection_id')
-        
+
         if not connection_id:
             return Response(
                 {'error': 'Se requiere connection_id'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        try:
-            connection = TabletConnection.objects.select_related('tablet', 'team', 'game_session').get(id=connection_id)
-            serializer = TabletConnectionSerializer(connection)
-            
-            team = connection.team
-            game_session = connection.game_session
-            team_serializer = TeamSerializer(team)
-            
-            # Obtener personalización del equipo
-            personalization = None
-            try:
-                personalization = team.personalization
-            except:
-                pass
-            
-            return Response({
-                'connection': serializer.data,
-                'team': team_serializer.data,
-                'game_session': {
-                    'id': game_session.id,
-                    'room_code': game_session.room_code,
-                    'status': game_session.status
-                },
-                'personalization': {
-                    'team_members_know_each_other': personalization.team_members_know_each_other if personalization else None
-                } if personalization else None
-            })
-        except TabletConnection.DoesNotExist:
+
+        room_code = request.query_params.get('room_code') or request.query_params.get('game_session')
+        connection = get_connection(room_code, connection_id) if room_code else find_connection_by_token(connection_id)
+        if connection is None:
             return Response(
                 {'error': 'Conexión no encontrada'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+        room_code = connection['room_code']
+        team = get_team(room_code, connection['team_id']) if connection.get('team_id') else None
+        game_session = get_session(room_code)
+        annotate_tablet_connection_display_fields(connection, team=team)
+
+        serializer = TabletConnectionSerializer(connection)
+        team_serializer = TeamSerializer(team) if team else None
+
+        # "Personalización presente" == alguno de sus dos campos ya fue
+        # fijado (nacen en None desde create_team) -- mismo criterio que
+        # TeamPersonalizationViewSet.create usa para distinguir creación de
+        # actualización, ya que TeamPersonalization ya no es una entidad
+        # separada (ver esa clase).
+        has_personalization = bool(team) and (
+            team.get('personalization_team_name') is not None
+            or team.get('personalization_members_know_each_other') is not None
+        )
+
+        return Response({
+            'connection': serializer.data,
+            'team': team_serializer.data if team_serializer else None,
+            'game_session': {
+                'id': game_session['room_code'],
+                'room_code': game_session['room_code'],
+                'status': game_session['status']
+            } if game_session else None,
+            'personalization': {
+                'team_members_know_each_other': team.get('personalization_members_know_each_other')
+            } if has_personalization else None
+        })
 
 
 class TeamRouletteAssignmentViewSet(viewsets.ModelViewSet):
