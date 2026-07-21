@@ -34,7 +34,8 @@ from .models import (
 from .serializers import (
     GameSessionSerializer, GameSessionCreateSerializer, annotate_game_session_display_fields,
     TeamSerializer, TeamPersonalizationSerializer,
-    SessionStageSerializer, TeamActivityProgressSerializer,
+    SessionStageSerializer, annotate_session_stage_display_fields,
+    TeamActivityProgressSerializer, annotate_team_activity_progress_display_fields,
     TeamBubbleMapSerializer, TabletSerializer, TabletConnectionSerializer,
     annotate_tablet_connection_display_fields,
     TeamRouletteAssignmentSerializer, TokenTransactionSerializer,
@@ -55,6 +56,7 @@ from game_sessions.dynamodb.stage_progress import (
 )
 from game_sessions.dynamodb.tablet_connection import list_connections, disconnect
 from game_sessions.dynamodb.token_transaction import list_transactions
+from game_sessions.dynamodb.evaluations import list_peer_evaluations
 from game_sessions.dynamodb.client import now_iso
 
 
@@ -2642,6 +2644,28 @@ class TeamPersonalizationViewSet(viewsets.ViewSet):
 class SessionStageViewSet(viewsets.ModelViewSet):
     """
     ViewSet para Etapas de Sesión
+
+    DynamoDB cutover (Task 14): the ~10 presentation-flow actions below
+    (generate_presentation_order through presentation_evaluation_progress)
+    now read/write game_sessions.dynamodb.stage_progress instead of the
+    SessionStage ORM model. `list`/`retrieve`/the default ModelViewSet CRUD
+    mixins and `queryset`/`get_queryset` below are UNCHANGED and stay
+    ORM-backed -- porting them was not in this task's scope (the brief only
+    covers the @action methods) and no other viewset in this class list was
+    touched. See the class-level Concerns note in task-14-report.md: since
+    Task 11 already switched SessionStage creation/writes over to
+    stage_progress.create_session_stage/update_session_stage (DynamoDB-only,
+    no ORM row), `list`/`retrieve` here likely no longer see current data
+    for sessions created after that cutover -- flagged as a pre-existing gap,
+    not something this task introduces or fixes.
+
+    Identifier-surface note (mirrors TeamViewSet's, Task 13): a SessionStage's
+    real key is (room_code, stage_id), not stage_id alone -- stage_id is
+    challenges.Stage's int id, shared across every room, so a bare `pk` in
+    the URL can't address one row by itself. Every ported action below
+    requires the owning room via `?game_session=<room_code>` (GET actions)
+    or a `game_session` field in the request body (POST actions), same
+    convention TeamViewSet/TeamPersonalizationViewSet established.
     """
     queryset = SessionStage.objects.all()
     serializer_class = SessionStageSerializer
@@ -2667,40 +2691,127 @@ class SessionStageViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return SessionStage.objects.select_related('game_session', 'stage')
     
+    # ------------------------------------------------------------------
+    # Helpers for the presentation-flow actions (Task 14)
+    # ------------------------------------------------------------------
+
+    # TeamActivityProgress fields upsert_progress() writes as a full
+    # overwrite -- mirrors GameSessionViewSet._PROGRESS_FIELD_NAMES (Task
+    # 11). Duplicated locally rather than shared across classes to keep
+    # this class self-contained (same reasoning as its own copy there).
+    _PROGRESS_FIELD_NAMES = (
+        'status', 'started_at', 'completed_at', 'progress_percentage', 'response_data',
+        'selected_topic_id', 'selected_challenge_id', 'prototype_image_url',
+        'pitch_intro_problem', 'pitch_solution', 'pitch_value', 'pitch_impact', 'pitch_closing',
+    )
+
+    def _resolve_session_stage(self, request, pk):
+        """Resolves the SessionStage dict for a presentation-flow action.
+        See the class docstring's identifier-surface note -- stage_id (pk)
+        alone can't address a single row, so the owning room must be
+        supplied via `?game_session=<room_code>` or a `game_session` body
+        field. Returns (session_stage_dict, None) on success, or
+        (None, Response) with the appropriate 400/404 on failure."""
+        room_code = request.data.get('game_session') or request.query_params.get('game_session')
+        if not room_code:
+            return None, Response(
+                {'error': 'Se requiere game_session'}, status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            stage_id = int(pk)
+        except (TypeError, ValueError):
+            return None, Response(
+                {'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND
+            )
+        session_stage = get_session_stage(room_code, stage_id)
+        if session_stage is None:
+            return None, Response(
+                {'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND
+            )
+        return session_stage, None
+
+    def _require_stage_4(self, session_stage):
+        """Byte-for-byte equivalent of the original's `session_stage.stage.
+        number != 4` ORM FK traversal -- challenges.Stage stays on Django
+        ORM/MySQL, unchanged by this cutover."""
+        from challenges.models import Stage
+
+        try:
+            stage_number = Stage.objects.get(id=session_stage['stage_id']).number
+        except Stage.DoesNotExist:
+            stage_number = None
+        if stage_number != 4:
+            return Response(
+                {'error': 'Este endpoint solo está disponible para la Etapa 4'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return None
+
+    def _mark_progress_completed(self, room_code, team_id, activity_id):
+        """mark_presentation_done's idempotent completion write. Same
+        read-existing -> preserve-other-fields -> single upsert_progress
+        write style as GameSessionViewSet's _upsert_progress_preserving/
+        _complete_activity_progress_for_all_teams (Task 11), adapted for
+        this action's own field semantics: both completed_at AND started_at
+        default to now() only when not already set -- matches the ORM's
+        get_or_create(defaults=...) + `if not progress.completed_at` /
+        `if not progress.started_at` guards (unlike
+        _complete_activity_progress_for_all_teams, which only guards
+        completed_at and always re-syncs started_at unconditionally
+        elsewhere).
+
+        STATUS='COMPLETED' CALL SITE for Task 22's future admin_dashboard
+        metric hook (TeamActivityProgress side).
+        """
+        existing = get_progress(room_code, team_id, activity_id)
+        now = now_iso()
+        if existing:
+            fields = {name: existing.get(name) for name in self._PROGRESS_FIELD_NAMES}
+            fields['status'] = 'completed'
+            fields['progress_percentage'] = 100
+            if not fields.get('completed_at'):
+                fields['completed_at'] = now
+            if not fields.get('started_at'):
+                fields['started_at'] = now
+        else:
+            fields = {
+                'status': 'completed', 'progress_percentage': 100,
+                'completed_at': now, 'started_at': now,
+            }
+        return upsert_progress(room_code, team_id, activity_id, **fields)
+
     @action(detail=True, methods=['post'], authentication_classes=[JWTAuthentication, SessionAuthentication])
     def generate_presentation_order(self, request, pk=None):
         """
         Generar orden de presentación automáticamente (aleatorio) para la Etapa 4
         NO permite generar si ya están presentando
         """
-        session_stage = self.get_object()
-        
-        if session_stage.stage.number != 4:
-            return Response(
-                {'error': 'Este endpoint solo está disponible para la Etapa 4'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
+        session_stage, error = self._resolve_session_stage(request, pk)
+        if error:
+            return error
+        stage_error = self._require_stage_4(session_stage)
+        if stage_error:
+            return stage_error
+
         # CRÍTICO: No permitir generar si ya están presentando
-        presentation_state = getattr(session_stage, 'presentation_state', 'not_started')
-        if presentation_state != 'not_started' and session_stage.current_presentation_team_id:
+        presentation_state = session_stage.get('presentation_state') or 'not_started'
+        if presentation_state != 'not_started' and session_stage.get('current_presentation_team_id'):
             return Response(
                 {'error': 'No se puede generar un nuevo orden mientras las presentaciones están en curso'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        from .models import Team
-        import random
-        
-        teams = Team.objects.filter(game_session=session_stage.game_session)
-        team_ids = list(teams.values_list('id', flat=True))
-        
+
+        room_code = session_stage['room_code']
+        team_ids = [team['team_id'] for team in list_teams(room_code)]
+
         # Generar orden aleatorio
         random.shuffle(team_ids)
-        
-        session_stage.presentation_order = team_ids
-        session_stage.save()
-        
+
+        session_stage = update_session_stage(
+            room_code, session_stage['stage_id'], presentation_order=team_ids
+        ) or session_stage
+        annotate_session_stage_display_fields(session_stage)
+
         serializer = self.get_serializer(session_stage)
         return Response(serializer.data)
     
@@ -2710,32 +2821,33 @@ class SessionStageViewSet(viewsets.ModelViewSet):
         Actualizar el orden de presentación (el profesor puede reordenar)
         NO permite cambios si ya están presentando
         """
-        session_stage = self.get_object()
-        
-        if session_stage.stage.number != 4:
-            return Response(
-                {'error': 'Este endpoint solo está disponible para la Etapa 4'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
+        session_stage, error = self._resolve_session_stage(request, pk)
+        if error:
+            return error
+        stage_error = self._require_stage_4(session_stage)
+        if stage_error:
+            return stage_error
+
         # CRÍTICO: No permitir cambios si ya están presentando
-        presentation_state = getattr(session_stage, 'presentation_state', 'not_started')
-        if presentation_state != 'not_started' and session_stage.current_presentation_team_id:
+        presentation_state = session_stage.get('presentation_state') or 'not_started'
+        if presentation_state != 'not_started' and session_stage.get('current_presentation_team_id'):
             return Response(
                 {'error': 'No se puede modificar el orden de presentación mientras las presentaciones están en curso'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         new_order = request.data.get('presentation_order')
         if not new_order or not isinstance(new_order, list):
             return Response(
                 {'error': 'Se requiere presentation_order como array de IDs de equipos'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        session_stage.presentation_order = new_order
-        session_stage.save()
-        
+
+        session_stage = update_session_stage(
+            session_stage['room_code'], session_stage['stage_id'], presentation_order=new_order
+        ) or session_stage
+        annotate_session_stage_display_fields(session_stage)
+
         serializer = self.get_serializer(session_stage)
         return Response(serializer.data)
     
@@ -2744,28 +2856,28 @@ class SessionStageViewSet(viewsets.ModelViewSet):
         """
         Iniciar las presentaciones (confirmar orden y comenzar con el primer equipo)
         """
-        session_stage = self.get_object()
-        
-        if session_stage.stage.number != 4:
-            return Response(
-                {'error': 'Este endpoint solo está disponible para la Etapa 4'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if not session_stage.presentation_order:
+        session_stage, error = self._resolve_session_stage(request, pk)
+        if error:
+            return error
+        stage_error = self._require_stage_4(session_stage)
+        if stage_error:
+            return stage_error
+
+        presentation_order = session_stage.get('presentation_order')
+        if not presentation_order:
             return Response(
                 {'error': 'Primero debes generar o confirmar el orden de presentación'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Establecer el primer equipo como el que está presentando y cambiar estado a 'preparing'
-        if len(session_stage.presentation_order) > 0:
-            session_stage.current_presentation_team_id = session_stage.presentation_order[0]
-            # Solo establecer presentation_state si el campo existe (migración aplicada)
-            if hasattr(session_stage, 'presentation_state'):
-                session_stage.presentation_state = 'preparing'  # Estado de preparación
-            session_stage.save()
-        
+        session_stage = update_session_stage(
+            session_stage['room_code'], session_stage['stage_id'],
+            current_presentation_team_id=presentation_order[0],
+            presentation_state='preparing',
+        ) or session_stage
+        annotate_session_stage_display_fields(session_stage)
+
         serializer = self.get_serializer(session_stage)
         return Response(serializer.data)
     
@@ -2774,45 +2886,48 @@ class SessionStageViewSet(viewsets.ModelViewSet):
         """
         Avanzar al siguiente equipo en el orden de presentación
         """
-        session_stage = self.get_object()
-        
-        if session_stage.stage.number != 4:
-            return Response(
-                {'error': 'Este endpoint solo está disponible para la Etapa 4'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if not session_stage.presentation_order:
+        session_stage, error = self._resolve_session_stage(request, pk)
+        if error:
+            return error
+        stage_error = self._require_stage_4(session_stage)
+        if stage_error:
+            return stage_error
+
+        presentation_order = session_stage.get('presentation_order')
+        if not presentation_order:
             return Response(
                 {'error': 'No hay orden de presentación establecido'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
+        current_team_id = session_stage.get('current_presentation_team_id')
         current_index = None
-        if session_stage.current_presentation_team_id:
+        if current_team_id:
             try:
-                current_index = session_stage.presentation_order.index(session_stage.current_presentation_team_id)
+                current_index = presentation_order.index(current_team_id)
             except ValueError:
                 current_index = 0
-        
+
         # Avanzar al siguiente
         if current_index is None or current_index < 0:
             next_index = 0
         else:
             next_index = current_index + 1
-        
-        if next_index >= len(session_stage.presentation_order):
+
+        if next_index >= len(presentation_order):
             # Todas las presentaciones completadas
-            session_stage.current_presentation_team_id = None
-            if hasattr(session_stage, 'presentation_state'):
-                session_stage.presentation_state = 'not_started'  # Ya no hay más presentaciones
+            fields = {'current_presentation_team_id': None, 'presentation_state': 'not_started'}
         else:
-            session_stage.current_presentation_team_id = session_stage.presentation_order[next_index]
-            if hasattr(session_stage, 'presentation_state'):
-                session_stage.presentation_state = 'preparing'  # Preparar al siguiente equipo
-        
-        session_stage.save()
-        
+            fields = {
+                'current_presentation_team_id': presentation_order[next_index],
+                'presentation_state': 'preparing',  # Preparar al siguiente equipo
+            }
+
+        session_stage = update_session_stage(
+            session_stage['room_code'], session_stage['stage_id'], **fields
+        ) or session_stage
+        annotate_session_stage_display_fields(session_stage)
+
         serializer = self.get_serializer(session_stage)
         return Response(serializer.data)
     
@@ -2821,62 +2936,52 @@ class SessionStageViewSet(viewsets.ModelViewSet):
         """
         Iniciar el pitch del equipo actual (cambiar estado a 'presenting' e iniciar temporizador de 3 minutos)
         """
-        from django.utils import timezone
-        
-        session_stage = self.get_object()
-        
-        if session_stage.stage.number != 4:
-            return Response(
-                {'error': 'Este endpoint solo está disponible para la Etapa 4'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if not session_stage.current_presentation_team_id:
+        session_stage, error = self._resolve_session_stage(request, pk)
+        if error:
+            return error
+        stage_error = self._require_stage_4(session_stage)
+        if stage_error:
+            return stage_error
+
+        current_team_id = session_stage.get('current_presentation_team_id')
+        if not current_team_id:
             return Response(
                 {'error': 'No hay un equipo presentando actualmente'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Verificar estado si el campo existe (migración aplicada)
-        if hasattr(session_stage, 'presentation_state') and session_stage.presentation_state != 'preparing':
+
+        # Verificar estado (el campo siempre existe en el esquema DynamoDB actual)
+        if session_stage.get('presentation_state') != 'preparing':
             return Response(
                 {'error': 'El equipo no está en estado de preparación'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Cambiar estado a 'presenting' e iniciar temporizador
-        if hasattr(session_stage, 'presentation_state'):
-            session_stage.presentation_state = 'presenting'
-        
-        # Guardar timestamp de inicio de presentación en un campo JSONField
-        # Usaremos presentation_order como almacenamiento temporal, o mejor crear un nuevo campo
-        # Por ahora, guardaremos en un diccionario usando el campo JSONField existente
-        # Necesitamos un campo específico, pero usaremos presentation_order temporalmente
-        # O mejor, guardar en un campo separado si existe
-        
+
         # Guardar el timestamp de inicio de la presentación actual
         presentation_started_at = timezone.now()
-        
-        # Guardar el timestamp en presentation_timestamps (JSONField)
-        if not hasattr(session_stage, 'presentation_timestamps') or session_stage.presentation_timestamps is None:
-            session_stage.presentation_timestamps = {}
-        
-        team_id = session_stage.current_presentation_team_id
-        session_stage.presentation_timestamps[str(team_id)] = presentation_started_at.isoformat()
-        
-        session_stage.save()
-        
+
+        presentation_timestamps = dict(session_stage.get('presentation_timestamps') or {})
+        presentation_timestamps[str(current_team_id)] = presentation_started_at.isoformat()
+
+        # Cambiar estado a 'presenting' e iniciar temporizador
+        session_stage = update_session_stage(
+            session_stage['room_code'], session_stage['stage_id'],
+            presentation_state='presenting',
+            presentation_timestamps=presentation_timestamps,
+        ) or session_stage
+        annotate_session_stage_display_fields(session_stage)
+
         serializer = self.get_serializer(session_stage)
         response_data = serializer.data
         # Agregar el timestamp de inicio en la respuesta
-        
+
         # La duración de cada presentación individual es siempre 1:30 (90 segundos)
         # NO usar timer_duration de la actividad ya que puede ser para la duración total de la etapa
         presentation_duration = 90  # Siempre 1:30 minutos para cada presentación individual
-        
+
         response_data['presentation_started_at'] = presentation_started_at.isoformat()
         response_data['presentation_duration'] = presentation_duration
-        
+
         return Response(response_data)
     
     @action(detail=True, methods=['post'], authentication_classes=[JWTAuthentication, SessionAuthentication])
@@ -2884,32 +2989,32 @@ class SessionStageViewSet(viewsets.ModelViewSet):
         """
         Finalizar la presentación del equipo actual (cambiar estado a 'evaluating')
         """
-        session_stage = self.get_object()
-        
-        if session_stage.stage.number != 4:
-            return Response(
-                {'error': 'Este endpoint solo está disponible para la Etapa 4'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if not session_stage.current_presentation_team_id:
+        session_stage, error = self._resolve_session_stage(request, pk)
+        if error:
+            return error
+        stage_error = self._require_stage_4(session_stage)
+        if stage_error:
+            return stage_error
+
+        if not session_stage.get('current_presentation_team_id'):
             return Response(
                 {'error': 'No hay un equipo presentando actualmente'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Verificar estado si el campo existe (migración aplicada)
-        if hasattr(session_stage, 'presentation_state') and session_stage.presentation_state != 'presenting':
+
+        # Verificar estado (el campo siempre existe en el esquema DynamoDB actual)
+        if session_stage.get('presentation_state') != 'presenting':
             return Response(
                 {'error': 'El equipo no está en estado de presentación'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Cambiar estado a 'evaluating'
-        if hasattr(session_stage, 'presentation_state'):
-            session_stage.presentation_state = 'evaluating'
-        session_stage.save()
-        
+        session_stage = update_session_stage(
+            session_stage['room_code'], session_stage['stage_id'], presentation_state='evaluating'
+        ) or session_stage
+        annotate_session_stage_display_fields(session_stage)
+
         serializer = self.get_serializer(session_stage)
         return Response(serializer.data)
     
@@ -2918,113 +3023,98 @@ class SessionStageViewSet(viewsets.ModelViewSet):
         """
         Obtener el estado actual de las presentaciones (para tablets)
         """
-        session_stage = self.get_object()
-        
-        if session_stage.stage.number != 4:
-            return Response(
-                {'error': 'Este endpoint solo está disponible para la Etapa 4'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        from .models import Team
+        session_stage, error = self._resolve_session_stage(request, pk)
+        if error:
+            return error
+        stage_error = self._require_stage_4(session_stage)
+        if stage_error:
+            return stage_error
+
         from challenges.models import Activity
-        
+
+        room_code = session_stage['room_code']
+        presentation_order = session_stage.get('presentation_order') or []
+        current_team_id = session_stage.get('current_presentation_team_id')
+
         teams_data = []
         completed_team_ids = []
-        
+
         # Obtener la actividad de presentación del pitch
         try:
             presentation_activity = Activity.objects.filter(
                 stage__number=4,
                 activity_type__name__icontains='presentación'
             ).first()
-            
-            if presentation_activity and session_stage.presentation_order:
+
+            if presentation_activity and presentation_order:
                 # Verificar qué equipos ya completaron su presentación
-                completed_progress = TeamActivityProgress.objects.filter(
-                    session_stage=session_stage,
-                    activity=presentation_activity,
-                    status='completed'
-                ).values_list('team_id', flat=True)
-                completed_team_ids = list(completed_progress)
+                for team in list_teams(room_code):
+                    progress = get_progress(room_code, team['team_id'], presentation_activity.id)
+                    if progress and progress.get('status') == 'completed':
+                        completed_team_ids.append(team['team_id'])
         except Exception as e:
             print(f"Error al obtener equipos completados: {e}")
-        
-        if session_stage.presentation_order:
-            for team_id in session_stage.presentation_order:
-                try:
-                    team = Team.objects.get(id=team_id)
-                    teams_data.append({
-                        'id': team.id,
-                        'name': team.name,
-                        'color': team.color
-                    })
-                except Team.DoesNotExist:
-                    continue
-        
+
+        for team_id in presentation_order:
+            team = get_team(room_code, team_id)
+            if team is not None:
+                teams_data.append({
+                    'id': team['team_id'],
+                    'name': team['name'],
+                    'color': team['color']
+                })
+
         # Obtener prototipo y pitch del equipo que está presentando
         current_team_prototype = None
         current_team_pitch = None
-        
-        if session_stage.current_presentation_team_id:
+
+        if current_team_id:
             try:
-                from .models import TeamActivityProgress
-                current_team = Team.objects.get(id=session_stage.current_presentation_team_id)
-                
                 # Obtener actividad de prototipo (Etapa 3)
                 prototype_activity = Activity.objects.filter(
                     stage__number=3,
                     activity_type__name__icontains='prototipo'
                 ).first()
-                
+
                 # Obtener actividad de formulario pitch (Etapa 4)
                 pitch_activity = Activity.objects.filter(
                     stage__number=4,
                     activity_type__name__icontains='formulario'
                 ).first()
-                
+
                 # Obtener prototipo
                 if prototype_activity:
-                    prototype_progress = TeamActivityProgress.objects.filter(
-                        team=current_team,
-                        activity=prototype_activity,
-                        session_stage__game_session=session_stage.game_session,
-                        session_stage__stage__number=3
-                    ).first()
-                    
-                    if prototype_progress and prototype_progress.prototype_image_url:
-                        current_team_prototype = prototype_progress.prototype_image_url
-                
+                    prototype_progress = get_progress(room_code, current_team_id, prototype_activity.id)
+
+                    if prototype_progress and prototype_progress.get('prototype_image_url'):
+                        current_team_prototype = prototype_progress['prototype_image_url']
+
                 # Obtener pitch
                 if pitch_activity:
-                    pitch_progress = TeamActivityProgress.objects.filter(
-                        team=current_team,
-                        activity=pitch_activity,
-                        session_stage=session_stage
-                    ).first()
-                    
+                    pitch_progress = get_progress(room_code, current_team_id, pitch_activity.id)
+
                     if pitch_progress:
                         current_team_pitch = {
-                            'intro_problem': pitch_progress.pitch_intro_problem or '',
-                            'solution': pitch_progress.pitch_solution or '',
-                            'value': pitch_progress.pitch_value or '',
-                            'impact': pitch_progress.pitch_impact or '',
-                            'closing': pitch_progress.pitch_closing or ''
+                            'intro_problem': pitch_progress.get('pitch_intro_problem') or '',
+                            'solution': pitch_progress.get('pitch_solution') or '',
+                            'value': pitch_progress.get('pitch_value') or '',
+                            'impact': pitch_progress.get('pitch_impact') or '',
+                            'closing': pitch_progress.get('pitch_closing') or ''
                         }
             except Exception as e:
                 print(f"Error obteniendo prototipo/pitch del equipo actual: {e}")
-        
+
         response_data = {
-            'presentation_order': session_stage.presentation_order,
-            'current_presentation_team_id': session_stage.current_presentation_team_id,
+            'presentation_order': presentation_order,
+            'current_presentation_team_id': current_team_id,
             'teams': teams_data,
-            'order_confirmed': session_stage.current_presentation_team_id is not None,  # True si las presentaciones comenzaron
+            'order_confirmed': current_team_id is not None,  # True si las presentaciones comenzaron
             'completed_team_ids': completed_team_ids,  # Equipos que ya completaron su presentación
-            'presentation_state': getattr(session_stage, 'presentation_state', 'not_started'),  # Estado actual: 'not_started', 'preparing', 'presenting', 'evaluating'
+            'presentation_state': session_stage.get('presentation_state') or 'not_started',  # Estado actual: 'not_started', 'preparing', 'presenting', 'evaluating'
             'current_team_prototype': current_team_prototype,  # URL de la imagen del prototipo del equipo que presenta
             'current_team_pitch': current_team_pitch  # Guion del pitch del equipo que presenta
         }
-        
+
         return Response(response_data)
     
     @action(detail=True, methods=['get'], permission_classes=[], authentication_classes=[])
@@ -3034,25 +3124,24 @@ class SessionStageViewSet(viewsets.ModelViewSet):
         Endpoint para tablets y profesor para sincronizar el temporizador
         """
         from datetime import datetime
-        
-        session_stage = self.get_object()
-        
-        if session_stage.stage.number != 4:
-            return Response(
-                {'error': 'Este endpoint solo está disponible para la Etapa 4'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if not session_stage.current_presentation_team_id:
+
+        session_stage, error = self._resolve_session_stage(request, pk)
+        if error:
+            return error
+        stage_error = self._require_stage_4(session_stage)
+        if stage_error:
+            return stage_error
+
+        if not session_stage.get('current_presentation_team_id'):
             return Response(
                 {'error': 'No hay un equipo presentando actualmente'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Obtener el timestamp de inicio de la presentación del equipo actual
-        team_id = str(session_stage.current_presentation_team_id)
-        presentation_timestamps = getattr(session_stage, 'presentation_timestamps', None) or {}
-        
+        team_id = str(session_stage['current_presentation_team_id'])
+        presentation_timestamps = session_stage.get('presentation_timestamps') or {}
+
         if team_id not in presentation_timestamps:
             return Response(
                 {'error': 'La presentación aún no ha iniciado'},
@@ -3101,70 +3190,54 @@ class SessionStageViewSet(viewsets.ModelViewSet):
         """
         team_id = request.data.get('team_id')
         activity_id = request.data.get('activity_id')
-        
+
         if not team_id or not activity_id:
             return Response(
                 {'error': 'Se requieren team_id y activity_id'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        session_stage = self.get_object()
-        
-        if session_stage.stage.number != 4:
-            return Response(
-                {'error': 'Este endpoint solo está disponible para la Etapa 4'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
+
+        session_stage, error = self._resolve_session_stage(request, pk)
+        if error:
+            return error
+        stage_error = self._require_stage_4(session_stage)
+        if stage_error:
+            return stage_error
+
+        room_code = session_stage['room_code']
+
         try:
-            from .models import Team
             from challenges.models import Activity
-            
-            team = Team.objects.get(id=team_id)
-            activity = Activity.objects.get(id=activity_id)
-            
+
+            team = get_team(room_code, team_id)
+            if team is None:
+                return Response(
+                    {'error': 'Equipo no encontrado'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            try:
+                activity = Activity.objects.get(id=activity_id)
+            except Activity.DoesNotExist:
+                return Response(
+                    {'error': 'Actividad no encontrada'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
             # Verificar que el equipo que está presentando es el correcto
-            if session_stage.current_presentation_team_id != team_id:
+            if session_stage.get('current_presentation_team_id') != team_id:
                 return Response(
                     {'error': 'No es tu turno de presentar'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
+
             # Marcar la actividad de presentación como completada para este equipo
-            progress, created = TeamActivityProgress.objects.get_or_create(
-                team=team,
-                activity=activity,
-                session_stage=session_stage,
-                defaults={
-                    'status': 'completed',
-                    'progress_percentage': 100,
-                    'completed_at': timezone.now(),
-                    'started_at': timezone.now()
-                }
-            )
-            
-            if not created:
-                progress.status = 'completed'
-                progress.progress_percentage = 100
-                if not progress.completed_at:
-                    progress.completed_at = timezone.now()
-                if not progress.started_at:
-                    progress.started_at = timezone.now()
-                progress.save()
-            
+            progress = self._mark_progress_completed(room_code, team_id, activity.id)
+            annotate_team_activity_progress_display_fields(progress, team=team)
+
             serializer = TeamActivityProgressSerializer(progress)
             return Response(serializer.data, status=status.HTTP_200_OK)
-            
-        except Team.DoesNotExist:
-            return Response(
-                {'error': 'Equipo no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Activity.DoesNotExist:
-            return Response(
-                {'error': 'Actividad no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+
         except Exception as e:
             return Response(
                 {'error': str(e)},
@@ -3177,45 +3250,41 @@ class SessionStageViewSet(viewsets.ModelViewSet):
         Obtener el progreso de evaluaciones para el equipo que está presentando
         Devuelve cuántas evaluaciones se han completado y cuántas faltan
         """
-        session_stage = self.get_object()
-        
-        if session_stage.stage.number != 4:
-            return Response(
-                {'error': 'Este endpoint solo está disponible para la Etapa 4'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if not session_stage.current_presentation_team_id:
+        session_stage, error = self._resolve_session_stage(request, pk)
+        if error:
+            return error
+        stage_error = self._require_stage_4(session_stage)
+        if stage_error:
+            return stage_error
+
+        presenting_team_id = session_stage.get('current_presentation_team_id')
+        if not presenting_team_id:
             return Response(
                 {'error': 'No hay un equipo presentando actualmente'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         try:
-            from .models import Team, PeerEvaluation
-            
-            presenting_team_id = session_stage.current_presentation_team_id
-            
+            room_code = session_stage['room_code']
+
             # Obtener todos los equipos de la sesión excepto el que está presentando
-            all_teams = Team.objects.filter(game_session=session_stage.game_session)
-            other_teams = all_teams.exclude(id=presenting_team_id)
-            total_teams = other_teams.count()
-            
+            all_teams = list_teams(room_code)
+            total_teams = sum(1 for team in all_teams if team['team_id'] != presenting_team_id)
+
             # Contar cuántas evaluaciones se han completado
-            completed_evaluations = PeerEvaluation.objects.filter(
-                evaluated_team_id=presenting_team_id,
-                game_session=session_stage.game_session
-            ).count()
-            
+            evaluations = list_peer_evaluations(room_code)
+            completed_evaluations = sum(
+                1 for evaluation in evaluations
+                if evaluation.get('evaluated_team_id') == presenting_team_id
+            )
+
             return Response({
                 'completed': completed_evaluations,
                 'total': total_teams,
                 'presenting_team_id': presenting_team_id
             })
-            
+
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.error(f'Error obteniendo progreso de evaluaciones: {str(e)}')
             return Response(
                 {'error': str(e)},
