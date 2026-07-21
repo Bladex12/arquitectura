@@ -605,3 +605,113 @@ class PresentationEvaluationProgressTest(SessionStageFlowTestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+
+# ---------------------------------------------------------------------------
+# list / retrieve -- fix-up: SessionStageViewSet was still viewsets.ModelViewSet
+# with an ORM-backed queryset/get_queryset(), which resolves to an
+# always-empty SessionStage table now that create_session_stage/
+# update_session_stage write to DynamoDB only. Ported to a hand-implemented
+# viewsets.ViewSet (same pattern as TeamViewSet, Task 13).
+# ---------------------------------------------------------------------------
+
+class SessionStageListTest(SessionStageFlowTestCase):
+    def test_list_scoped_to_room_returns_dynamodb_backed_stages(self):
+        prof, room_code, stage3, stage4, activities = self.make_room_with_stage4()
+        create_session_stage(room_code, stage3.id)
+        client = make_client_for(prof.user)
+
+        response = client.get('/api/sessions/session-stages/', {'game_session': room_code})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        stage_ids = {item['id'] for item in response.data}
+        self.assertEqual(stage_ids, {stage3.id, stage4.id})
+
+    def test_list_excludes_other_rooms(self):
+        prof, room_code, stage3, stage4, activities = self.make_room_with_stage4()
+        prof2 = make_professor()
+        course2 = make_course()
+        create_session('ROOM_OTHER', professor_id=prof2.id, course_id=course2.id)
+        create_session_stage('ROOM_OTHER', stage4.id)
+        client = make_client_for(prof.user)
+
+        response = client.get('/api/sessions/session-stages/', {'game_session': room_code})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['game_session'], room_code)
+
+    def test_list_without_game_session_falls_back_to_all_rooms(self):
+        prof, room_code, stage3, stage4, activities = self.make_room_with_stage4()
+        prof2 = make_professor()
+        course2 = make_course()
+        create_session('ROOM_OTHER', professor_id=prof2.id, course_id=course2.id)
+        create_session_stage('ROOM_OTHER', stage4.id)
+        client = make_client_for(prof.user)
+
+        response = client.get('/api/sessions/session-stages/')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        room_codes = {item['game_session'] for item in response.data}
+        self.assertEqual(room_codes, {room_code, 'ROOM_OTHER'})
+
+    def test_list_includes_stage_display_fields(self):
+        prof, room_code, stage3, stage4, activities = self.make_room_with_stage4()
+        client = make_client_for(prof.user)
+
+        response = client.get('/api/sessions/session-stages/', {'game_session': room_code})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data[0]['stage_name'], stage4.name)
+        self.assertEqual(response.data[0]['stage_number'], 4)
+
+    def test_no_auth_required(self):
+        prof, room_code, stage3, stage4, activities = self.make_room_with_stage4()
+        client = APIClient()
+
+        response = client.get('/api/sessions/session-stages/', {'game_session': room_code})
+
+        self.assertEqual(response.status_code, 200, response.data)
+
+
+class SessionStageRetrieveTest(SessionStageFlowTestCase):
+    def test_retrieve_by_stage_id_and_game_session(self):
+        prof, room_code, stage3, stage4, activities = self.make_room_with_stage4()
+        client = make_client_for(prof.user)
+
+        response = client.get(
+            f'/api/sessions/session-stages/{stage4.id}/', {'game_session': room_code}
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['id'], stage4.id)
+        self.assertEqual(response.data['game_session'], room_code)
+        self.assertEqual(response.data['status'], 'pending')
+
+    def test_retrieve_requires_game_session(self):
+        prof, room_code, stage3, stage4, activities = self.make_room_with_stage4()
+        client = make_client_for(prof.user)
+
+        response = client.get(f'/api/sessions/session-stages/{stage4.id}/')
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_retrieve_404_for_unknown_stage(self):
+        prof, room_code, stage3, stage4, activities = self.make_room_with_stage4()
+        client = make_client_for(prof.user)
+
+        response = client.get(
+            f'/api/sessions/session-stages/{stage3.id}/', {'game_session': room_code}
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_no_auth_required(self):
+        prof, room_code, stage3, stage4, activities = self.make_room_with_stage4()
+        client = APIClient()
+
+        response = client.get(
+            f'/api/sessions/session-stages/{stage4.id}/', {'game_session': room_code}
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)

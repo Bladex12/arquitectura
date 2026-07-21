@@ -53,6 +53,7 @@ from game_sessions.dynamodb.team import (
 from game_sessions.dynamodb.catalog import create_session_group
 from game_sessions.dynamodb.stage_progress import (
     create_session_stage, get_session_stage, update_session_stage, upsert_progress, get_progress,
+    list_session_stages, scan_all_stages,
 )
 from game_sessions.dynamodb.tablet_connection import list_connections, disconnect
 from game_sessions.dynamodb.token_transaction import list_transactions
@@ -2641,43 +2642,52 @@ class TeamPersonalizationViewSet(viewsets.ViewSet):
         )
 
 
-class SessionStageViewSet(viewsets.ModelViewSet):
+class SessionStageViewSet(viewsets.ViewSet):
     """
     ViewSet para Etapas de Sesión
 
-    DynamoDB cutover (Task 14): the ~10 presentation-flow actions below
-    (generate_presentation_order through presentation_evaluation_progress)
-    now read/write game_sessions.dynamodb.stage_progress instead of the
-    SessionStage ORM model. `list`/`retrieve`/the default ModelViewSet CRUD
-    mixins and `queryset`/`get_queryset` below are UNCHANGED and stay
-    ORM-backed -- porting them was not in this task's scope (the brief only
-    covers the @action methods) and no other viewset in this class list was
-    touched. See the class-level Concerns note in task-14-report.md: since
-    Task 11 already switched SessionStage creation/writes over to
-    stage_progress.create_session_stage/update_session_stage (DynamoDB-only,
-    no ORM row), `list`/`retrieve` here likely no longer see current data
-    for sessions created after that cutover -- flagged as a pre-existing gap,
-    not something this task introduces or fixes.
+    DynamoDB cutover (Task 14 + fix-up): the ~10 presentation-flow actions
+    below (generate_presentation_order through presentation_evaluation_progress)
+    read/write game_sessions.dynamodb.stage_progress instead of the
+    SessionStage ORM model. `list`/`retrieve` are now hand-implemented and
+    DynamoDB-backed too (viewsets.ModelViewSet -> viewsets.ViewSet, same as
+    TeamViewSet/Task 13): since Task 11 switched SessionStage creation/writes
+    over to stage_progress.create_session_stage/update_session_stage
+    (DynamoDB-only, no ORM row is ever written anymore), the ORM-backed
+    `queryset`/`get_queryset()` this class used to carry always resolved to
+    an empty table for any session created after that cutover -- GET
+    /api/sessions/session-stages/?game_session=<room_code> (list) was
+    returning `[]` for every real session. See task-14-report.md's Concerns
+    section (original Task 14) and the fix-up section appended after it.
+
+    create/update/partial_update/destroy are intentionally NOT
+    hand-implemented: every SessionStage write already goes through the
+    dedicated @action endpoints below (or create_session_stage(), called
+    directly from GameSessionViewSet's session-start flow, never via this
+    viewset's generic CRUD routes) -- grepped the frontend and this app's
+    tests, nothing calls POST/PUT/PATCH/DELETE /session-stages/<pk>/ without
+    an @action suffix. Dropping viewsets.ModelViewSet means the router simply
+    stops registering those verbs (405), rather than leaving a queryset-less
+    ModelViewSet mixin silently 500ing.
 
     Identifier-surface note (mirrors TeamViewSet's, Task 13): a SessionStage's
     real key is (room_code, stage_id), not stage_id alone -- stage_id is
     challenges.Stage's int id, shared across every room, so a bare `pk` in
-    the URL can't address one row by itself. Every ported action below
-    requires the owning room via `?game_session=<room_code>` (GET actions)
-    or a `game_session` field in the request body (POST actions), same
-    convention TeamViewSet/TeamPersonalizationViewSet established.
+    the URL can't address one row by itself. `retrieve` and every ported
+    action below require the owning room via `?game_session=<room_code>`
+    (GET actions) or a `game_session` field in the request body (POST
+    actions), same convention TeamViewSet/TeamPersonalizationViewSet
+    established. `list` accepts the same `?game_session=<room_code>` param
+    (the frontend's actual and only usage --
+    frontend/src/services/sessions.ts's getSessionStages) and falls back to
+    scan_all_stages() across every room when omitted, mirroring the old
+    unfiltered queryset/DjangoFilterBackend combo's behavior when no
+    `game_session` filter was supplied.
     """
-    queryset = SessionStage.objects.all()
-    serializer_class = SessionStageSerializer
     permission_classes = [IsAuthenticated]
     # NO establecer authentication_classes = [] a nivel de clase
     # Las acciones del profesor necesitan autenticación JWT
     # Las acciones de tablets tienen authentication_classes=[] en el decorador @action
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['game_session', 'stage', 'status']
-    search_fields = ['game_session__room_code', 'stage__name']
-    ordering_fields = ['started_at', 'completed_at']
-    ordering = ['stage__number']
 
     def get_permissions(self):
         """
@@ -2688,9 +2698,33 @@ class SessionStageViewSet(viewsets.ModelViewSet):
             return []
         return super().get_permissions()
 
-    def get_queryset(self):
-        return SessionStage.objects.select_related('game_session', 'stage')
-    
+    def list(self, request):
+        room_code = request.query_params.get('game_session')
+        if room_code:
+            session_stages = list_session_stages(room_code)
+        else:
+            session_stages = scan_all_stages()
+        for session_stage in session_stages:
+            annotate_session_stage_display_fields(session_stage)
+        serializer = SessionStageSerializer(session_stages, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        """Unlike `list`, there's no safe "scan every room" fallback here:
+        stage_id (pk) is challenges.Stage's int id, shared across every
+        room, so without a room_code a bare stage_id can't pick one row
+        over another with the same stage_id in a different room. Delegates
+        to _resolve_session_stage (defined below, alongside the ported
+        @action methods) so retrieve enforces the exact same
+        `?game_session=<room_code>` requirement they already do -- 400 if
+        missing, 404 if the (room_code, stage_id) pair doesn't exist."""
+        session_stage, error = self._resolve_session_stage(request, pk)
+        if error:
+            return error
+        annotate_session_stage_display_fields(session_stage)
+        serializer = SessionStageSerializer(session_stage)
+        return Response(serializer.data)
+
     # ------------------------------------------------------------------
     # Helpers for the presentation-flow actions (Task 14)
     # ------------------------------------------------------------------
@@ -2812,7 +2846,7 @@ class SessionStageViewSet(viewsets.ModelViewSet):
         ) or session_stage
         annotate_session_stage_display_fields(session_stage)
 
-        serializer = self.get_serializer(session_stage)
+        serializer = SessionStageSerializer(session_stage)
         return Response(serializer.data)
     
     @action(detail=True, methods=['post'], authentication_classes=[JWTAuthentication, SessionAuthentication])
@@ -2848,7 +2882,7 @@ class SessionStageViewSet(viewsets.ModelViewSet):
         ) or session_stage
         annotate_session_stage_display_fields(session_stage)
 
-        serializer = self.get_serializer(session_stage)
+        serializer = SessionStageSerializer(session_stage)
         return Response(serializer.data)
     
     @action(detail=True, methods=['post'], authentication_classes=[JWTAuthentication, SessionAuthentication])
@@ -2878,7 +2912,7 @@ class SessionStageViewSet(viewsets.ModelViewSet):
         ) or session_stage
         annotate_session_stage_display_fields(session_stage)
 
-        serializer = self.get_serializer(session_stage)
+        serializer = SessionStageSerializer(session_stage)
         return Response(serializer.data)
     
     @action(detail=True, methods=['post'], authentication_classes=[JWTAuthentication, SessionAuthentication])
@@ -2928,7 +2962,7 @@ class SessionStageViewSet(viewsets.ModelViewSet):
         ) or session_stage
         annotate_session_stage_display_fields(session_stage)
 
-        serializer = self.get_serializer(session_stage)
+        serializer = SessionStageSerializer(session_stage)
         return Response(serializer.data)
     
     @action(detail=True, methods=['post'], authentication_classes=[JWTAuthentication, SessionAuthentication])
@@ -2971,7 +3005,7 @@ class SessionStageViewSet(viewsets.ModelViewSet):
         ) or session_stage
         annotate_session_stage_display_fields(session_stage)
 
-        serializer = self.get_serializer(session_stage)
+        serializer = SessionStageSerializer(session_stage)
         response_data = serializer.data
         # Agregar el timestamp de inicio en la respuesta
 
@@ -3015,7 +3049,7 @@ class SessionStageViewSet(viewsets.ModelViewSet):
         ) or session_stage
         annotate_session_stage_display_fields(session_stage)
 
-        serializer = self.get_serializer(session_stage)
+        serializer = SessionStageSerializer(session_stage)
         return Response(serializer.data)
     
     @action(detail=True, methods=['get'], permission_classes=[], authentication_classes=[])

@@ -40,6 +40,21 @@ def get_session_stage(room_code, stage_id):
     return response.get('Item')
 
 
+def list_session_stages(room_code):
+    """Returns every SessionStage item in a room, mirroring
+    game_sessions.dynamodb.team.list_teams's query+filter pattern (SK
+    prefix 'STAGE#' is unique to SessionStage items -- no other item type
+    shares it -- but the type filter is kept for the same defensive
+    consistency team.list_teams uses)."""
+    table = get_table()
+    response = table.query(
+        KeyConditionExpression=Key('PK').eq(keys.session_pk(room_code)) & Key('SK').begins_with('STAGE#'),
+        FilterExpression=Attr('type').eq('SessionStage'),
+        ConsistentRead=True,
+    )
+    return response['Items']
+
+
 def update_session_stage(room_code, stage_id, **fields):
     """Partial update - pass any subset of status/started_at/
     completed_at/presentation_order/current_presentation_team_id/
