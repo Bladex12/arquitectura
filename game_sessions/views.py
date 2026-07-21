@@ -3387,12 +3387,21 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
     tasks must follow this same convention for any new award reason on
     this entity, per the brief): `source_type` stays 'activity'
     (unchanged from the ORM version); `source_id` becomes a composite
-    string f'{activity_id}:<reason_tag>', where reason_tag is a short
-    fixed tag for one-shot awards ('part1', 'chaos') or
+    string f'{team_id}:{activity_id}:<reason_tag>', where reason_tag is a
+    short fixed tag for one-shot awards ('part1', 'chaos') or
     '<tag>:<item_key>' for per-item awards ('anagram:<WORD>',
-    'word_search:<WORD>', 'general_knowledge:<question_id>'). This
-    replaces the old `reason__icontains` fuzzy-text existence check with
-    create_transaction()'s real (source_type, source_id) uniqueness
+    'word_search:<WORD>', 'general_knowledge:<question_id>'). team_id
+    leads the composite because create_transaction()'s uniqueness check
+    is keyed on (room_code, source_type, source_id) -- room-scoped, not
+    team-scoped -- so team_id MUST be part of source_id itself or two
+    different teams completing the same activity/reason in the same room
+    collide on the same key and only the first team is ever awarded (see
+    this class's `_award_tokens` fix report for the cross-team bug this
+    corrected). Call sites never build source_id by hand -- they pass a
+    bare reason_tag and `_award_tokens` prepends team_id internally, so
+    this mistake structurally can't be repeated by a future call site.
+    This replaces the old `reason__icontains` fuzzy-text existence check
+    with create_transaction()'s real (source_type, source_id) uniqueness
     constraint, while still letting many distinct awards share one
     activity_id without colliding with each other -- see `_award_tokens`.
     """
@@ -3485,15 +3494,27 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         idempotent reason on one activity, per this class's source_id
         disambiguation convention (see class docstring): source_type
         stays 'activity', source_id is a composite
-        f'{activity.id}:{reason_tag}'. create_transaction() rejects a
-        retried write for the same (source_type, source_id) pair instead
-        of double-awarding -- that's the expected outcome of e.g. a
-        student double-tapping submit, not an error. Returns True if a
-        new award was actually recorded, False if it was already granted
-        (no-op, tokens_total untouched)."""
+        f'{team_id}:{activity.id}:{reason_tag}'. team_id leads the
+        composite (not just tacked onto the end) because
+        token_tx_sk_for_source() builds SK='TOKENTX#{source_type}#{source_id}'
+        under a room-scoped PK ('SESSION#{room_code}') with no team_id
+        anywhere else in the key -- without team_id in source_id itself,
+        create_transaction()'s attribute_not_exists(PK) uniqueness check
+        collapses to (room_code, activity_id, reason_tag) and silently
+        drops every team's award after the first team in the room to
+        trigger a given reason_tag (see this fix's task report). Callers
+        must NOT prepend team_id themselves -- pass a bare reason_tag
+        (e.g. 'part1', f'anagram:{word}') and let this helper build the
+        fully-qualified source_id, so no future call site can repeat the
+        mistake. create_transaction() then rejects a retried write for
+        the same (source_type, source_id) pair instead of
+        double-awarding -- that's the expected outcome of e.g. a student
+        double-tapping submit, not an error. Returns True if a new award
+        was actually recorded, False if it was already granted (no-op,
+        tokens_total untouched)."""
         tx = create_transaction(
             room_code, team_id, amount, source_type='activity',
-            source_id=f'{activity.id}:{reason_tag}', session_stage_id=session_stage_id,
+            source_id=f'{team_id}:{activity.id}:{reason_tag}', session_stage_id=session_stage_id,
             reason=reason, awarded_by_id=None,
         )
         if tx is None:

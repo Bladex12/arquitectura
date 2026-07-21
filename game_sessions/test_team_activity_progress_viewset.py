@@ -176,7 +176,7 @@ class CreateTest(TeamActivityProgressTestCase):
         self.assertEqual(team_after['tokens_total'], 5)
 
         transactions = list_transactions(room_code)
-        part1_txs = [t for t in transactions if t['source_id'] == f'{activity.id}:part1']
+        part1_txs = [t for t in transactions if t['source_id'] == f'{team["team_id"]}:{activity.id}:part1']
         self.assertEqual(len(part1_txs), 1)
 
     def test_chaos_completed_awards_tokens_exactly_once(self):
@@ -210,6 +210,106 @@ class CreateTest(TeamActivityProgressTestCase):
 
         team_after = get_team(room_code, team['team_id'])
         self.assertEqual(team_after['tokens_total'], 10)
+
+
+# ---------------------------------------------------------------------------
+# Cross-team token-award idempotency regression (task: fix cross-team
+# token award collision). _award_tokens' source_id used to be
+# f'{activity.id}:{reason_tag}' with no team_id anywhere in the DynamoDB
+# key (create_transaction's uniqueness is (room_code, source_type,
+# source_id) under a room-scoped PK -- see keys.token_tx_sk_for_source).
+# In a room with two+ teams, the FIRST team to trigger a given
+# activity/reason_tag combo silently blocked every other team's award --
+# create_transaction() returned None (the intended "duplicate retry"
+# behavior) even though it was a genuinely different team's first-ever
+# award, not a retry. Fixed by prefixing team_id into source_id inside
+# _award_tokens itself. These tests prove: (a) two different teams in the
+# same room both get awarded for the same activity/reason, and (b) each
+# team's award is still idempotent under a same-team retry.
+# ---------------------------------------------------------------------------
+
+class CrossTeamTokenAwardTest(TeamActivityProgressTestCase):
+    def test_two_teams_completing_part1_both_get_awarded(self):
+        _, room_code, stage, activity, team_a = self.make_room_with_activity()
+        team_b = create_team(room_code, 'Equipo B', 'Rojo')
+
+        payload_a = {
+            'team': team_a['team_id'], 'activity': activity.id, 'session_stage': stage.id,
+            'response_data': {'part1_completed': True},
+        }
+        payload_b = {
+            'team': team_b['team_id'], 'activity': activity.id, 'session_stage': stage.id,
+            'response_data': {'part1_completed': True},
+        }
+
+        response_a = self.client.post('/api/sessions/team-activity-progress/', payload_a, format='json')
+        response_b = self.client.post('/api/sessions/team-activity-progress/', payload_b, format='json')
+        self.assertEqual(response_a.status_code, 201, response_a.data)
+        self.assertEqual(response_b.status_code, 201, response_b.data)
+
+        team_a_after = get_team(room_code, team_a['team_id'])
+        team_b_after = get_team(room_code, team_b['team_id'])
+        # This is the exact regression the reviewer reported: before the
+        # fix, team_b_after['tokens_total'] would be 0 here because
+        # team_a's award "claimed" the shared (activity, reason_tag) key.
+        self.assertEqual(team_a_after['tokens_total'], 5)
+        self.assertEqual(team_b_after['tokens_total'], 5)
+
+        transactions = list_transactions(room_code)
+        part1_txs = [t for t in transactions if t['reason'] and 'Parte 1' in t['reason']]
+        self.assertEqual(len(part1_txs), 2)
+        self.assertEqual({t['team_id'] for t in part1_txs}, {team_a['team_id'], team_b['team_id']})
+
+    def test_two_teams_completing_part1_each_stay_idempotent_under_retry(self):
+        """Combines the cross-team fix with the pre-existing per-team
+        idempotency guarantee: retrying team A's submission must not
+        double-award team A, and must not affect team B's independent
+        award either."""
+        _, room_code, stage, activity, team_a = self.make_room_with_activity()
+        team_b = create_team(room_code, 'Equipo B', 'Rojo')
+
+        payload_a = {
+            'team': team_a['team_id'], 'activity': activity.id, 'session_stage': stage.id,
+            'response_data': {'part1_completed': True},
+        }
+        payload_b = {
+            'team': team_b['team_id'], 'activity': activity.id, 'session_stage': stage.id,
+            'response_data': {'part1_completed': True},
+        }
+
+        self.client.post('/api/sessions/team-activity-progress/', payload_a, format='json')
+        self.client.post('/api/sessions/team-activity-progress/', payload_a, format='json')  # retry, team A
+        self.client.post('/api/sessions/team-activity-progress/', payload_b, format='json')
+
+        team_a_after = get_team(room_code, team_a['team_id'])
+        team_b_after = get_team(room_code, team_b['team_id'])
+        self.assertEqual(team_a_after['tokens_total'], 5)
+        self.assertEqual(team_b_after['tokens_total'], 5)
+
+        transactions = list_transactions(room_code)
+        part1_txs = [t for t in transactions if t['reason'] and 'Parte 1' in t['reason']]
+        self.assertEqual(len(part1_txs), 2)
+
+    def test_two_teams_awarded_chaos_tokens_independently(self):
+        _, room_code, stage, activity, team_a = self.make_room_with_activity()
+        team_b = create_team(room_code, 'Equipo B', 'Rojo')
+
+        payload_a = {
+            'team': team_a['team_id'], 'activity': activity.id, 'session_stage': stage.id,
+            'response_data': {'chaos': {'completed': True}},
+        }
+        payload_b = {
+            'team': team_b['team_id'], 'activity': activity.id, 'session_stage': stage.id,
+            'response_data': {'chaos': {'completed': True}},
+        }
+
+        self.client.post('/api/sessions/team-activity-progress/', payload_a, format='json')
+        self.client.post('/api/sessions/team-activity-progress/', payload_b, format='json')
+
+        team_a_after = get_team(room_code, team_a['team_id'])
+        team_b_after = get_team(room_code, team_b['team_id'])
+        self.assertEqual(team_a_after['tokens_total'], 5)
+        self.assertEqual(team_b_after['tokens_total'], 5)
 
 
 # ---------------------------------------------------------------------------
@@ -367,6 +467,36 @@ class SubmitAnagramTest(TeamActivityProgressTestCase):
         self.assertEqual(second.data['tokens_earned'], 0)
         team_after = get_team(room_code, team['team_id'])
         self.assertEqual(team_after['tokens_total'], 1)
+
+    def test_two_teams_submitting_the_same_correct_word_both_get_awarded(self):
+        """Cross-team regression: source_id used to be
+        f'{activity.id}:anagram:{word}' with no team_id, so two teams
+        submitting the same correct word in the same room collided on
+        one DynamoDB key and only the first team was ever awarded."""
+        _, room_code, stage, activity, team_a = self.make_room_with_activity()
+        team_b = create_team(room_code, 'Equipo B', 'Rojo')
+        self._seed_word_search_trivially_done(room_code, team_a['team_id'], activity.id)
+        self._seed_word_search_trivially_done(room_code, team_b['team_id'], activity.id)
+
+        response_a = self.client.post('/api/sessions/team-activity-progress/submit_anagram/', {
+            'team': team_a['team_id'], 'activity': activity.id, 'session_stage': stage.id,
+            'answers': [{'word': 'IDEA', 'answer': 'IDEA'}],
+            'anagram_words': ['IDEA', 'META'],
+            'total_words': 2,
+        }, format='json')
+        response_b = self.client.post('/api/sessions/team-activity-progress/submit_anagram/', {
+            'team': team_b['team_id'], 'activity': activity.id, 'session_stage': stage.id,
+            'answers': [{'word': 'IDEA', 'answer': 'IDEA'}],
+            'anagram_words': ['IDEA', 'META'],
+            'total_words': 2,
+        }, format='json')
+
+        self.assertEqual(response_a.data['tokens_earned'], 1)
+        self.assertEqual(response_b.data['tokens_earned'], 1)
+        team_a_after = get_team(room_code, team_a['team_id'])
+        team_b_after = get_team(room_code, team_b['team_id'])
+        self.assertEqual(team_a_after['tokens_total'], 1)
+        self.assertEqual(team_b_after['tokens_total'], 1)
 
     def test_completes_when_all_anagram_words_correct_and_word_search_trivially_done(self):
         _, room_code, stage, activity, team = self.make_room_with_activity()

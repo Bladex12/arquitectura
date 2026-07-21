@@ -267,8 +267,40 @@ class UploadPrototypeTest(TeamActivityProgressPart2TestCase):
         self.assertEqual(team_after['tokens_total'], 15)
 
         transactions = list_transactions(room_code)
-        prototype_txs = [t for t in transactions if t['source_id'] == f'{activity.id}:prototype_uploaded']
+        prototype_txs = [
+            t for t in transactions if t['source_id'] == f'{team["team_id"]}:{activity.id}:prototype_uploaded'
+        ]
         self.assertEqual(len(prototype_txs), 1)
+
+    def test_two_teams_uploading_prototype_both_get_awarded(self):
+        """Cross-team regression: source_id used to be
+        f'{activity.id}:prototype_uploaded' with no team_id, so two teams
+        in the same room uploading a prototype for the same activity
+        collided on one DynamoDB key and only the first team was ever
+        awarded (see this fix's task report for the reviewer-confirmed
+        repro: team A got 15, team B got 0, only one transaction)."""
+        _, room_code, stage, activity, team_a = self.make_room_with_activity()
+        team_b = create_team(room_code, 'Equipo B', 'Rojo')
+
+        response_a = self.client.post('/api/sessions/team-activity-progress/upload_prototype/', {
+            'team': team_a['team_id'], 'activity': activity.id, 'session_stage': stage.id,
+        }, format='multipart')
+        response_b = self.client.post('/api/sessions/team-activity-progress/upload_prototype/', {
+            'team': team_b['team_id'], 'activity': activity.id, 'session_stage': stage.id,
+        }, format='multipart')
+
+        self.assertEqual(response_a.status_code, 200, response_a.data)
+        self.assertEqual(response_b.status_code, 200, response_b.data)
+
+        team_a_after = get_team(room_code, team_a['team_id'])
+        team_b_after = get_team(room_code, team_b['team_id'])
+        self.assertEqual(team_a_after['tokens_total'], 15)
+        self.assertEqual(team_b_after['tokens_total'], 15)
+
+        transactions = list_transactions(room_code)
+        prototype_txs = [t for t in transactions if t['source_id'].endswith(':prototype_uploaded')]
+        self.assertEqual(len(prototype_txs), 2)
+        self.assertEqual({t['team_id'] for t in prototype_txs}, {team_a['team_id'], team_b['team_id']})
 
     def test_product_name_and_tagline_saved_to_response_data(self):
         _, room_code, stage, activity, team = self.make_room_with_activity()
