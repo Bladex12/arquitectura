@@ -124,6 +124,21 @@ def get_progress(room_code, team_id, activity_id):
     return response.get('Item')
 
 
+def list_progress_for_team(room_code, team_id):
+    """Returns every TeamActivityProgress item for one team in one room
+    (query, not scan - mirrors team.list_teams's SK-prefix + type-filter
+    pattern, scoped to one team's PROGRESS# children instead of every
+    team in the room)."""
+    table = get_table()
+    response = table.query(
+        KeyConditionExpression=Key('PK').eq(keys.session_pk(room_code))
+        & Key('SK').begins_with(keys.team_prefix(team_id)),
+        FilterExpression=Attr('type').eq('TeamActivityProgress'),
+        ConsistentRead=True,
+    )
+    return response['Items']
+
+
 def scan_all_stages(stage_id=None):
     """Returns SessionStage items across every room. Optionally narrows to
     one stage_id when passed. Needed by admin_dashboard's cross-room

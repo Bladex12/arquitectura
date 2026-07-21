@@ -258,12 +258,31 @@ class TeamActivityProgressSerializer(serializers.Serializer):
     Expects display fields already attached via
     annotate_team_activity_progress_display_fields(). No standalone id
     attribute exists on this item (it's addressed by the composite
-    (team_id, activity_id) key) -- `id` is sourced from the item's own SK.
+    (team_id, activity_id) key).
+
+    `id` is NOT sourced from the item's own SK ("TEAM#<team_id>#PROGRESS#
+    <activity_id>") like most other Task 9 serializers -- Task 15 found
+    that raw SK is unusable as a URL path segment: '#' is the URL fragment
+    delimiter, so any client building "/team-activity-progress/<id>/" from
+    it (e.g. teamActivityProgressAPI.update(progress.id, ...) in
+    frontend/src/services/teamActivityProgress.ts) has everything from the
+    first '#' onward silently stripped before the request is even sent --
+    confirmed empirically via APIClient, which received a PATH_INFO
+    truncated to "/team-activity-progress/TEAM" (see task-15-report.md).
+    `id` is instead a colon-joined "<team_id>:<activity_id>" -- team_id is
+    a UUID4 (no colons), activity_id is a plain int, and ':' is not a URL
+    reserved character, so this survives a real HTTP round-trip.
+    TeamActivityProgressViewSet._parse_progress_pk (game_sessions/views.py)
+    is the corresponding parser.
 
     selected_topic/selected_challenge remain SerializerMethodFields doing
     a direct lookup by plain int id, unchanged in spirit from the old
     FK-traversal version (per brief)."""
-    id = serializers.CharField(source='SK', read_only=True)
+    id = serializers.SerializerMethodField()
+
+    def get_id(self, obj):
+        return f"{obj['team_id']}:{obj['activity_id']}"
+
     team = serializers.CharField(source='team_id')
     team_name = serializers.CharField(read_only=True, default=None, allow_null=True)
     session_stage = serializers.IntegerField(read_only=True, default=None, allow_null=True)

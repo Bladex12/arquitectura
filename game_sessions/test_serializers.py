@@ -271,7 +271,7 @@ class TeamActivityProgressSerializerTest(GameSessionsSerializersTestCase):
 
         data = TeamActivityProgressSerializer(progress).data
 
-        self.assertEqual(data['id'], progress['SK'])
+        self.assertEqual(data['id'], f"team-uuid-1:{self.activity.id}")
         self.assertEqual(data['team'], 'team-uuid-1')
         self.assertEqual(data['team_name'], 'Rojo')
         self.assertEqual(data['activity'], self.activity.id)

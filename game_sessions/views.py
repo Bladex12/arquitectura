@@ -49,14 +49,15 @@ from game_sessions.dynamodb.game_session import (
 )
 from game_sessions.dynamodb.team import (
     create_team, set_roster, list_teams, get_team, update_team, delete_team, scan_all_teams,
+    update_tokens,
 )
 from game_sessions.dynamodb.catalog import create_session_group
 from game_sessions.dynamodb.stage_progress import (
     create_session_stage, get_session_stage, update_session_stage, upsert_progress, get_progress,
-    list_session_stages, scan_all_stages,
+    list_session_stages, scan_all_stages, list_progress_for_team, scan_all_progress,
 )
 from game_sessions.dynamodb.tablet_connection import list_connections, disconnect
-from game_sessions.dynamodb.token_transaction import list_transactions
+from game_sessions.dynamodb.token_transaction import list_transactions, create_transaction
 from game_sessions.dynamodb.evaluations import list_peer_evaluations
 from game_sessions.dynamodb.client import now_iso
 
@@ -3326,28 +3327,100 @@ class SessionStageViewSet(viewsets.ViewSet):
             )
 
 
-class TeamActivityProgressViewSet(viewsets.ModelViewSet):
+class TeamActivityProgressViewSet(viewsets.ViewSet):
     """
     ViewSet para Progreso de Actividades de Equipos
+
+    DynamoDB cutover (Task 15): create/update/submit_anagram (this task's
+    literal brief scope) plus submit_word_search/submit_general_knowledge
+    and list/retrieve (pulled in -- see below) now read/write
+    game_sessions.dynamodb.stage_progress instead of the TeamActivityProgress
+    ORM model. viewsets.ModelViewSet -> viewsets.ViewSet, same shape change
+    as TeamViewSet (Task 13) / SessionStageViewSet (Task 14): there's no
+    queryset left to back DRF's generic mixins.
+
+    WHY submit_word_search/submit_general_knowledge/list/retrieve were
+    pulled in even though the brief scoped only create/update/submit_anagram:
+    a TeamActivityProgress row is addressed by (team_id, activity_id), and
+    submit_word_search -> submit_anagram -> submit_general_knowledge are
+    three phases of the *same* Etapa 1 minigame writing into that *same*
+    row (found_words/answers/general_knowledge all merged together --
+    see both_parts_complete below and frontend/src/pages/tablets/etapa1/
+    Minijuego.tsx, which calls all three in sequence for one team/activity).
+    Converting submit_anagram alone while submit_word_search stayed on the
+    ORM would silently fork that row into two disconnected halves the
+    first time any team played the minigame. And since every current
+    frontend caller of create/update calls `list` first to decide
+    create-vs-update (e.g. Presentacion.tsx), leaving list/retrieve
+    ORM-backed would repeat Task 14's exact live-break mistake: the
+    newly-Dynamo-backed writes from create/update/submit_anagram would
+    never be visible to `list`, so the frontend would never find its own
+    just-written progress and would hammer `create` in a loop instead of
+    ever reaching `partial_update`. Both problems trace back to the same
+    root cause (one shared row, read/written by many actions), so both
+    were fixed together rather than shipping a guaranteed regression
+    window between this task and Task 16.
+
+    select_topic/select_challenge/upload_prototype/save_pitch remain
+    ORM-only -- genuinely deferred to Task 16 (select_challenge does
+    Pillow image processing onto challenges.Challenge, upload_prototype
+    does file storage, neither read/tested here). Concrete, high-severity
+    consequence, not a theoretical one: their writes are now invisible to
+    `list`/`retrieve` (Dynamo-only below) until Task 16 converts them too
+    -- an immediate regression for Etapa 2/3/4 flows. See this task's
+    report for the full callsite audit; flagged loudly per this task's
+    instructions rather than left silent.
+
+    Identifier-surface note (mirrors TeamViewSet's, Task 13): no current
+    frontend caller sends room_code/game_session alongside `team` (see
+    frontend/src/services/teamActivityProgress.ts). Every mutating action
+    below resolves room_code via `_resolve_team`, which scans every team
+    for a matching team_id when no explicit room_code/game_session is
+    given (same fallback TeamViewSet.retrieve/TeamPersonalizationViewSet.list
+    established). `partial_update`'s pk is the item's own SK
+    ("TEAM#<team_id>#PROGRESS#<activity_id>", per
+    TeamActivityProgressSerializer's id field) -- parsed by
+    `_parse_progress_pk`, then resolved the same way.
+
+    Token-award idempotency convention (settles pattern 2b's "source_id
+    disambiguation" question for this class -- Task 16 and later minigame
+    tasks must follow this same convention for any new award reason on
+    this entity, per the brief): `source_type` stays 'activity'
+    (unchanged from the ORM version); `source_id` becomes a composite
+    string f'{activity_id}:<reason_tag>', where reason_tag is a short
+    fixed tag for one-shot awards ('part1', 'chaos') or
+    '<tag>:<item_key>' for per-item awards ('anagram:<WORD>',
+    'word_search:<WORD>', 'general_knowledge:<question_id>'). This
+    replaces the old `reason__icontains` fuzzy-text existence check with
+    create_transaction()'s real (source_type, source_id) uniqueness
+    constraint, while still letting many distinct awards share one
+    activity_id without colliding with each other -- see `_award_tokens`.
     """
-    queryset = TeamActivityProgress.objects.all()
-    serializer_class = TeamActivityProgressSerializer
     permission_classes = [IsAuthenticated]
     authentication_classes = []  # No requerir autenticación (se controla con get_permissions)
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['team', 'session_stage', 'activity', 'status']
-    search_fields = ['team__name', 'activity__name']
-    ordering_fields = ['started_at', 'completed_at', 'progress_percentage']
-    ordering = ['-started_at']
+
+    # TeamActivityProgress fields upsert_progress() writes as a full
+    # overwrite -- every read-modify-write action below reads these
+    # forward from any existing item first so a partial change (e.g. just
+    # status, or just response_data) never silently discards whatever
+    # else was already saved (response_data/pitch/topic fields written by
+    # a different action on the same row). Duplicated from
+    # GameSessionViewSet._PROGRESS_FIELD_NAMES (Task 11) rather than
+    # shared across viewsets -- out of this task's scope to refactor.
+    _PROGRESS_FIELD_NAMES = (
+        'status', 'started_at', 'completed_at', 'progress_percentage', 'response_data',
+        'selected_topic_id', 'selected_challenge_id', 'prototype_image_url',
+        'pitch_intro_problem', 'pitch_solution', 'pitch_value', 'pitch_impact', 'pitch_closing',
+    )
 
     def get_permissions(self):
         """
         Permite crear/actualizar sin autenticación para tablets
         """
-        if self.action in ['create', 'update', 'partial_update', 'list', 'submit_anagram', 'submit_word_search', 'select_topic', 'select_challenge', 'upload_prototype', 'save_pitch']:
+        if self.action in ['create', 'update', 'partial_update', 'list', 'submit_anagram', 'submit_word_search', 'submit_general_knowledge', 'select_topic', 'select_challenge', 'upload_prototype', 'save_pitch']:
             return []
         return super().get_permissions()
-    
+
     def get_parsers(self):
         """
         Soporta FormData para subida de imágenes
@@ -3357,10 +3430,146 @@ class TeamActivityProgressViewSet(viewsets.ModelViewSet):
             return [MultiPartParser, FormParser]
         return super().get_parsers()
 
-    def get_queryset(self):
-        return TeamActivityProgress.objects.select_related(
-            'team', 'session_stage__stage', 'activity', 'selected_topic', 'selected_challenge'
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_team(self, request, team_id):
+        """Resolves a Team dict from a bare team_id. Prefers a direct
+        get_team (O(1)) when the caller supplies room_code/game_session
+        (a future caller, or an explicit override); otherwise scans every
+        team in every room for a matching team_id -- no current frontend
+        caller of this viewset sends room_code, so this is the primary
+        path in practice today, same fallback TeamViewSet.retrieve/
+        TeamPersonalizationViewSet.list already established (Task 13)."""
+        room_code = (
+            request.data.get('game_session') or request.data.get('room_code')
+            or request.query_params.get('game_session') or request.query_params.get('room_code')
         )
+        if room_code:
+            return get_team(room_code, team_id)
+        return next((t for t in scan_all_teams() if t['team_id'] == team_id), None)
+
+    def _parse_progress_pk(self, pk):
+        """Parses a TeamActivityProgress detail-route pk, which is
+        "<team_id>:<activity_id>" (see TeamActivityProgressSerializer's
+        id field for why it's ':'-joined rather than the item's raw SK --
+        a URL-safety fix, not an arbitrary choice). rsplit on the last
+        ':' since team_id is a UUID4 and therefore never contains one,
+        but this stays correct even if it did. Returns (team_id,
+        activity_id), or None if pk doesn't match that shape."""
+        if not pk or ':' not in pk:
+            return None
+        team_id, _, activity_id_str = pk.rpartition(':')
+        try:
+            activity_id = int(activity_id_str)
+        except ValueError:
+            return None
+        return team_id, activity_id
+
+    def _existing_fields(self, existing):
+        """Turns a get_progress() result (or None) into the field dict a
+        read-modify-write action starts mutating, matching
+        GameSessionViewSet._upsert_progress_preserving's defaulting
+        (Task 11): status='pending', progress_percentage=0 for a
+        brand-new row."""
+        if existing:
+            fields = {name: existing.get(name) for name in self._PROGRESS_FIELD_NAMES}
+            if fields.get('progress_percentage') is None:
+                fields['progress_percentage'] = 0
+            return fields
+        return {'status': 'pending', 'progress_percentage': 0}
+
+    def _award_tokens(self, room_code, team_id, session_stage_id, activity, amount, reason_tag, reason):
+        """Awards `amount` tokens for one occurrence of a named,
+        idempotent reason on one activity, per this class's source_id
+        disambiguation convention (see class docstring): source_type
+        stays 'activity', source_id is a composite
+        f'{activity.id}:{reason_tag}'. create_transaction() rejects a
+        retried write for the same (source_type, source_id) pair instead
+        of double-awarding -- that's the expected outcome of e.g. a
+        student double-tapping submit, not an error. Returns True if a
+        new award was actually recorded, False if it was already granted
+        (no-op, tokens_total untouched)."""
+        tx = create_transaction(
+            room_code, team_id, amount, source_type='activity',
+            source_id=f'{activity.id}:{reason_tag}', session_stage_id=session_stage_id,
+            reason=reason, awarded_by_id=None,
+        )
+        if tx is None:
+            return False
+        update_tokens(room_code, team_id, amount)
+        return True
+
+    # ------------------------------------------------------------------
+    # list / retrieve
+    # ------------------------------------------------------------------
+
+    def list(self, request):
+        team_id = request.query_params.get('team')
+        activity_id = request.query_params.get('activity')
+        session_stage_id = request.query_params.get('session_stage')
+
+        activity_id_int = None
+        if activity_id not in (None, ''):
+            try:
+                activity_id_int = int(activity_id)
+            except (TypeError, ValueError):
+                return Response([])
+
+        if team_id:
+            team = self._resolve_team(request, team_id)
+            if team is None:
+                return Response([])
+            progress_items = list_progress_for_team(team['room_code'], team_id)
+        else:
+            progress_items = scan_all_progress(activity_id=activity_id_int)
+
+        if activity_id_int is not None:
+            progress_items = [p for p in progress_items if p['activity_id'] == activity_id_int]
+
+        if session_stage_id not in (None, ''):
+            try:
+                stage_id_int = int(session_stage_id)
+            except (TypeError, ValueError):
+                stage_id_int = None
+            if stage_id_int is None:
+                progress_items = []
+            else:
+                from challenges.models import Activity
+                activity_ids_in_stage = set(
+                    Activity.objects.filter(stage_id=stage_id_int).values_list('id', flat=True)
+                )
+                progress_items = [p for p in progress_items if p['activity_id'] in activity_ids_in_stage]
+
+        team_cache = {}
+        for item in progress_items:
+            team = team_cache.get(item['team_id'])
+            if team is None:
+                team = get_team(item['room_code'], item['team_id'])
+                team_cache[item['team_id']] = team
+            annotate_team_activity_progress_display_fields(item, team=team)
+
+        serializer = TeamActivityProgressSerializer(progress_items, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        parsed = self._parse_progress_pk(pk)
+        if parsed is None:
+            return Response({'error': 'Progreso no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        team_id, activity_id = parsed
+
+        team = self._resolve_team(request, team_id)
+        if team is None:
+            return Response({'error': 'Progreso no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+        progress = get_progress(team['room_code'], team_id, activity_id)
+        if progress is None:
+            return Response({'error': 'Progreso no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+        annotate_team_activity_progress_display_fields(progress, team=team)
+        serializer = TeamActivityProgressSerializer(progress)
+        return Response(serializer.data)
 
     def create(self, request, *args, **kwargs):
         """
@@ -3370,251 +3579,141 @@ class TeamActivityProgressViewSet(viewsets.ModelViewSet):
         activity_id = request.data.get('activity')
         session_stage_id = request.data.get('session_stage')
         status_value = request.data.get('status', 'pending')
-        
+
         if not all([team_id, activity_id, session_stage_id]):
             return Response(
                 {'error': 'Se requieren team, activity y session_stage'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
+        from challenges.models import Activity
+
+        team = self._resolve_team(request, team_id)
+        if team is None:
+            return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        room_code = team['room_code']
+
         try:
-            from .models import Team, SessionStage
-            from challenges.models import Activity
-            
-            team = Team.objects.get(id=team_id)
+            activity_id = int(activity_id)
             activity = Activity.objects.get(id=activity_id)
-            session_stage = SessionStage.objects.get(id=session_stage_id)
-            
-            # Obtener o crear progreso (manejar casos de duplicados)
-            progress_list = TeamActivityProgress.objects.filter(
-                team=team,
-                activity=activity,
-                session_stage=session_stage
-            )
-            
-            if progress_list.exists():
-                # Si hay registros existentes, usar el primero (o eliminar duplicados si hay más de uno)
-                progress = progress_list.first()
-                
-                # Si hay más de un registro, eliminar los duplicados y mantener el mejor (completado > en progreso > pendiente)
-                if progress_list.count() > 1:
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.warning(f'Se encontraron {progress_list.count()} registros duplicados para TeamActivityProgress (team={team.id}, activity={activity.id}, session_stage={session_stage.id}). Eliminando duplicados...')
-                    
-                    # Priorizar el registro con mejor estado: completed > in_progress > submitted > pending
-                    status_priority = {'completed': 4, 'in_progress': 3, 'submitted': 2, 'pending': 1}
-                    best_progress = max(progress_list, key=lambda p: status_priority.get(p.status, 0))
-                    
-                    # Mantener el mejor registro
-                    progress = best_progress
-                    
-                    # Eliminar los demás
-                    ids_to_delete = list(progress_list.exclude(id=progress.id).values_list('id', flat=True))
-                    TeamActivityProgress.objects.filter(id__in=ids_to_delete).delete()
-                    logger.info(f'Eliminados {len(ids_to_delete)} registros duplicados. Mantenido registro ID {progress.id} con status {progress.status}')
-                
-                created = False
-            else:
-                # No existe, crear uno nuevo
-                progress = TeamActivityProgress.objects.create(
-                    team=team,
-                    activity=activity,
-                    session_stage=session_stage,
-                    status=status_value,
-                    started_at=timezone.now() if not request.data.get('started_at') else None
+        except (Activity.DoesNotExist, ValueError, TypeError):
+            return Response({'error': 'Actividad no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            session_stage_id = int(session_stage_id)
+        except (ValueError, TypeError):
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        if get_session_stage(room_code, session_stage_id) is None:
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        existing = get_progress(room_code, team_id, activity_id)
+        created = existing is None
+        fields = self._existing_fields(existing)
+        if created:
+            fields['started_at'] = request.data.get('started_at') or now_iso()
+
+        fields['status'] = status_value
+
+        # Si el status es 'completed', establecer completed_at (los tokens
+        # de la parte 1/caos se otorgan más abajo, cuando se guarda
+        # response_data -- no aquí, para evitar duplicados)
+        if status_value == 'completed':
+            if not fields.get('completed_at'):
+                fields['completed_at'] = now_iso()
+            if (fields.get('progress_percentage') or 0) < 100:
+                fields['progress_percentage'] = 100
+
+        if 'response_data' in request.data:
+            new_response_data = request.data.get('response_data')
+            old_response_data = fields.get('response_data') or {}
+
+            # Verificar si se completó la parte 1 de presentación
+            part1_completed = new_response_data.get('part1_completed')
+            old_part1_completed = old_response_data.get('part1_completed')
+            if part1_completed and not old_part1_completed:
+                self._award_tokens(
+                    room_code, team_id, session_stage_id, activity, amount=5, reason_tag='part1',
+                    reason=f'Actividad "{activity.name}": Parte 1 completada',
                 )
-                created = True
-            
-            # Actualizar el status y otros campos
-            progress.status = status_value
-            
-            # Si el status es 'completed', establecer completed_at y otorgar tokens
-            if status_value == 'completed':
-                was_completed = progress.completed_at is not None
-                if not progress.completed_at:
-                    progress.completed_at = timezone.now()
-                if progress.progress_percentage < 100:
-                    progress.progress_percentage = 100
-                
-                # Otorgar tokens solo si no estaba completado antes (para evitar duplicados)
-                # NOTA: Los tokens de la parte 1 se otorgan cuando se guarda part1_completed en response_data
-                # No se otorgan aquí para evitar duplicados
-                pass
-            
-            # Actualizar otros campos si se proporcionan
-            if 'response_data' in request.data:
-                new_response_data = request.data.get('response_data')
-                old_response_data = progress.response_data or {}
-                
-                from .models import TokenTransaction
-                
-                # Verificar si se completó la parte 1 de presentación
-                part1_completed = new_response_data.get('part1_completed')
-                old_part1_completed = old_response_data.get('part1_completed')
-                
-                if part1_completed and not old_part1_completed:
-                    # Se completó la parte 1, otorgar 5 tokens
-                    tokens_to_award = 5
-                    
-                    # Verificar si ya se otorgaron tokens por la parte 1
-                    existing_transaction = TokenTransaction.objects.filter(
-                        team=team,
-                        game_session=session_stage.game_session,
-                        session_stage=session_stage,
-                        source_type='activity',
-                        source_id=activity.id,
-                        reason__icontains='Parte 1'
-                    ).exists()
-                    
-                    if not existing_transaction:
-                        TokenTransaction.objects.create(
-                            team=team,
-                            game_session=session_stage.game_session,
-                            session_stage=session_stage,
-                            amount=tokens_to_award,
-                            source_type='activity',
-                            source_id=activity.id,
-                            reason=f'Actividad "{activity.name}": Parte 1 completada',
-                            awarded_by=None
-                        )
-                        
-                        team.tokens_total += tokens_to_award
-                        team.save()
-                
-                # Verificar si se completó el caos de presentación
-                chaos_data = new_response_data.get('chaos', {})
-                old_chaos_data = old_response_data.get('chaos', {})
-                
-                if chaos_data.get('completed') and not old_chaos_data.get('completed'):
-                    # Se completó el caos, otorgar 5 tokens
-                    tokens_to_award = 5
-                    
-                    # Verificar si ya se otorgaron tokens por el caos
-                    existing_transaction = TokenTransaction.objects.filter(
-                        team=team,
-                        game_session=session_stage.game_session,
-                        session_stage=session_stage,
-                        source_type='activity',
-                        source_id=activity.id,
-                        reason__icontains='caos'
-                    ).exists()
-                    
-                    if not existing_transaction:
-                        TokenTransaction.objects.create(
-                            team=team,
-                            game_session=session_stage.game_session,
-                            session_stage=session_stage,
-                            amount=tokens_to_award,
-                            source_type='activity',
-                            source_id=activity.id,
-                            reason=f'Actividad "{activity.name}": Preguntas del caos completadas',
-                            awarded_by=None
-                        )
-                        
-                        team.tokens_total += tokens_to_award
-                        team.save()
-                
-                progress.response_data = new_response_data
-                
-            if 'progress_percentage' in request.data:
-                progress.progress_percentage = request.data.get('progress_percentage')
-            
-            progress.save()
-            
-            serializer = self.get_serializer(progress)
-            if created:
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
-            else:
-                return Response(serializer.data, status=status.HTTP_200_OK)
-                
-        except Team.DoesNotExist:
-            return Response(
-                {'error': 'Equipo no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Activity.DoesNotExist:
-            return Response(
-                {'error': 'Actividad no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except SessionStage.DoesNotExist:
-            return Response(
-                {'error': 'Etapa de sesión no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f'Error al crear/actualizar progreso: {e}')
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+
+            # Verificar si se completó el caos de presentación
+            chaos_data = new_response_data.get('chaos', {}) or {}
+            old_chaos_data = old_response_data.get('chaos', {}) or {}
+            if chaos_data.get('completed') and not old_chaos_data.get('completed'):
+                self._award_tokens(
+                    room_code, team_id, session_stage_id, activity, amount=5, reason_tag='chaos',
+                    reason=f'Actividad "{activity.name}": Preguntas del caos completadas',
+                )
+
+            fields['response_data'] = new_response_data
+
+        if 'progress_percentage' in request.data:
+            fields['progress_percentage'] = request.data.get('progress_percentage')
+
+        progress = upsert_progress(room_code, team_id, activity_id, **fields)
+        annotate_team_activity_progress_display_fields(progress, team=team)
+        serializer = TeamActivityProgressSerializer(progress)
+        return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    def update(self, request, *args, **kwargs):
+        return self.partial_update(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
         """
         Actualizar parcialmente el progreso (usado por update del frontend)
         Incluye lógica para detectar completado del caos y otorgar tokens
         """
-        instance = self.get_object()
-        old_response_data = instance.response_data or {}
-        
+        parsed = self._parse_progress_pk(kwargs.get('pk'))
+        if parsed is None:
+            return Response({'error': 'Progreso no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        team_id, activity_id = parsed
+
+        team = self._resolve_team(request, team_id)
+        if team is None:
+            return Response({'error': 'Progreso no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        room_code = team['room_code']
+
+        existing = get_progress(room_code, team_id, activity_id)
+        if existing is None:
+            return Response({'error': 'Progreso no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+        fields = self._existing_fields(existing)
+        old_response_data = fields.get('response_data') or {}
+
         # Actualizar campos estándar
         if 'status' in request.data:
-            instance.status = request.data.get('status')
-            if instance.status == 'completed' and not instance.completed_at:
-                instance.completed_at = timezone.now()
-                if instance.progress_percentage < 100:
-                    instance.progress_percentage = 100
-        
+            fields['status'] = request.data.get('status')
+            if fields['status'] == 'completed' and not fields.get('completed_at'):
+                fields['completed_at'] = now_iso()
+                if (fields.get('progress_percentage') or 0) < 100:
+                    fields['progress_percentage'] = 100
+
         # Actualizar response_data si se proporciona
         if 'response_data' in request.data:
             new_response_data = request.data.get('response_data')
-            
+
             # Verificar si se completó el caos de presentación
-            chaos_data = new_response_data.get('chaos', {})
-            old_chaos_data = old_response_data.get('chaos', {})
-            
+            chaos_data = new_response_data.get('chaos', {}) or {}
+            old_chaos_data = old_response_data.get('chaos', {}) or {}
             if chaos_data.get('completed') and not old_chaos_data.get('completed'):
-                # Se completó el caos, otorgar 5 tokens
-                from .models import TokenTransaction
-                tokens_to_award = 5
-                
-                # Verificar si ya se otorgaron tokens por el caos
-                existing_transaction = TokenTransaction.objects.filter(
-                    team=instance.team,
-                    game_session=instance.session_stage.game_session,
-                    session_stage=instance.session_stage,
-                    source_type='activity',
-                    source_id=instance.activity.id,
-                    reason__icontains='caos'
-                ).exists()
-                
-                if not existing_transaction:
-                    TokenTransaction.objects.create(
-                        team=instance.team,
-                        game_session=instance.session_stage.game_session,
-                        session_stage=instance.session_stage,
-                        amount=tokens_to_award,
-                        source_type='activity',
-                        source_id=instance.activity.id,
-                        reason=f'Actividad "{instance.activity.name}": Preguntas del caos completadas',
-                        awarded_by=None
+                from challenges.models import Activity
+                try:
+                    activity = Activity.objects.get(id=activity_id)
+                    self._award_tokens(
+                        room_code, team_id, activity.stage_id, activity, amount=5, reason_tag='chaos',
+                        reason=f'Actividad "{activity.name}": Preguntas del caos completadas',
                     )
-                    
-                    instance.team.tokens_total += tokens_to_award
-                    instance.team.save()
-            
-            # Actualizar response_data
-            instance.response_data = new_response_data
-        
+                except Activity.DoesNotExist:
+                    pass
+
+            fields['response_data'] = new_response_data
+
         if 'progress_percentage' in request.data:
-            instance.progress_percentage = request.data.get('progress_percentage')
-        
-        instance.save()
-        
-        serializer = self.get_serializer(instance)
+            fields['progress_percentage'] = request.data.get('progress_percentage')
+
+        progress = upsert_progress(room_code, team_id, activity_id, **fields)
+        annotate_team_activity_progress_display_fields(progress, team=team)
+        serializer = TeamActivityProgressSerializer(progress)
         return Response(serializer.data)
 
     @action(detail=False, methods=['post'], permission_classes=[], authentication_classes=[])
@@ -3625,14 +3724,14 @@ class TeamActivityProgressViewSet(viewsets.ModelViewSet):
         """
         import logging
         logger = logging.getLogger(__name__)
-        
+
         team_id = request.data.get('team')
         activity_id = request.data.get('activity')
         session_stage_id = request.data.get('session_stage')
         answers = request.data.get('answers', [])  # Lista de respuestas: [{'word': 'emprender', 'answer': 'emprender'}, ...]
-        
+
         logger.info(f'[submit_anagram] Datos recibidos: team={team_id}, activity={activity_id}, session_stage={session_stage_id}, answers={answers}')
-        
+
         if not team_id:
             return Response(
                 {'error': 'Se requiere team', 'received': {'team': team_id, 'activity': activity_id, 'session_stage': session_stage_id, 'answers': answers}},
@@ -3653,321 +3752,282 @@ class TeamActivityProgressViewSet(viewsets.ModelViewSet):
                 {'error': 'Se requiere answers (lista no vacía)', 'received': {'team': team_id, 'activity': activity_id, 'session_stage': session_stage_id, 'answers': answers}},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
+        from challenges.models import Activity
+
+        team = self._resolve_team(request, team_id)
+        if team is None:
+            return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        room_code = team['room_code']
+
         try:
-            from .models import Team, SessionStage, TokenTransaction
-            from challenges.models import Activity
-            
-            team = Team.objects.get(id=team_id)
+            activity_id = int(activity_id)
             activity = Activity.objects.get(id=activity_id)
-            session_stage = SessionStage.objects.get(id=session_stage_id)
-            
-            # Obtener tipo de minijuego del request PRIMERO (antes de obtener/crear el progreso)
-            minigame_type = request.data.get('minigame_type', None)
-            
-            # Obtener o crear el progreso
-            progress, created = TeamActivityProgress.objects.get_or_create(
-                team=team,
-                activity=activity,
-                session_stage=session_stage,
-                defaults={
-                    'status': 'in_progress',
-                    'started_at': timezone.now()
-                }
-            )
-            
-            # Permitir actualizar progreso incluso si está completado (para permitir correcciones o actualizaciones)
-            # Solo bloquear si realmente no hay nada nuevo que agregar
-            # (Esta verificación se hace más adelante en el código)
-            
-            # Si no hay minigame_type en el request, intentar obtenerlo del response_data existente
-            if not minigame_type:
-                existing_response_data = progress.response_data or {}
-                minigame_type = existing_response_data.get('minigame_type', None)
-            
-            # Obtener palabras del anagrama con prioridad:
-            # 1) Del request (si el frontend las envía)
-            # 2) Del response_data guardado
-            # 3) De la actividad (como último recurso)
-            anagram_words_from_request = request.data.get('anagram_words', [])
-            existing_response_data_for_words = progress.response_data or {}
-            anagram_words_from_progress = existing_response_data_for_words.get('anagram_words', [])
-            
-            # Priorizar palabras del request, luego del progreso guardado
-            if anagram_words_from_request:
-                anagram_words_from_progress = anagram_words_from_request
-                logger.info(f'[submit_anagram] Usando anagram_words del request: {len(anagram_words_from_progress)} palabras')
-            elif not anagram_words_from_progress:
-                # Si no hay palabras guardadas en el progreso, intentar obtenerlas de la actividad
-                try:
-                    # Obtener anagram_data de la actividad
-                    anagram_data = activity.get_anagram_data(
-                        count=5,
-                        team_id=team.id,
-                        session_stage_id=session_stage.id
-                    )
-                    if anagram_data and anagram_data.get('words'):
-                        anagram_words_from_progress = [w.get('word', '').upper() if isinstance(w, dict) else str(w).upper() 
-                                                      for w in anagram_data['words']]
-                        logger.info(f'[submit_anagram] Obtenidas palabras desde actividad: {len(anagram_words_from_progress)} palabras')
-                except Exception as e:
-                    logger.warning(f'No se pudieron obtener palabras del anagrama desde la actividad: {e}')
-            
-            # Normalizar palabras para comparación
-            normalized_words = [w.upper() if isinstance(w, str) else str(w).upper() 
-                              for w in anagram_words_from_progress] if anagram_words_from_progress else []
-            
-            logger.info(f'[submit_anagram] normalized_words: {normalized_words}, count={len(normalized_words)}')
-            
-            # SIEMPRE usar 1 token por palabra (no usar tokens_per_word de la configuración)
-            tokens_per_word = 1  # 1 token por palabra
-            
-            # Calcular el número esperado de palabras
-            # Prioridad: 1) total_words enviado por el frontend, 2) palabras en configuración, 3) 3 como mínimo
-            total_words_from_request = request.data.get('total_words')
-            if total_words_from_request is not None and total_words_from_request > 0:
-                # El frontend envía el número real de palabras generadas
-                total_words_expected = int(total_words_from_request)
-            elif normalized_words:
-                total_words_expected = len(normalized_words)
+        except (Activity.DoesNotExist, ValueError, TypeError):
+            return Response({'error': 'Actividad no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            session_stage_id = int(session_stage_id)
+        except (ValueError, TypeError):
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        if get_session_stage(room_code, session_stage_id) is None:
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Obtener tipo de minijuego del request PRIMERO (antes de obtener/crear el progreso)
+        minigame_type = request.data.get('minigame_type', None)
+
+        # Obtener o crear el progreso
+        existing = get_progress(room_code, team_id, activity_id)
+        fields = self._existing_fields(existing)
+        if existing is None:
+            fields['status'] = 'in_progress'
+            fields['started_at'] = now_iso()
+
+        # Si no hay minigame_type en el request, intentar obtenerlo del response_data existente
+        if not minigame_type:
+            existing_response_data = fields.get('response_data') or {}
+            minigame_type = existing_response_data.get('minigame_type', None)
+
+        # Obtener palabras del anagrama con prioridad:
+        # 1) Del request (si el frontend las envía)
+        # 2) Del response_data guardado
+        # 3) De la actividad (como último recurso)
+        anagram_words_from_request = request.data.get('anagram_words', [])
+        existing_response_data_for_words = fields.get('response_data') or {}
+        anagram_words_from_progress = existing_response_data_for_words.get('anagram_words', [])
+
+        # Priorizar palabras del request, luego del progreso guardado
+        if anagram_words_from_request:
+            anagram_words_from_progress = anagram_words_from_request
+            logger.info(f'[submit_anagram] Usando anagram_words del request: {len(anagram_words_from_progress)} palabras')
+        elif not anagram_words_from_progress:
+            # Si no hay palabras guardadas en el progreso, intentar obtenerlas de la actividad
+            try:
+                # Obtener anagram_data de la actividad
+                anagram_data = activity.get_anagram_data(
+                    count=5,
+                    team_id=team_id,
+                    session_stage_id=session_stage_id
+                )
+                if anagram_data and anagram_data.get('words'):
+                    anagram_words_from_progress = [w.get('word', '').upper() if isinstance(w, dict) else str(w).upper()
+                                                  for w in anagram_data['words']]
+                    logger.info(f'[submit_anagram] Obtenidas palabras desde actividad: {len(anagram_words_from_progress)} palabras')
+            except Exception as e:
+                logger.warning(f'No se pudieron obtener palabras del anagrama desde la actividad: {e}')
+
+        # Normalizar palabras para comparación
+        normalized_words = [w.upper() if isinstance(w, str) else str(w).upper()
+                          for w in anagram_words_from_progress] if anagram_words_from_progress else []
+
+        logger.info(f'[submit_anagram] normalized_words: {normalized_words}, count={len(normalized_words)}')
+
+        # SIEMPRE usar 1 token por palabra (no usar tokens_per_word de la configuración)
+        tokens_per_word = 1  # 1 token por palabra
+
+        # Calcular el número esperado de palabras
+        # Prioridad: 1) total_words enviado por el frontend, 2) palabras en configuración, 3) 3 como mínimo
+        total_words_from_request = request.data.get('total_words')
+        if total_words_from_request is not None and total_words_from_request > 0:
+            # El frontend envía el número real de palabras generadas
+            total_words_expected = int(total_words_from_request)
+        elif normalized_words:
+            total_words_expected = len(normalized_words)
+        else:
+            # Si no hay configuración, usar 3 como mínimo
+            total_words_expected = 3
+
+        # Obtener respuestas existentes o crear nuevas (MANTENER progreso de ambas partes)
+        existing_response_data = fields.get('response_data') or {}
+        existing_answers = existing_response_data.get('answers', [])
+        existing_found_words = existing_response_data.get('found_words', [])  # Mantener palabras de sopa de letras
+        # PRESERVAR el total_words original de la sopa de letras si existe
+        existing_total_words = existing_response_data.get('total_words')
+
+        # Diccionario para fácil búsqueda de respuestas existentes
+        existing_answers_dict = {a.get('word', '').upper(): a for a in existing_answers}
+
+        # Actualizar respuestas existentes o agregar nuevas
+        new_correct_answers = 0
+        new_tokens = 0
+
+        for answer_data in answers:
+            word = answer_data.get('word', '').upper()
+            answer = answer_data.get('answer', '').strip().upper()
+
+            # Buscar si ya existe esta respuesta
+            existing_answer = existing_answers_dict.get(word)
+
+            # Verificar si la respuesta es correcta (la palabra coincide con la respuesta)
+            # La validación principal es que word == answer (ambos en mayúsculas)
+            # Si normalized_words está disponible y no está vacío, también verificar que la palabra esté en la lista
+            # Si normalized_words está vacío, confiar en que word == answer es suficiente
+            if len(normalized_words) > 0:
+                is_correct = (word == answer) and (word in normalized_words)
             else:
-                # Si no hay configuración, usar 3 como mínimo
-                total_words_expected = 3
-            
-            # Obtener respuestas existentes o crear nuevas (MANTENER progreso de ambas partes)
-            existing_response_data = progress.response_data or {}
-            existing_answers = existing_response_data.get('answers', [])
-            existing_found_words = existing_response_data.get('found_words', [])  # Mantener palabras de sopa de letras
-            # PRESERVAR el total_words original de la sopa de letras si existe
-            existing_total_words = existing_response_data.get('total_words')
-            
-            # Diccionario para fácil búsqueda de respuestas existentes
-            existing_answers_dict = {a.get('word', '').upper(): a for a in existing_answers}
-            
-            # Actualizar respuestas existentes o agregar nuevas
-            new_correct_answers = 0
-            new_tokens = 0
-            
-            for answer_data in answers:
-                word = answer_data.get('word', '').upper()
-                answer = answer_data.get('answer', '').strip().upper()
-                
-                # Buscar si ya existe esta respuesta
-                existing_answer = existing_answers_dict.get(word)
-                
-                # Verificar si la respuesta es correcta (la palabra coincide con la respuesta)
-                # La validación principal es que word == answer (ambos en mayúsculas)
-                # Si normalized_words está disponible y no está vacío, también verificar que la palabra esté en la lista
-                # Si normalized_words está vacío, confiar en que word == answer es suficiente
-                if len(normalized_words) > 0:
-                    is_correct = (word == answer) and (word in normalized_words)
-                else:
-                    # Si no hay lista de palabras normalizadas, solo verificar que word == answer
-                    is_correct = (word == answer)
-                
-                # Log para debugging
-                logger.info(f'[submit_anagram] Validación: word={word}, answer={answer}, is_correct={is_correct}, normalized_words_count={len(normalized_words)}')
-                
-                # Si la respuesta es correcta pero no se detectó, intentar normalizar más
-                if not is_correct and word.upper().strip() == answer.upper().strip():
-                    logger.warning(f'[submit_anagram] Respuesta debería ser correcta pero no se detectó. Normalizando: word={word.upper().strip()}, answer={answer.upper().strip()}')
-                    is_correct = True
-                
-                if is_correct:
-                    # Verificar si es una nueva respuesta correcta
-                    # Si no existe la respuesta o si existe pero estaba incorrecta, otorgar tokens
-                    was_already_correct = existing_answer and existing_answer.get('answer', '').upper() == answer
-                    
-                    if not was_already_correct:
-                        # Verificar si ya se otorgaron tokens para esta palabra específica
-                        # Buscar transacciones que mencionen esta palabra específica en el reason
-                        existing_transaction = TokenTransaction.objects.filter(
-                            team=team,
-                            game_session=session_stage.game_session,
-                            session_stage=session_stage,
-                            source_type='activity',
-                            source_id=activity.id,
-                            reason__icontains='anagrama'
-                        ).filter(
-                            reason__icontains=word
-                        ).exists()
-                        
-                        if not existing_transaction:
-                            # Otorgar tokens inmediatamente por cada palabra correcta nueva
-                            new_correct_answers += 1
-                            new_tokens += tokens_per_word
-                            
-                            # Crear transacción de tokens inmediatamente
-                            TokenTransaction.objects.create(
-                                team=team,
-                                game_session=session_stage.game_session,
-                                session_stage=session_stage,
-                                amount=tokens_per_word,
-                                source_type='activity',
-                                source_id=activity.id,
-                                reason=f'Actividad "{activity.name}": Palabra "{word}" correcta en anagrama',
-                                awarded_by=None  # Sistema automático
-                            )
-                            
-                            # Actualizar tokens del equipo inmediatamente
-                            team.tokens_total += tokens_per_word
-                            team.save()
-                    
-                    # Actualizar o agregar respuesta
-                    if existing_answer:
-                        existing_answer['answer'] = answer
-                    else:
-                        existing_answers.append({'word': word, 'answer': answer})
-                        existing_answers_dict[word] = existing_answers[-1]
-                else:
-                    # Respuesta incorrecta o nueva
-                    if existing_answer:
-                        existing_answer['answer'] = answer
-                    else:
-                        existing_answers.append({'word': word, 'answer': answer})
-                        existing_answers_dict[word] = existing_answers[-1]
-            
-            # Contar total de respuestas correctas del anagrama
-            # IMPORTANTE: Si normalized_words está disponible y no está vacío, verificar que la palabra esté en la lista
-            # Si normalized_words está vacío, solo verificar que word == answer
-            total_correct_anagram = 0
-            for a in existing_answers:
-                word_upper = a.get('word', '').upper()
-                answer_upper = a.get('answer', '').upper()
-                is_match = word_upper == answer_upper
-                
-                if normalized_words:
-                    # Si hay lista de palabras normalizadas, verificar que la palabra esté en la lista
-                    in_list = word_upper in normalized_words
-                    if is_match and in_list:
-                        total_correct_anagram += 1
-                        logger.debug(f'[submit_anagram] Contando respuesta correcta: word={word_upper}, answer={answer_upper}, in_normalized={in_list}')
-                    elif is_match and not in_list:
-                        logger.warning(f'[submit_anagram] Respuesta coincide pero no está en normalized_words: word={word_upper}, normalized_words={normalized_words}')
-                else:
-                    # Si no hay lista de palabras normalizadas, contar todas las respuestas donde word == answer
-                    if is_match:
-                        total_correct_anagram += 1
-                        logger.debug(f'[submit_anagram] Contando respuesta correcta (sin normalized_words): word={word_upper}, answer={answer_upper}')
-            
-            logger.info(f'[submit_anagram] Total correctas calculadas: {total_correct_anagram} de {len(existing_answers)} respuestas')
-            
-            # Calcular tokens totales de ambas partes
-            word_search_correct = len(existing_found_words)
-            total_tokens_earned = (word_search_correct * tokens_per_word) + (total_correct_anagram * tokens_per_word)
-            
-            # Guardar datos de respuesta (MANTENER ambas partes)
-            # IMPORTANTE: Usar campos separados para los totales de cada parte del minijuego
-            existing_response_data_for_totals = progress.response_data or {}
-            word_search_total_words = existing_response_data_for_totals.get('word_search_total_words')
-            anagram_total_words = total_words_expected  # El total del anagrama viene del request o configuración
-            
-            # Si no existe word_search_total_words, preservar el total_words original si existe
-            if word_search_total_words is None:
-                word_search_total_words = existing_response_data_for_totals.get('total_words')
-            
-            # Preservar las palabras del anagrama guardadas (el frontend las guarda cuando las carga)
-            # Prioridad: 1) Del request, 2) Del response_data guardado, 3) De las respuestas existentes
-            anagram_words = request.data.get('anagram_words', [])
-            if not anagram_words:
-                anagram_words = existing_response_data_for_totals.get('anagram_words', [])
-            if not anagram_words and existing_answers:
-                # Si no hay palabras guardadas pero hay respuestas, extraer las palabras de las respuestas
-                anagram_words = [a.get('word', '').upper() for a in existing_answers if a.get('word')]
-                # Eliminar duplicados manteniendo el orden
-                seen = set()
-                anagram_words = [w for w in anagram_words if w and (w not in seen and not seen.add(w))]
-            
-            # Normalizar anagram_words para guardar
-            if anagram_words:
-                anagram_words = [w.upper() if isinstance(w, str) else str(w).upper() for w in anagram_words]
-            
-            # Guardar el índice actual del anagrama
-            current_index = request.data.get('current_index')
-            if current_index is None:
-                # Si no se envía, calcular basado en respuestas correctas
-                current_index = total_correct_anagram
-            
+                # Si no hay lista de palabras normalizadas, solo verificar que word == answer
+                is_correct = (word == answer)
+
             # Log para debugging
-            logger.info(f'[submit_anagram] Guardando progreso: total_correct_anagram={total_correct_anagram}, existing_answers_count={len(existing_answers)}, anagram_total_words={anagram_total_words}, normalized_words_count={len(normalized_words)}')
-            for idx, ans in enumerate(existing_answers):
-                word_upper = ans.get("word", "").upper()
-                answer_upper = ans.get("answer", "").upper()
-                is_match = word_upper == answer_upper
-                in_normalized = word_upper in normalized_words if normalized_words else True
-                logger.debug(f'[submit_anagram] Respuesta {idx}: word={word_upper}, answer={answer_upper}, match={is_match}, in_normalized={in_normalized}, counted={is_match and (not normalized_words or in_normalized)}')
-            
-            progress.response_data = {
-                'answers': existing_answers,
-                'correct_answers': total_correct_anagram,
-                'total_words': word_search_total_words,  # Mantener compatibilidad con código antiguo (usar word_search_total_words)
-                'tokens_earned': total_tokens_earned,
-                'minigame_type': minigame_type,  # Guardar tipo de minijuego (anagrama o word_search)
-                'minigame_part': 'anagram',  # Parte 2: anagrama
-                'found_words': existing_found_words,  # Mantener palabras de sopa de letras
-                'word_search_words_found': word_search_correct,
-                'anagram_words_found': total_correct_anagram,
-                'word_search_total_words': word_search_total_words,  # Total de palabras para sopa de letras
-                'anagram_total_words': anagram_total_words,  # Total de palabras para anagrama
-                'anagram_words': anagram_words,  # Guardar las palabras del anagrama para mantener consistencia
-                'anagram_current_index': current_index  # Guardar el índice actual del anagrama
-            }
-            
-            # Log después de guardar
-            logger.info(f'[submit_anagram] Progreso guardado: anagram_words_found={progress.response_data.get("anagram_words_found")}, anagram_total_words={progress.response_data.get("anagram_total_words")}')
-            
-            # Actualizar progreso (solo marcar como completado si ambas partes están completas)
-            # Verificar si ambas partes están completas usando los totales específicos de cada parte
-            both_parts_complete = (word_search_correct >= word_search_total_words) and (total_correct_anagram >= anagram_total_words)
-            
-            if both_parts_complete:
-                progress.status = 'completed'
-                progress.completed_at = timezone.now()
-                progress.progress_percentage = 100
+            logger.info(f'[submit_anagram] Validación: word={word}, answer={answer}, is_correct={is_correct}, normalized_words_count={len(normalized_words)}')
+
+            # Si la respuesta es correcta pero no se detectó, intentar normalizar más
+            if not is_correct and word.upper().strip() == answer.upper().strip():
+                logger.warning(f'[submit_anagram] Respuesta debería ser correcta pero no se detectó. Normalizando: word={word.upper().strip()}, answer={answer.upper().strip()}')
+                is_correct = True
+
+            if is_correct:
+                # Verificar si es una nueva respuesta correcta
+                # Si no existe la respuesta o si existe pero estaba incorrecta, otorgar tokens
+                was_already_correct = existing_answer and existing_answer.get('answer', '').upper() == answer
+
+                if not was_already_correct:
+                    # Otorgar tokens inmediatamente por cada palabra correcta nueva (idempotente
+                    # por (source_type, source_id) -- ver _award_tokens / convención de la clase)
+                    awarded = self._award_tokens(
+                        room_code, team_id, session_stage_id, activity, amount=tokens_per_word,
+                        reason_tag=f'anagram:{word}',
+                        reason=f'Actividad "{activity.name}": Palabra "{word}" correcta en anagrama',
+                    )
+                    if awarded:
+                        new_correct_answers += 1
+                        new_tokens += tokens_per_word
+
+                # Actualizar o agregar respuesta
+                if existing_answer:
+                    existing_answer['answer'] = answer
+                else:
+                    existing_answers.append({'word': word, 'answer': answer})
+                    existing_answers_dict[word] = existing_answers[-1]
             else:
-                progress.status = 'in_progress'
-                # Calcular progreso total basado en ambas partes usando los totales específicos
-                total_words_both_parts = word_search_total_words + anagram_total_words
-                total_progress = ((word_search_correct + total_correct_anagram) / total_words_both_parts) * 100 if total_words_both_parts > 0 else 0
-                progress.progress_percentage = int(total_progress)
-            
-            # Los tokens ya se otorgaron inmediatamente cuando se detectó cada respuesta correcta nueva (líneas 3119-3133)
-            # No es necesario otorgarlos aquí de nuevo
-            
-            progress.save()
-            
-            # Recargar el equipo para obtener tokens actualizados
-            team.refresh_from_db()
-            
-            serializer = self.get_serializer(progress)
-            return Response({
-                **serializer.data,
-                'correct_answers': total_correct_anagram,
-                'total_words': total_words_expected,
-                'tokens_earned': new_tokens,  # Solo tokens ganados en este envío
-                'team_tokens_total': team.tokens_total  # Tokens totales del equipo
-            })
-            
-        except Team.DoesNotExist:
-            return Response(
-                {'error': 'Equipo no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Activity.DoesNotExist:
-            return Response(
-                {'error': 'Actividad no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except SessionStage.DoesNotExist:
-            return Response(
-                {'error': 'Etapa de sesión no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+                # Respuesta incorrecta o nueva
+                if existing_answer:
+                    existing_answer['answer'] = answer
+                else:
+                    existing_answers.append({'word': word, 'answer': answer})
+                    existing_answers_dict[word] = existing_answers[-1]
+
+        # Contar total de respuestas correctas del anagrama
+        # IMPORTANTE: Si normalized_words está disponible y no está vacío, verificar que la palabra esté en la lista
+        # Si normalized_words está vacío, solo verificar que word == answer
+        total_correct_anagram = 0
+        for a in existing_answers:
+            word_upper = a.get('word', '').upper()
+            answer_upper = a.get('answer', '').upper()
+            is_match = word_upper == answer_upper
+
+            if normalized_words:
+                # Si hay lista de palabras normalizadas, verificar que la palabra esté en la lista
+                in_list = word_upper in normalized_words
+                if is_match and in_list:
+                    total_correct_anagram += 1
+                    logger.debug(f'[submit_anagram] Contando respuesta correcta: word={word_upper}, answer={answer_upper}, in_normalized={in_list}')
+                elif is_match and not in_list:
+                    logger.warning(f'[submit_anagram] Respuesta coincide pero no está en normalized_words: word={word_upper}, normalized_words={normalized_words}')
+            else:
+                # Si no hay lista de palabras normalizadas, contar todas las respuestas donde word == answer
+                if is_match:
+                    total_correct_anagram += 1
+                    logger.debug(f'[submit_anagram] Contando respuesta correcta (sin normalized_words): word={word_upper}, answer={answer_upper}')
+
+        logger.info(f'[submit_anagram] Total correctas calculadas: {total_correct_anagram} de {len(existing_answers)} respuestas')
+
+        # Calcular tokens totales de ambas partes
+        word_search_correct = len(existing_found_words)
+        total_tokens_earned = (word_search_correct * tokens_per_word) + (total_correct_anagram * tokens_per_word)
+
+        # Guardar datos de respuesta (MANTENER ambas partes)
+        # IMPORTANTE: Usar campos separados para los totales de cada parte del minijuego
+        existing_response_data_for_totals = fields.get('response_data') or {}
+        word_search_total_words = existing_response_data_for_totals.get('word_search_total_words')
+        anagram_total_words = total_words_expected  # El total del anagrama viene del request o configuración
+
+        # Si no existe word_search_total_words, preservar el total_words original si existe
+        if word_search_total_words is None:
+            word_search_total_words = existing_response_data_for_totals.get('total_words')
+
+        # Preservar las palabras del anagrama guardadas (el frontend las guarda cuando las carga)
+        # Prioridad: 1) Del request, 2) Del response_data guardado, 3) De las respuestas existentes
+        anagram_words = request.data.get('anagram_words', [])
+        if not anagram_words:
+            anagram_words = existing_response_data_for_totals.get('anagram_words', [])
+        if not anagram_words and existing_answers:
+            # Si no hay palabras guardadas pero hay respuestas, extraer las palabras de las respuestas
+            anagram_words = [a.get('word', '').upper() for a in existing_answers if a.get('word')]
+            # Eliminar duplicados manteniendo el orden
+            seen = set()
+            anagram_words = [w for w in anagram_words if w and (w not in seen and not seen.add(w))]
+
+        # Normalizar anagram_words para guardar
+        if anagram_words:
+            anagram_words = [w.upper() if isinstance(w, str) else str(w).upper() for w in anagram_words]
+
+        # Guardar el índice actual del anagrama
+        current_index = request.data.get('current_index')
+        if current_index is None:
+            # Si no se envía, calcular basado en respuestas correctas
+            current_index = total_correct_anagram
+
+        # Log para debugging
+        logger.info(f'[submit_anagram] Guardando progreso: total_correct_anagram={total_correct_anagram}, existing_answers_count={len(existing_answers)}, anagram_total_words={anagram_total_words}, normalized_words_count={len(normalized_words)}')
+        for idx, ans in enumerate(existing_answers):
+            word_upper = ans.get("word", "").upper()
+            answer_upper = ans.get("answer", "").upper()
+            is_match = word_upper == answer_upper
+            in_normalized = word_upper in normalized_words if normalized_words else True
+            logger.debug(f'[submit_anagram] Respuesta {idx}: word={word_upper}, answer={answer_upper}, match={is_match}, in_normalized={in_normalized}, counted={is_match and (not normalized_words or in_normalized)}')
+
+        fields['response_data'] = {
+            'answers': existing_answers,
+            'correct_answers': total_correct_anagram,
+            'total_words': word_search_total_words,  # Mantener compatibilidad con código antiguo (usar word_search_total_words)
+            'tokens_earned': total_tokens_earned,
+            'minigame_type': minigame_type,  # Guardar tipo de minijuego (anagrama o word_search)
+            'minigame_part': 'anagram',  # Parte 2: anagrama
+            'found_words': existing_found_words,  # Mantener palabras de sopa de letras
+            'word_search_words_found': word_search_correct,
+            'anagram_words_found': total_correct_anagram,
+            'word_search_total_words': word_search_total_words,  # Total de palabras para sopa de letras
+            'anagram_total_words': anagram_total_words,  # Total de palabras para anagrama
+            'anagram_words': anagram_words,  # Guardar las palabras del anagrama para mantener consistencia
+            'anagram_current_index': current_index  # Guardar el índice actual del anagrama
+        }
+
+        # Log después de guardar
+        logger.info(f'[submit_anagram] Progreso guardado: anagram_words_found={fields["response_data"].get("anagram_words_found")}, anagram_total_words={fields["response_data"].get("anagram_total_words")}')
+
+        # Actualizar progreso (solo marcar como completado si ambas partes están completas)
+        # Verificar si ambas partes están completas usando los totales específicos de cada parte
+        both_parts_complete = (word_search_correct >= word_search_total_words) and (total_correct_anagram >= anagram_total_words)
+
+        if both_parts_complete:
+            fields['status'] = 'completed'
+            fields['completed_at'] = now_iso()
+            fields['progress_percentage'] = 100
+        else:
+            fields['status'] = 'in_progress'
+            # Calcular progreso total basado en ambas partes usando los totales específicos
+            total_words_both_parts = word_search_total_words + anagram_total_words
+            total_progress = ((word_search_correct + total_correct_anagram) / total_words_both_parts) * 100 if total_words_both_parts > 0 else 0
+            fields['progress_percentage'] = int(total_progress)
+
+        # Los tokens ya se otorgaron inmediatamente cuando se detectó cada respuesta correcta nueva
+        # (ver _award_tokens más arriba). No es necesario otorgarlos aquí de nuevo.
+
+        progress = upsert_progress(room_code, team_id, activity_id, **fields)
+
+        # Recargar el equipo para obtener tokens actualizados
+        team = get_team(room_code, team_id) or team
+
+        annotate_team_activity_progress_display_fields(progress, team=team)
+        serializer = TeamActivityProgressSerializer(progress)
+        return Response({
+            **serializer.data,
+            'correct_answers': total_correct_anagram,
+            'total_words': total_words_expected,
+            'tokens_earned': new_tokens,  # Solo tokens ganados en este envío
+            'team_tokens_total': team['tokens_total']  # Tokens totales del equipo
+        })
 
     @action(detail=False, methods=['post'], permission_classes=[], authentication_classes=[])
     def submit_word_search(self, request):
@@ -3977,16 +4037,16 @@ class TeamActivityProgressViewSet(viewsets.ModelViewSet):
         """
         import logging
         logger = logging.getLogger(__name__)
-        
+
         team_id = request.data.get('team')
         activity_id = request.data.get('activity')
         session_stage_id = request.data.get('session_stage')
         found_words = request.data.get('found_words', [])  # Lista de palabras encontradas: ['IDEA', 'META', ...]
         minigame_type = request.data.get('minigame_type', 'word_search')
         completed = request.data.get('completed', False)
-        
+
         logger.info(f'[submit_word_search] Datos recibidos: team={team_id}, activity={activity_id}, session_stage={session_stage_id}, found_words={found_words}, completed={completed}')
-        
+
         if not team_id:
             return Response(
                 {'error': 'Se requiere team'},
@@ -4002,194 +4062,177 @@ class TeamActivityProgressViewSet(viewsets.ModelViewSet):
                 {'error': 'Se requiere session_stage'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
+        from challenges.models import Activity
+
+        team = self._resolve_team(request, team_id)
+        if team is None:
+            return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        room_code = team['room_code']
+
         try:
-            from .models import Team, SessionStage, TokenTransaction
-            from challenges.models import Activity
-            
-            team = Team.objects.get(id=team_id)
+            activity_id = int(activity_id)
             activity = Activity.objects.get(id=activity_id)
-            session_stage = SessionStage.objects.get(id=session_stage_id)
-            
-            # Obtener o crear el progreso
-            progress, created = TeamActivityProgress.objects.get_or_create(
-                team=team,
-                activity=activity,
-                session_stage=session_stage,
-                defaults={
-                    'status': 'in_progress',
-                    'started_at': timezone.now()
-                }
+        except (Activity.DoesNotExist, ValueError, TypeError):
+            return Response({'error': 'Actividad no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            session_stage_id = int(session_stage_id)
+        except (ValueError, TypeError):
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        if get_session_stage(room_code, session_stage_id) is None:
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Obtener o crear el progreso
+        existing = get_progress(room_code, team_id, activity_id)
+        created = existing is None
+        fields = self._existing_fields(existing)
+        if created:
+            fields['status'] = 'in_progress'
+            fields['started_at'] = now_iso()
+
+        if not created and fields.get('status') == 'completed' and not completed:
+            return Response(
+                {'error': 'Esta actividad ya fue completada'},
+                status=status.HTTP_400_BAD_REQUEST
             )
-            
-            if not created and progress.status == 'completed' and not completed:
-                return Response(
-                    {'error': 'Esta actividad ya fue completada'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Obtener configuración de la actividad
-            config = activity.config_data or {}
-            words_config = config.get('words', [])
-            # SIEMPRE usar 1 token por palabra (no usar tokens_per_word de la configuración)
-            tokens_per_word = 1  # 1 token por palabra encontrada
-            
-            # Normalizar palabras de la configuración
-            normalized_config_words = []
-            for w in words_config:
-                if isinstance(w, dict):
-                    normalized_config_words.append(w.get('word', '').upper())
-                else:
-                    normalized_config_words.append(str(w).upper())
-            
-            # Calcular el número esperado de palabras
-            # Prioridad: 1) total_words enviado por el frontend, 2) palabras en configuración, 3) palabras encontradas o 3 como mínimo
-            total_words_from_request = request.data.get('total_words')
-            if total_words_from_request is not None and total_words_from_request > 0:
-                # El frontend envía el número real de palabras generadas
-                total_words_expected = int(total_words_from_request)
-            elif normalized_config_words:
-                total_words_expected = len(normalized_config_words)
+
+        # Obtener configuración de la actividad
+        config = activity.config_data or {}
+        words_config = config.get('words', [])
+        # SIEMPRE usar 1 token por palabra (no usar tokens_per_word de la configuración)
+        tokens_per_word = 1  # 1 token por palabra encontrada
+
+        # Normalizar palabras de la configuración
+        normalized_config_words = []
+        for w in words_config:
+            if isinstance(w, dict):
+                normalized_config_words.append(w.get('word', '').upper())
             else:
-                # Si no hay configuración, usar el número de palabras encontradas o 3 como mínimo
-                total_words_expected = max(len(found_words) if found_words else 0, 3)
-            
-            # Normalizar palabras encontradas
-            found_words_normalized = [w.upper().strip() for w in found_words if w and w.strip()]
-            
-            # Obtener respuestas existentes o crear nuevas (MANTENER progreso de ambas partes)
-            existing_response_data = progress.response_data or {}
-            existing_found_words = existing_response_data.get('found_words', [])
-            existing_answers = existing_response_data.get('answers', [])  # Mantener respuestas del anagrama
-            
-            # Combinar palabras encontradas (sin duplicados)
-            combined_found_words = list(set(existing_found_words + found_words_normalized))
-            
-            # Contar palabras correctas
-            # IMPORTANTE: El frontend ya valida las palabras antes de enviarlas, así que todas las palabras
-            # encontradas que se envían son correctas. Si hay configuración, verificamos contra ella,
-            # pero si no hay configuración o las palabras no están en la configuración, aceptamos todas
-            # las palabras encontradas como correctas (ya que el frontend las generó y validó)
-            if normalized_config_words:
-                # Verificar contra configuración, pero también aceptar palabras que no estén en la configuración
-                # si fueron generadas por el frontend (esto permite flexibilidad cuando el frontend genera palabras por defecto)
-                correct_words = [w for w in combined_found_words if w in normalized_config_words]
-                # Si hay palabras encontradas que no están en la configuración, también son correctas
-                # (el frontend las generó y validó)
-                words_not_in_config = [w for w in combined_found_words if w not in normalized_config_words]
-                if words_not_in_config:
-                    correct_words.extend(words_not_in_config)
-                # Eliminar duplicados
-                correct_words = list(set(correct_words))
-            else:
-                # Si no hay configuración, todas las encontradas son correctas
-                correct_words = combined_found_words
-            
-            total_correct_word_search = len(correct_words)
-            
-            # Calcular tokens ganados (solo para nuevas palabras)
-            new_words = [w for w in found_words_normalized if w not in existing_found_words]
-            new_correct_words = [w for w in new_words if w in correct_words]
-            new_tokens = len(new_correct_words) * tokens_per_word
-            
-            # Calcular tokens totales de ambas partes
-            anagram_correct = sum(1 for a in existing_answers 
-                                if a.get('word', '').upper() == a.get('answer', '').upper())
-            total_tokens_earned = (total_correct_word_search * tokens_per_word) + (anagram_correct * tokens_per_word)
-            
-            # Guardar datos de respuesta (MANTENER ambas partes)
-            # IMPORTANTE: Usar campos separados para los totales de cada parte del minijuego
-            existing_response_data_for_totals = progress.response_data or {}
-            word_search_total_words = total_words_expected  # El total de la sopa de letras viene del request o configuración
-            anagram_total_words = existing_response_data_for_totals.get('anagram_total_words')
-            
-            # Si no existe anagram_total_words, usar un valor por defecto (5) o preservar el total_words original si existe
-            if anagram_total_words is None:
-                anagram_total_words = existing_response_data_for_totals.get('total_words', 5)
-            
-            progress.response_data = {
-                'found_words': combined_found_words,
-                'correct_words': correct_words,
-                'correct_answers': total_correct_word_search,
-                'total_words': word_search_total_words,  # Mantener compatibilidad con código antiguo (usar word_search_total_words)
-                'tokens_earned': total_tokens_earned,
-                'minigame_type': minigame_type,
-                'minigame_part': 'word_search',  # Parte 1: sopa de letras
-                'answers': existing_answers,  # Mantener respuestas del anagrama
-                'word_search_words_found': total_correct_word_search,
-                'anagram_words_found': anagram_correct,
-                'word_search_total_words': word_search_total_words,  # Total de palabras para sopa de letras
-                'anagram_total_words': anagram_total_words  # Total de palabras para anagrama
-            }
-            
-            # Actualizar progreso (solo marcar como completado si ambas partes están completas)
-            # Verificar si ambas partes están completas usando los totales específicos de cada parte
-            both_parts_complete = (total_correct_word_search >= word_search_total_words) and (anagram_correct >= anagram_total_words)
-            
-            if completed or both_parts_complete:
-                progress.status = 'completed'
-                progress.completed_at = timezone.now()
-                progress.progress_percentage = 100
-            else:
-                progress.status = 'in_progress'
-                # Calcular progreso total basado en ambas partes usando los totales específicos
-                total_words_both_parts = word_search_total_words + anagram_total_words
-                total_progress = ((total_correct_word_search + anagram_correct) / total_words_both_parts) * 100 if total_words_both_parts > 0 else 0
-                progress.progress_percentage = int(total_progress)
-            
-            # Asignar tokens solo para nuevas palabras correctas
-            if new_tokens > 0:
-                TokenTransaction.objects.create(
-                    team=team,
-                    game_session=session_stage.game_session,
-                    session_stage=session_stage,
-                    amount=new_tokens,
-                    source_type='activity',
-                    source_id=activity.id,
-                    reason=f'Actividad "{activity.name}": +{len(new_correct_words)} palabra(s) encontrada(s) en sopa de letras',
-                    awarded_by=None
-                )
-                
-                team.tokens_total += new_tokens
-                team.save()
-            
-            progress.save()
-            
-            # Recargar el equipo para obtener tokens actualizados
-            team.refresh_from_db()
-            
-            serializer = self.get_serializer(progress)
-            return Response({
-                **serializer.data,
-                'found_words': combined_found_words,
-                'correct_words': correct_words,
-                'correct_answers': total_correct_word_search,
-                'total_words': total_words_expected,
-                'tokens_earned': new_tokens,  # Solo tokens ganados en este envío
-                'team_tokens_total': team.tokens_total
-            })
-            
-        except Team.DoesNotExist:
-            return Response(
-                {'error': 'Equipo no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
+                normalized_config_words.append(str(w).upper())
+
+        # Calcular el número esperado de palabras
+        # Prioridad: 1) total_words enviado por el frontend, 2) palabras en configuración, 3) palabras encontradas o 3 como mínimo
+        total_words_from_request = request.data.get('total_words')
+        if total_words_from_request is not None and total_words_from_request > 0:
+            # El frontend envía el número real de palabras generadas
+            total_words_expected = int(total_words_from_request)
+        elif normalized_config_words:
+            total_words_expected = len(normalized_config_words)
+        else:
+            # Si no hay configuración, usar el número de palabras encontradas o 3 como mínimo
+            total_words_expected = max(len(found_words) if found_words else 0, 3)
+
+        # Normalizar palabras encontradas
+        found_words_normalized = [w.upper().strip() for w in found_words if w and w.strip()]
+
+        # Obtener respuestas existentes o crear nuevas (MANTENER progreso de ambas partes)
+        existing_response_data = fields.get('response_data') or {}
+        existing_found_words = existing_response_data.get('found_words', [])
+        existing_answers = existing_response_data.get('answers', [])  # Mantener respuestas del anagrama
+
+        # Combinar palabras encontradas (sin duplicados)
+        combined_found_words = list(set(existing_found_words + found_words_normalized))
+
+        # Contar palabras correctas
+        # IMPORTANTE: El frontend ya valida las palabras antes de enviarlas, así que todas las palabras
+        # encontradas que se envían son correctas. Si hay configuración, verificamos contra ella,
+        # pero si no hay configuración o las palabras no están en la configuración, aceptamos todas
+        # las palabras encontradas como correctas (ya que el frontend las generó y validó)
+        if normalized_config_words:
+            # Verificar contra configuración, pero también aceptar palabras que no estén en la configuración
+            # si fueron generadas por el frontend (esto permite flexibilidad cuando el frontend genera palabras por defecto)
+            correct_words = [w for w in combined_found_words if w in normalized_config_words]
+            # Si hay palabras encontradas que no están en la configuración, también son correctas
+            # (el frontend las generó y validó)
+            words_not_in_config = [w for w in combined_found_words if w not in normalized_config_words]
+            if words_not_in_config:
+                correct_words.extend(words_not_in_config)
+            # Eliminar duplicados
+            correct_words = list(set(correct_words))
+        else:
+            # Si no hay configuración, todas las encontradas son correctas
+            correct_words = combined_found_words
+
+        total_correct_word_search = len(correct_words)
+
+        # Calcular tokens ganados (solo para nuevas palabras), otorgando de a
+        # una palabra por vez -- idempotente por (source_type, source_id) vía
+        # _award_tokens / convención de la clase, en vez de una sola
+        # transacción combinada sin protección contra reintento.
+        new_words = [w for w in found_words_normalized if w not in existing_found_words]
+        new_correct_words = [w for w in new_words if w in correct_words]
+        new_tokens = 0
+        for word in new_correct_words:
+            awarded = self._award_tokens(
+                room_code, team_id, session_stage_id, activity, amount=tokens_per_word,
+                reason_tag=f'word_search:{word}',
+                reason=f'Actividad "{activity.name}": Palabra "{word}" encontrada en sopa de letras',
             )
-        except Activity.DoesNotExist:
-            return Response(
-                {'error': 'Actividad no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except SessionStage.DoesNotExist:
-            return Response(
-                {'error': 'Etapa de sesión no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Exception as e:
-            logger.error(f'Error en submit_word_search: {str(e)}')
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            if awarded:
+                new_tokens += tokens_per_word
+
+        # Calcular tokens totales de ambas partes
+        anagram_correct = sum(1 for a in existing_answers
+                            if a.get('word', '').upper() == a.get('answer', '').upper())
+        total_tokens_earned = (total_correct_word_search * tokens_per_word) + (anagram_correct * tokens_per_word)
+
+        # Guardar datos de respuesta (MANTENER ambas partes)
+        # IMPORTANTE: Usar campos separados para los totales de cada parte del minijuego
+        existing_response_data_for_totals = fields.get('response_data') or {}
+        word_search_total_words = total_words_expected  # El total de la sopa de letras viene del request o configuración
+        anagram_total_words = existing_response_data_for_totals.get('anagram_total_words')
+
+        # Si no existe anagram_total_words, usar un valor por defecto (5) o preservar el total_words original si existe
+        if anagram_total_words is None:
+            anagram_total_words = existing_response_data_for_totals.get('total_words', 5)
+
+        fields['response_data'] = {
+            'found_words': combined_found_words,
+            'correct_words': correct_words,
+            'correct_answers': total_correct_word_search,
+            'total_words': word_search_total_words,  # Mantener compatibilidad con código antiguo (usar word_search_total_words)
+            'tokens_earned': total_tokens_earned,
+            'minigame_type': minigame_type,
+            'minigame_part': 'word_search',  # Parte 1: sopa de letras
+            'answers': existing_answers,  # Mantener respuestas del anagrama
+            'word_search_words_found': total_correct_word_search,
+            'anagram_words_found': anagram_correct,
+            'word_search_total_words': word_search_total_words,  # Total de palabras para sopa de letras
+            'anagram_total_words': anagram_total_words  # Total de palabras para anagrama
+        }
+
+        # Actualizar progreso (solo marcar como completado si ambas partes están completas)
+        # Verificar si ambas partes están completas usando los totales específicos de cada parte
+        both_parts_complete = (total_correct_word_search >= word_search_total_words) and (anagram_correct >= anagram_total_words)
+
+        if completed or both_parts_complete:
+            fields['status'] = 'completed'
+            fields['completed_at'] = now_iso()
+            fields['progress_percentage'] = 100
+        else:
+            fields['status'] = 'in_progress'
+            # Calcular progreso total basado en ambas partes usando los totales específicos
+            total_words_both_parts = word_search_total_words + anagram_total_words
+            total_progress = ((total_correct_word_search + anagram_correct) / total_words_both_parts) * 100 if total_words_both_parts > 0 else 0
+            fields['progress_percentage'] = int(total_progress)
+
+        progress = upsert_progress(room_code, team_id, activity_id, **fields)
+
+        # Recargar el equipo para obtener tokens actualizados
+        team = get_team(room_code, team_id) or team
+
+        annotate_team_activity_progress_display_fields(progress, team=team)
+        serializer = TeamActivityProgressSerializer(progress)
+        return Response({
+            **serializer.data,
+            'found_words': combined_found_words,
+            'correct_words': correct_words,
+            'correct_answers': total_correct_word_search,
+            'total_words': total_words_expected,
+            'tokens_earned': new_tokens,  # Solo tokens ganados en este envío
+            'team_tokens_total': team['tokens_total']
+        })
 
     @action(detail=False, methods=['post'], permission_classes=[], authentication_classes=[])
     def submit_general_knowledge(self, request):
@@ -4200,12 +4243,12 @@ class TeamActivityProgressViewSet(viewsets.ModelViewSet):
         """
         import logging
         logger = logging.getLogger(__name__)
-        
+
         team_id = request.data.get('team')
         activity_id = request.data.get('activity')
         session_stage_id = request.data.get('session_stage')
         answers = request.data.get('answers', [])  # [{question_id, selected}]
-        
+
         if not team_id:
             return Response(
                 {'error': 'Se requiere team'},
@@ -4221,197 +4264,163 @@ class TeamActivityProgressViewSet(viewsets.ModelViewSet):
                 {'error': 'Se requiere session_stage'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Validar que hayan respuestas
         if len(answers) == 0:
             return Response(
                 {'error': 'Debe haber al menos una respuesta'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
+        from challenges.models import Activity, GeneralKnowledgeQuestion
+
+        team = self._resolve_team(request, team_id)
+        if team is None:
+            return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        room_code = team['room_code']
+
         try:
-            from .models import Team, SessionStage, TokenTransaction
-            from challenges.models import Activity, GeneralKnowledgeQuestion
-            
-            team = Team.objects.get(id=team_id)
+            activity_id = int(activity_id)
             activity = Activity.objects.get(id=activity_id)
-            session_stage = SessionStage.objects.get(id=session_stage_id)
-            
-            # Obtener o crear el progreso
-            progress, created = TeamActivityProgress.objects.get_or_create(
-                team=team,
-                activity=activity,
-                session_stage=session_stage,
-                defaults={
-                    'status': 'in_progress',
-                    'started_at': timezone.now()
-                }
-            )
-            
-            # Obtener datos existentes del progreso
-            existing_response_data = progress.response_data or {}
-            existing_general_knowledge = existing_response_data.get('general_knowledge', {})
-            existing_answers = existing_general_knowledge.get('answers', [])
-            
-            # Crear un diccionario de respuestas existentes por question_id para evitar duplicados
-            existing_answers_dict = {a.get('question_id'): a for a in existing_answers}
-            
-            # Calcular respuestas correctas y otorgar tokens (TODO en el backend)
-            new_tokens_awarded = 0
-            question_results = []
-            
-            for answer_data in answers:
-                question_id = answer_data.get('question_id')
-                selected_answer = answer_data.get('selected')  # Cambiado de 'selected_answer' a 'selected'
-                
-                # IMPORTANTE: También rechazar si selected_answer es -1 (valor por defecto cuando no hay respuesta)
-                if question_id is None or selected_answer is None or selected_answer == -1:
-                    logger.warning(f'[submit_general_knowledge] Respuesta inválida omitida: question_id={question_id}, selected={selected_answer}')
-                    continue
-                
-                try:
-                    # CONSULTA A BASE DE DATOS: Obtener la pregunta
-                    question = GeneralKnowledgeQuestion.objects.get(id=question_id)
-                    
-                    # CÁLCULO EN BACKEND: Verificar si la respuesta es correcta
-                    is_correct = question.correct_answer == selected_answer
-                    
-                    # Verificar si esta pregunta ya había sido respondida correctamente
-                    existing_answer = existing_answers_dict.get(question_id)
-                    was_already_correct = existing_answer and existing_answer.get('correct', False)
-                    
-                    # CONSULTA A BASE DE DATOS: Verificar si ya se otorgó token para esta pregunta
-                    if is_correct and not was_already_correct:
-                        existing_transaction = TokenTransaction.objects.filter(
-                            team=team,
-                            game_session=session_stage.game_session,
-                            session_stage=session_stage,
-                            source_type='activity',
-                            source_id=activity.id,
-                            reason__icontains=f'Pregunta {question_id}'
-                        ).exists()
-                        
-                        if not existing_transaction:
-                            # CREAR TRANSACCIÓN EN BASE DE DATOS: Otorgar 1 token por respuesta correcta
-                            TokenTransaction.objects.create(
-                                team=team,
-                                game_session=session_stage.game_session,
-                                session_stage=session_stage,
-                                amount=1,
-                                source_type='activity',
-                                source_id=activity.id,
-                                reason=f'Actividad "{activity.name}": Pregunta {question_id} de conocimiento general respondida correctamente',
-                                awarded_by=None  # Sistema automático
-                            )
-                            
-                            # ACTUALIZAR BASE DE DATOS: Tokens del equipo
-                            team.tokens_total += 1
-                            team.save()
-                            new_tokens_awarded += 1
-                    
-                    question_results.append({
-                        'question_id': question_id,
-                        'selected': selected_answer,
-                        'correct': bool(is_correct)  # Asegurar que sea un booleano explícito
-                    })
-                    
-                    # Log para debugging
-                    logger.debug(f'[submit_general_knowledge] Procesada pregunta {question_id}: selected={selected_answer}, correct={is_correct}')
-                    
-                except GeneralKnowledgeQuestion.DoesNotExist:
-                    continue
-            
-            # Actualizar response_data con todas las respuestas (nuevas y existentes)
-            # IMPORTANTE: Las respuestas nuevas siempre sobrescriben las existentes para asegurar que 'correct' esté actualizado
-            all_answers_dict = {}
-            # Primero agregar las respuestas existentes que NO están en las nuevas respuestas
-            new_question_ids = {a.get('question_id') for a in question_results}
-            for existing_answer in existing_answers:
-                existing_qid = existing_answer.get('question_id')
-                # Solo agregar si no está en las nuevas respuestas que se están procesando
-                if existing_qid not in new_question_ids:
-                    all_answers_dict[existing_qid] = existing_answer
-            # Luego agregar/sobrescribir con las nuevas respuestas (que tienen 'correct' actualizado)
-            for new_answer in question_results:
-                all_answers_dict[new_answer['question_id']] = new_answer
-            
-            all_answers = list(all_answers_dict.values())
-            # Contar correctas: solo las que tienen 'correct' = True
-            # IMPORTANTE: Verificar explícitamente que 'correct' sea True (no solo truthy)
-            total_correct = sum(1 for a in all_answers if a.get('correct') is True)
-            # IMPORTANTE: total_questions siempre debe ser 5 (total de preguntas esperadas), no el número de respuestas dadas
-            total_questions = 5
-            
-            # Log para debugging
-            logger.info(f'[submit_general_knowledge] Conteo de respuestas: total={total_questions}, correctas={total_correct}')
-            logger.info(f'[submit_general_knowledge] Respuestas procesadas: {len(question_results)} nuevas, {len(existing_answers)} existentes')
-            for a in all_answers:
-                correct_value = a.get('correct')
-                logger.debug(f'[submit_general_knowledge] Pregunta {a.get("question_id")}: correct={correct_value} (type: {type(correct_value)}), selected={a.get("selected")}')
-                # Verificar si alguna respuesta tiene correct=None o no está definido
-                if correct_value is None:
-                    logger.warning(f'[submit_general_knowledge] ⚠️ Pregunta {a.get("question_id")} tiene correct=None!')
-            
-            # Verificar si está completado (5 preguntas respondidas)
-            is_completed = len(all_answers) >= 5
-            
-            # ACTUALIZAR BASE DE DATOS: Progreso de la actividad
-            existing_response_data['general_knowledge'] = {
-                'answers': all_answers,
-                'correct_count': total_correct,
-                'total_questions': total_questions,
-                'completed': is_completed
-            }
-            
-            progress.response_data = existing_response_data
-            
-            if is_completed:
-                progress.status = 'completed'
-                progress.completed_at = timezone.now()
-                progress.progress_percentage = 100
-            
-            progress.save()
-            
-            # Recargar el equipo para obtener tokens actualizados
-            team.refresh_from_db()
-            
-            serializer = self.get_serializer(progress)
-            
-            # Log final para debugging
-            logger.info(f'[submit_general_knowledge] RESULTADO FINAL: total_questions={total_questions}, total_correct={total_correct}, new_tokens={new_tokens_awarded}, team_tokens={team.tokens_total}')
-            
-            return Response({
-                **serializer.data,
-                'correct_count': total_correct,
-                'total_questions': total_questions,
-                'tokens_earned': new_tokens_awarded,
-                'team_tokens_total': team.tokens_total
-            })
-            
-        except Team.DoesNotExist:
-            return Response(
-                {'error': 'Equipo no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Activity.DoesNotExist:
-            return Response(
-                {'error': 'Actividad no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except SessionStage.DoesNotExist:
-            return Response(
-                {'error': 'Etapa de sesión no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Exception as e:
-            import traceback
-            error_trace = traceback.format_exc()
-            logger.error(f'Error en submit_general_knowledge: {str(e)}')
-            logger.error(f'Traceback completo: {error_trace}')
-            return Response(
-                {'error': str(e), 'trace': error_trace},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+        except (Activity.DoesNotExist, ValueError, TypeError):
+            return Response({'error': 'Actividad no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            session_stage_id = int(session_stage_id)
+        except (ValueError, TypeError):
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        if get_session_stage(room_code, session_stage_id) is None:
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Obtener o crear el progreso
+        existing = get_progress(room_code, team_id, activity_id)
+        fields = self._existing_fields(existing)
+        if existing is None:
+            fields['status'] = 'in_progress'
+            fields['started_at'] = now_iso()
+
+        # Obtener datos existentes del progreso
+        existing_response_data = fields.get('response_data') or {}
+        existing_general_knowledge = existing_response_data.get('general_knowledge', {})
+        existing_answers = existing_general_knowledge.get('answers', [])
+
+        # Crear un diccionario de respuestas existentes por question_id para evitar duplicados
+        existing_answers_dict = {a.get('question_id'): a for a in existing_answers}
+
+        # Calcular respuestas correctas y otorgar tokens (TODO en el backend)
+        new_tokens_awarded = 0
+        question_results = []
+
+        for answer_data in answers:
+            question_id = answer_data.get('question_id')
+            selected_answer = answer_data.get('selected')  # Cambiado de 'selected_answer' a 'selected'
+
+            # IMPORTANTE: También rechazar si selected_answer es -1 (valor por defecto cuando no hay respuesta)
+            if question_id is None or selected_answer is None or selected_answer == -1:
+                logger.warning(f'[submit_general_knowledge] Respuesta inválida omitida: question_id={question_id}, selected={selected_answer}')
+                continue
+
+            try:
+                # CONSULTA A BASE DE DATOS: Obtener la pregunta
+                question = GeneralKnowledgeQuestion.objects.get(id=question_id)
+
+                # CÁLCULO EN BACKEND: Verificar si la respuesta es correcta
+                is_correct = question.correct_answer == selected_answer
+
+                # Verificar si esta pregunta ya había sido respondida correctamente
+                existing_answer = existing_answers_dict.get(question_id)
+                was_already_correct = existing_answer and existing_answer.get('correct', False)
+
+                # Otorgar 1 token por respuesta correcta nueva -- idempotente
+                # por (source_type, source_id) vía _award_tokens
+                if is_correct and not was_already_correct:
+                    awarded = self._award_tokens(
+                        room_code, team_id, session_stage_id, activity, amount=1,
+                        reason_tag=f'general_knowledge:{question_id}',
+                        reason=f'Actividad "{activity.name}": Pregunta {question_id} de conocimiento general respondida correctamente',
+                    )
+                    if awarded:
+                        new_tokens_awarded += 1
+
+                question_results.append({
+                    'question_id': question_id,
+                    'selected': selected_answer,
+                    'correct': bool(is_correct)  # Asegurar que sea un booleano explícito
+                })
+
+                # Log para debugging
+                logger.debug(f'[submit_general_knowledge] Procesada pregunta {question_id}: selected={selected_answer}, correct={is_correct}')
+
+            except GeneralKnowledgeQuestion.DoesNotExist:
+                continue
+
+        # Actualizar response_data con todas las respuestas (nuevas y existentes)
+        # IMPORTANTE: Las respuestas nuevas siempre sobrescriben las existentes para asegurar que 'correct' esté actualizado
+        all_answers_dict = {}
+        # Primero agregar las respuestas existentes que NO están en las nuevas respuestas
+        new_question_ids = {a.get('question_id') for a in question_results}
+        for existing_answer in existing_answers:
+            existing_qid = existing_answer.get('question_id')
+            # Solo agregar si no está en las nuevas respuestas que se están procesando
+            if existing_qid not in new_question_ids:
+                all_answers_dict[existing_qid] = existing_answer
+        # Luego agregar/sobrescribir con las nuevas respuestas (que tienen 'correct' actualizado)
+        for new_answer in question_results:
+            all_answers_dict[new_answer['question_id']] = new_answer
+
+        all_answers = list(all_answers_dict.values())
+        # Contar correctas: solo las que tienen 'correct' = True
+        # IMPORTANTE: Verificar explícitamente que 'correct' sea True (no solo truthy)
+        total_correct = sum(1 for a in all_answers if a.get('correct') is True)
+        # IMPORTANTE: total_questions siempre debe ser 5 (total de preguntas esperadas), no el número de respuestas dadas
+        total_questions = 5
+
+        # Log para debugging
+        logger.info(f'[submit_general_knowledge] Conteo de respuestas: total={total_questions}, correctas={total_correct}')
+        logger.info(f'[submit_general_knowledge] Respuestas procesadas: {len(question_results)} nuevas, {len(existing_answers)} existentes')
+        for a in all_answers:
+            correct_value = a.get('correct')
+            logger.debug(f'[submit_general_knowledge] Pregunta {a.get("question_id")}: correct={correct_value} (type: {type(correct_value)}), selected={a.get("selected")}')
+            # Verificar si alguna respuesta tiene correct=None o no está definido
+            if correct_value is None:
+                logger.warning(f'[submit_general_knowledge] ⚠️ Pregunta {a.get("question_id")} tiene correct=None!')
+
+        # Verificar si está completado (5 preguntas respondidas)
+        is_completed = len(all_answers) >= 5
+
+        # ACTUALIZAR PROGRESO
+        existing_response_data['general_knowledge'] = {
+            'answers': all_answers,
+            'correct_count': total_correct,
+            'total_questions': total_questions,
+            'completed': is_completed
+        }
+
+        fields['response_data'] = existing_response_data
+
+        if is_completed:
+            fields['status'] = 'completed'
+            fields['completed_at'] = now_iso()
+            fields['progress_percentage'] = 100
+
+        progress = upsert_progress(room_code, team_id, activity_id, **fields)
+
+        # Recargar el equipo para obtener tokens actualizados
+        team = get_team(room_code, team_id) or team
+
+        annotate_team_activity_progress_display_fields(progress, team=team)
+        serializer = TeamActivityProgressSerializer(progress)
+
+        # Log final para debugging
+        logger.info(f'[submit_general_knowledge] RESULTADO FINAL: total_questions={total_questions}, total_correct={total_correct}, new_tokens={new_tokens_awarded}, team_tokens={team["tokens_total"]}')
+
+        return Response({
+            **serializer.data,
+            'correct_count': total_correct,
+            'total_questions': total_questions,
+            'tokens_earned': new_tokens_awarded,
+            'team_tokens_total': team['tokens_total']
+        })
 
     @action(detail=False, methods=['post'], permission_classes=[], authentication_classes=[])
     def select_topic(self, request):
