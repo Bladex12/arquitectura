@@ -4427,93 +4427,69 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         """
         Seleccionar un tema para una actividad
         No requiere autenticación (para tablets)
+
+        Task 16: ported off Team.objects/TeamActivityProgress.objects/
+        self.get_serializer onto the get_progress -> mutate fields ->
+        upsert_progress shape (see class docstring). Topic itself stays
+        on the Django ORM (challenges app, unaffected by this cutover) --
+        only the TeamActivityProgress write (selected_topic_id) moves.
         """
         team_id = request.data.get('team')
         activity_id = request.data.get('activity')
         session_stage_id = request.data.get('session_stage')
         topic_id = request.data.get('topic')
-        
+
         if not all([team_id, activity_id, session_stage_id, topic_id]):
             return Response(
                 {'error': 'Se requieren team, activity, session_stage y topic'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
+        from challenges.models import Activity, Topic
+
+        team = self._resolve_team(request, team_id)
+        if team is None:
+            return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        room_code = team['room_code']
+
         try:
-            from .models import Team, SessionStage
-            from challenges.models import Activity, Topic
-            
-            team = Team.objects.get(id=team_id)
+            activity_id = int(activity_id)
             activity = Activity.objects.get(id=activity_id)
-            session_stage = SessionStage.objects.get(id=session_stage_id)
+        except (Activity.DoesNotExist, ValueError, TypeError):
+            return Response({'error': 'Actividad no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            session_stage_id = int(session_stage_id)
+        except (ValueError, TypeError):
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        if get_session_stage(room_code, session_stage_id) is None:
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
             topic = Topic.objects.get(id=topic_id)
-            
-            # Obtener o crear progreso
-            progress, created = TeamActivityProgress.objects.get_or_create(
-                team=team,
-                activity=activity,
-                session_stage=session_stage,
-                defaults={
-                    'status': 'in_progress',
-                    'started_at': timezone.now()
-                }
-            )
-            
-            # Actualizar tema seleccionado
-            progress.selected_topic = topic
-            # Si ya hay desafío seleccionado, marcar como completado
-            if progress.selected_challenge:
-                progress.status = 'completed'
-                progress.completed_at = timezone.now()
-                progress.progress_percentage = 100
-            else:
-                progress.status = 'in_progress'
-            if not progress.started_at:
-                progress.started_at = timezone.now()
-            progress.save()
-            
-            # Recargar desde la base de datos para asegurar que se incluyan las relaciones
-            # Importar logger para debugging
-            import logging
-            logger = logging.getLogger(__name__)
-            
-            progress.refresh_from_db()
-            progress = TeamActivityProgress.objects.select_related(
-                'selected_topic', 'selected_challenge'
-            ).get(id=progress.id)
-            
-            logger.info(f"✅ Tema seleccionado guardado: Equipo {team.id}, Tema {topic.id}, Progress ID {progress.id}")
-            
-            serializer = self.get_serializer(progress)
-            response_data = serializer.data
-            logger.info(f"📤 Respuesta serializer - selected_topic: {response_data.get('selected_topic')}")
-            return Response(response_data)
-            
-        except Team.DoesNotExist:
-            return Response(
-                {'error': 'Equipo no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Activity.DoesNotExist:
-            return Response(
-                {'error': 'Actividad no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except SessionStage.DoesNotExist:
-            return Response(
-                {'error': 'Etapa de sesión no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Topic.DoesNotExist:
-            return Response(
-                {'error': 'Tema no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+        except (Topic.DoesNotExist, ValueError, TypeError):
+            return Response({'error': 'Tema no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+        existing = get_progress(room_code, team_id, activity_id)
+        fields = self._existing_fields(existing)
+        if existing is None:
+            fields['started_at'] = now_iso()
+
+        fields['selected_topic_id'] = topic.id
+        # Si ya hay desafío seleccionado, marcar como completado
+        if fields.get('selected_challenge_id'):
+            fields['status'] = 'completed'
+            fields['completed_at'] = now_iso()
+            fields['progress_percentage'] = 100
+        else:
+            fields['status'] = 'in_progress'
+        if not fields.get('started_at'):
+            fields['started_at'] = now_iso()
+
+        progress = upsert_progress(room_code, team_id, activity_id, **fields)
+        annotate_team_activity_progress_display_fields(progress, team=team)
+        serializer = TeamActivityProgressSerializer(progress)
+        return Response(serializer.data)
 
     @action(detail=False, methods=['post'], permission_classes=[], authentication_classes=[])
     def select_challenge(self, request):
@@ -4521,166 +4497,152 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         Seleccionar un desafío para una actividad
         No requiere autenticación (para tablets)
         Puede recibir una imagen de la persona (persona_image) en FormData
+
+        Task 16: ported off Team.objects/TeamActivityProgress.objects/
+        self.get_serializer onto the get_progress -> mutate fields ->
+        upsert_progress shape (see class docstring). Challenge/Topic (and
+        the persona_image Pillow processing, which writes onto
+        challenges.Challenge, not TeamActivityProgress) stay on the
+        Django ORM/file storage, unchanged -- only the TeamActivityProgress
+        write (selected_challenge_id/selected_topic_id) moves.
         """
         team_id = request.data.get('team')
         activity_id = request.data.get('activity')
         session_stage_id = request.data.get('session_stage')
         challenge_id = request.data.get('challenge')
         persona_image_file = request.FILES.get('persona_image')
-        
+
         if not all([team_id, activity_id, session_stage_id, challenge_id]):
             return Response(
                 {'error': 'Se requieren team, activity, session_stage y challenge'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
+        from challenges.models import Activity, Challenge, Topic
+
+        team = self._resolve_team(request, team_id)
+        if team is None:
+            return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        room_code = team['room_code']
+
         try:
-            from .models import Team, SessionStage
-            from challenges.models import Activity, Challenge
-            
-            team = Team.objects.get(id=team_id)
+            activity_id = int(activity_id)
             activity = Activity.objects.get(id=activity_id)
-            session_stage = SessionStage.objects.get(id=session_stage_id)
+        except (Activity.DoesNotExist, ValueError, TypeError):
+            return Response({'error': 'Actividad no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            session_stage_id = int(session_stage_id)
+        except (ValueError, TypeError):
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        if get_session_stage(room_code, session_stage_id) is None:
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
             challenge = Challenge.objects.get(id=challenge_id)
-            
-            # Si se envía una imagen de la persona, guardarla en el desafío
-            if persona_image_file:
-                # Validar tamaño de archivo (5MB máximo)
-                if persona_image_file.size > settings.IMAGE_UPLOAD_MAX_SIZE:
-                    return Response(
-                        {'error': f'El archivo es demasiado grande. Máximo: {settings.IMAGE_UPLOAD_MAX_SIZE / 1024 / 1024}MB'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                
-                # Validar tipo de archivo
-                allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
-                if persona_image_file.content_type not in allowed_types:
-                    return Response(
-                        {'error': 'Tipo de archivo no permitido. Use JPEG, PNG o WEBP'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                
-                try:
-                    # Procesar y guardar imagen
-                    img = Image.open(persona_image_file)
-                    
-                    # Convertir a RGB si es necesario (para JPEG)
-                    if img.mode in ('RGBA', 'LA', 'P'):
-                        background = Image.new('RGB', img.size, (255, 255, 255))
-                        if img.mode == 'P':
-                            img = img.convert('RGBA')
-                        background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
-                        img = background
-                    
-                    # Redimensionar si es muy grande (máximo 800x800 para imágenes de perfil)
-                    max_size = (800, 800)
-                    if img.size[0] > max_size[0] or img.size[1] > max_size[1]:
-                        img.thumbnail(max_size, Image.Resampling.LANCZOS)
-                    
-                    # Guardar en buffer
-                    from io import BytesIO
-                    buffer = BytesIO()
-                    img_format = 'JPEG'
-                    img.save(buffer, format=img_format, quality=85, optimize=True)
-                    buffer.seek(0)
-                    
-                    # Si ya había una imagen, eliminar la anterior
-                    if challenge.persona_image:
-                        old_path = challenge.persona_image.path
-                        if os.path.exists(old_path):
-                            os.remove(old_path)
-                    
-                    # Guardar la nueva imagen
-                    import uuid
-                    file_extension = 'jpg'
-                    filename = f'personas/{challenge.id}_{uuid.uuid4().hex[:8]}.{file_extension}'
-                    challenge.persona_image.save(filename, ContentFile(buffer.read()), save=False)
-                    challenge.save()
-                    
-                except Exception as img_error:
-                    return Response(
-                        {'error': f'Error al procesar imagen: {str(img_error)}'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            
-            # Obtener o crear progreso
-            progress, created = TeamActivityProgress.objects.get_or_create(
-                team=team,
-                activity=activity,
-                session_stage=session_stage,
-                defaults={
-                    'status': 'in_progress',
-                    'started_at': timezone.now()
-                }
-            )
-            
-            # Actualizar desafío seleccionado
-            progress.selected_challenge = challenge
-            
-            # Automáticamente obtener y guardar el tema del desafío
-            # El desafío siempre tiene un tema asociado
-            if challenge.topic and not progress.selected_topic:
-                progress.selected_topic = challenge.topic
-            
-            # Si el frontend también envía el tema (por compatibilidad), usarlo si no hay uno del desafío
-            topic_id = request.data.get('topic')
-            if topic_id and not progress.selected_topic:
-                from challenges.models import Topic
-                try:
-                    topic = Topic.objects.get(id=topic_id)
-                    progress.selected_topic = topic
-                except Topic.DoesNotExist:
-                    pass  # Si el tema no existe, continuar sin él
-            
-            # Si hay tema seleccionado (del desafío o enviado), marcar como completado
-            if progress.selected_topic:
-                progress.status = 'completed'
-                progress.completed_at = timezone.now()
-                progress.progress_percentage = 100
-            else:
-                progress.status = 'in_progress'
-            if not progress.started_at:
-                progress.started_at = timezone.now()
-            progress.save()
-            
-            # Recargar desde la base de datos para asegurar que se incluyan las relaciones
-            progress.refresh_from_db()
-            progress = TeamActivityProgress.objects.select_related(
-                'selected_topic', 'selected_challenge'
-            ).get(id=progress.id)
-            
-            # Recargar el desafío para obtener la imagen actualizada
-            challenge.refresh_from_db()
-            
-            serializer = self.get_serializer(progress)
-            return Response(serializer.data)
-            
-        except Team.DoesNotExist:
-            return Response(
-                {'error': 'Equipo no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Activity.DoesNotExist:
-            return Response(
-                {'error': 'Actividad no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except SessionStage.DoesNotExist:
-            return Response(
-                {'error': 'Etapa de sesión no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Challenge.DoesNotExist:
-            return Response(
-                {'error': 'Desafío no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Exception as e:
-            logger.error(f'Error en select_challenge: {str(e)}')
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+        except (Challenge.DoesNotExist, ValueError, TypeError):
+            return Response({'error': 'Desafío no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Si se envía una imagen de la persona, guardarla en el desafío
+        if persona_image_file:
+            # Validar tamaño de archivo (5MB máximo)
+            if persona_image_file.size > settings.IMAGE_UPLOAD_MAX_SIZE:
+                return Response(
+                    {'error': f'El archivo es demasiado grande. Máximo: {settings.IMAGE_UPLOAD_MAX_SIZE / 1024 / 1024}MB'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Validar tipo de archivo
+            allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+            if persona_image_file.content_type not in allowed_types:
+                return Response(
+                    {'error': 'Tipo de archivo no permitido. Use JPEG, PNG o WEBP'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            try:
+                # Procesar y guardar imagen
+                img = Image.open(persona_image_file)
+
+                # Convertir a RGB si es necesario (para JPEG)
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    if img.mode == 'P':
+                        img = img.convert('RGBA')
+                    background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                    img = background
+
+                # Redimensionar si es muy grande (máximo 800x800 para imágenes de perfil)
+                max_size = (800, 800)
+                if img.size[0] > max_size[0] or img.size[1] > max_size[1]:
+                    img.thumbnail(max_size, Image.Resampling.LANCZOS)
+
+                # Guardar en buffer
+                from io import BytesIO
+                buffer = BytesIO()
+                img_format = 'JPEG'
+                img.save(buffer, format=img_format, quality=85, optimize=True)
+                buffer.seek(0)
+
+                # Si ya había una imagen, eliminar la anterior
+                if challenge.persona_image:
+                    old_path = challenge.persona_image.path
+                    if os.path.exists(old_path):
+                        os.remove(old_path)
+
+                # Guardar la nueva imagen
+                import uuid
+                file_extension = 'jpg'
+                filename = f'personas/{challenge.id}_{uuid.uuid4().hex[:8]}.{file_extension}'
+                challenge.persona_image.save(filename, ContentFile(buffer.read()), save=False)
+                challenge.save()
+
+            except Exception as img_error:
+                return Response(
+                    {'error': f'Error al procesar imagen: {str(img_error)}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        existing = get_progress(room_code, team_id, activity_id)
+        fields = self._existing_fields(existing)
+        if existing is None:
+            fields['started_at'] = now_iso()
+
+        # Actualizar desafío seleccionado
+        fields['selected_challenge_id'] = challenge.id
+
+        # Automáticamente obtener y guardar el tema del desafío
+        # El desafío siempre tiene un tema asociado
+        if challenge.topic_id and not fields.get('selected_topic_id'):
+            fields['selected_topic_id'] = challenge.topic_id
+
+        # Si el frontend también envía el tema (por compatibilidad), usarlo si no hay uno del desafío
+        topic_id = request.data.get('topic')
+        if topic_id and not fields.get('selected_topic_id'):
+            try:
+                topic = Topic.objects.get(id=topic_id)
+                fields['selected_topic_id'] = topic.id
+            except (Topic.DoesNotExist, ValueError, TypeError):
+                pass  # Si el tema no existe, continuar sin él
+
+        # Si hay tema seleccionado (del desafío o enviado), marcar como completado
+        if fields.get('selected_topic_id'):
+            fields['status'] = 'completed'
+            fields['completed_at'] = now_iso()
+            fields['progress_percentage'] = 100
+        else:
+            fields['status'] = 'in_progress'
+        if not fields.get('started_at'):
+            fields['started_at'] = now_iso()
+
+        progress = upsert_progress(room_code, team_id, activity_id, **fields)
+
+        # Recargar el desafío para obtener la imagen actualizada
+        challenge.refresh_from_db()
+
+        annotate_team_activity_progress_display_fields(progress, team=team)
+        serializer = TeamActivityProgressSerializer(progress)
+        return Response(serializer.data)
 
     @action(detail=False, methods=['post'], permission_classes=[], authentication_classes=[])
     def upload_prototype(self, request):
@@ -4697,25 +4659,32 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         - image: Archivo de imagen (FormData) — puede omitirse si el equipo saltó la foto
         - product_name: Nombre del producto (se guarda en response_data)
         - product_tagline: Frase descriptiva del producto (se guarda en response_data)
+
+        Task 16: ported off Team.objects/TeamActivityProgress.objects/
+        self.get_serializer/TokenTransaction.objects onto the get_progress
+        -> mutate fields -> upsert_progress + _award_tokens shape (see
+        class docstring). Image processing/storage (Pillow, default_storage,
+        S3) is unchanged -- only the TeamActivityProgress write
+        (prototype_image_url, response_data) and the token award move.
         """
         team_id = request.data.get('team')
         activity_id = request.data.get('activity')
         session_stage_id = request.data.get('session_stage')
         image_file = request.FILES.get('image')
-        
+
         if not all([team_id, activity_id, session_stage_id]):
             return Response(
                 {'error': 'Se requieren team, activity y session_stage'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Validar tamaño de archivo (5MB máximo)
         if image_file and image_file.size > settings.IMAGE_UPLOAD_MAX_SIZE:
             return Response(
                 {'error': f'El archivo es demasiado grande. Máximo: {settings.IMAGE_UPLOAD_MAX_SIZE / 1024 / 1024}MB'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Validar tipo de archivo
         allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
         if image_file and image_file.content_type not in allowed_types:
@@ -4723,159 +4692,126 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
                 {'error': 'Tipo de archivo no permitido. Use JPEG, PNG o WEBP'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
+        from challenges.models import Activity
+
+        team = self._resolve_team(request, team_id)
+        if team is None:
+            return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        room_code = team['room_code']
+
         try:
-            from .models import Team, SessionStage
-            from challenges.models import Activity
-            
-            team = Team.objects.get(id=team_id)
+            activity_id = int(activity_id)
             activity = Activity.objects.get(id=activity_id)
-            session_stage = SessionStage.objects.get(id=session_stage_id)
-            
-            # Obtener o crear progreso
-            progress, created = TeamActivityProgress.objects.get_or_create(
-                team=team,
-                activity=activity,
-                session_stage=session_stage,
-                defaults={
-                    'status': 'submitted',
-                    'progress_percentage': 100,
-                    'started_at': timezone.now()
-                }
-            )
-            
-            # Procesar y guardar imagen (opcional si se saltó la foto)
-            image_url = None
-            if image_file:
-                try:
-                    # Abrir imagen con PIL para validar y optimizar
-                    img = Image.open(image_file)
+        except (Activity.DoesNotExist, ValueError, TypeError):
+            return Response({'error': 'Actividad no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
-                    # Convertir a RGB si es necesario (para JPEG)
-                    if img.mode in ('RGBA', 'LA', 'P'):
-                        background = Image.new('RGB', img.size, (255, 255, 255))
-                        if img.mode == 'P':
-                            img = img.convert('RGBA')
-                        background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
-                        img = background
+        try:
+            session_stage_id = int(session_stage_id)
+        except (ValueError, TypeError):
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        if get_session_stage(room_code, session_stage_id) is None:
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
-                    # Redimensionar si es muy grande (máximo 1920x1920)
-                    max_size = (1920, 1920)
-                    if img.size[0] > max_size[0] or img.size[1] > max_size[1]:
-                        img.thumbnail(max_size, Image.Resampling.LANCZOS)
+        existing = get_progress(room_code, team_id, activity_id)
+        created = existing is None
+        fields = self._existing_fields(existing)
+        if created:
+            fields['status'] = 'submitted'
+            fields['progress_percentage'] = 100
+            fields['started_at'] = now_iso()
 
-                    # Guardar en buffer
-                    from io import BytesIO
-                    buffer = BytesIO()
-                    img.save(buffer, format='JPEG', quality=85, optimize=True)
-                    buffer.seek(0)
+        # Procesar y guardar imagen (opcional si se saltó la foto)
+        image_url = None
+        if image_file:
+            try:
+                # Abrir imagen con PIL para validar y optimizar
+                img = Image.open(image_file)
 
-                    # Generar nombre único para el archivo
-                    import uuid
-                    filename = f'prototypes/{team.id}_{session_stage.id}_{uuid.uuid4().hex[:8]}.jpg'
+                # Convertir a RGB si es necesario (para JPEG)
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    if img.mode == 'P':
+                        img = img.convert('RGBA')
+                    background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                    img = background
 
-                    # Guardar en el sistema de archivos
-                    saved_path = default_storage.save(filename, ContentFile(buffer.read()))
-                    image_url = f"{settings.MEDIA_URL}{saved_path}"
+                # Redimensionar si es muy grande (máximo 1920x1920)
+                max_size = (1920, 1920)
+                if img.size[0] > max_size[0] or img.size[1] > max_size[1]:
+                    img.thumbnail(max_size, Image.Resampling.LANCZOS)
 
-                except Exception as img_error:
-                    return Response(
-                        {'error': f'Error al procesar imagen: {str(img_error)}'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            
-            # Si ya había una imagen y se subió una nueva, eliminar la anterior
-            if image_file and progress.prototype_image_url and not created:
-                old_path = progress.prototype_image_url.replace(settings.MEDIA_URL, '')
-                if default_storage.exists(old_path):
-                    default_storage.delete(old_path)
-            
-            # Actualizar progreso
-            if image_url:
-                progress.prototype_image_url = image_url
-            progress.status = 'submitted'
-            progress.progress_percentage = 100
-            if not progress.started_at:
-                progress.started_at = timezone.now()
-            progress.completed_at = timezone.now()
+                # Guardar en buffer
+                from io import BytesIO
+                buffer = BytesIO()
+                img.save(buffer, format='JPEG', quality=85, optimize=True)
+                buffer.seek(0)
 
-            # Guardar nombre y tagline del producto en response_data
-            product_name = request.data.get('product_name')
-            product_tagline = request.data.get('product_tagline')
-            if product_name is not None or product_tagline is not None:
-                existing = progress.response_data or {}
-                if product_name is not None:
-                    existing['product_name'] = product_name.strip()
-                if product_tagline is not None:
-                    existing['product_tagline'] = product_tagline.strip()
-                progress.response_data = existing
+                # Generar nombre único para el archivo
+                import uuid
+                filename = f'prototypes/{team_id}_{session_stage_id}_{uuid.uuid4().hex[:8]}.jpg'
 
-            progress.save()
-            
-            # Otorgar 15 tokens por subir el prototipo
-            from .models import TokenTransaction
-            tokens_to_award = 15
-            
-            # Verificar si ya se otorgaron tokens por este prototipo
-            existing_transaction = TokenTransaction.objects.filter(
-                team=team,
-                game_session=team.game_session,
-                session_stage=session_stage,
-                source_type='activity',
-                source_id=progress.id
-            ).first()
-            
-            if not existing_transaction:
-                # Crear transacción de tokens
-                TokenTransaction.objects.create(
-                    team=team,
-                    game_session=team.game_session,
-                    session_stage=session_stage,
-                    amount=tokens_to_award,
-                    source_type='activity',
-                    source_id=progress.id,
-                    reason='Prototipo subido (15 tokens)',
-                    awarded_by=None
+                # Guardar en el sistema de archivos
+                saved_path = default_storage.save(filename, ContentFile(buffer.read()))
+                image_url = f"{settings.MEDIA_URL}{saved_path}"
+
+            except Exception as img_error:
+                return Response(
+                    {'error': f'Error al procesar imagen: {str(img_error)}'},
+                    status=status.HTTP_400_BAD_REQUEST
                 )
-                
-                # Actualizar tokens del equipo
-                team.tokens_total += tokens_to_award
-                team.save()
-            
-            # Reload para incluir relaciones
-            progress.refresh_from_db()
-            progress = TeamActivityProgress.objects.select_related(
-                'team', 'session_stage__stage', 'activity', 'selected_topic', 'selected_challenge'
-            ).get(id=progress.id)
-            
-            serializer = self.get_serializer(progress)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-            
-        except Team.DoesNotExist:
-            return Response(
-                {'error': 'Equipo no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Activity.DoesNotExist:
-            return Response(
-                {'error': 'Actividad no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except SessionStage.DoesNotExist:
-            return Response(
-                {'error': 'Etapa de sesión no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+
+        # Si ya había una imagen y se subió una nueva, eliminar la anterior
+        if image_file and fields.get('prototype_image_url') and not created:
+            old_path = fields['prototype_image_url'].replace(settings.MEDIA_URL, '')
+            if default_storage.exists(old_path):
+                default_storage.delete(old_path)
+
+        # Actualizar progreso
+        if image_url:
+            fields['prototype_image_url'] = image_url
+        fields['status'] = 'submitted'
+        fields['progress_percentage'] = 100
+        if not fields.get('started_at'):
+            fields['started_at'] = now_iso()
+        fields['completed_at'] = now_iso()
+
+        # Guardar nombre y tagline del producto en response_data
+        product_name = request.data.get('product_name')
+        product_tagline = request.data.get('product_tagline')
+        if product_name is not None or product_tagline is not None:
+            response_data = fields.get('response_data') or {}
+            if product_name is not None:
+                response_data['product_name'] = product_name.strip()
+            if product_tagline is not None:
+                response_data['product_tagline'] = product_tagline.strip()
+            fields['response_data'] = response_data
+
+        # Otorgar 15 tokens por subir el prototipo (one-shot award, idempotente
+        # por (source_type, source_id) vía _award_tokens / convención de la clase)
+        self._award_tokens(
+            room_code, team_id, session_stage_id, activity, amount=15, reason_tag='prototype_uploaded',
+            reason=f'Actividad "{activity.name}": Prototipo subido (15 tokens)',
+        )
+
+        progress = upsert_progress(room_code, team_id, activity_id, **fields)
+        annotate_team_activity_progress_display_fields(progress, team=team)
+        serializer = TeamActivityProgressSerializer(progress)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'], permission_classes=[], authentication_classes=[])
     def save_pitch(self, request):
         """
         Guardar el formulario de pitch (Etapa 4)
+
+        Task 16: ported off Team.objects/TeamActivityProgress.objects/
+        self.get_serializer onto the get_progress -> mutate fields ->
+        upsert_progress shape (see class docstring). No tokens awarded by
+        this action (unchanged from the ORM version -- there's no
+        TokenTransaction call in the code being ported). Note this
+        action's request body uses team_id/activity_id/session_stage_id
+        (not team/activity/session_stage like its siblings) -- preserved
+        as-is since that's the existing frontend contract.
         """
         team_id = request.data.get('team_id')
         activity_id = request.data.get('activity_id')
@@ -4885,101 +4821,71 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         pitch_value = request.data.get('pitch_value', '')
         pitch_impact = request.data.get('pitch_impact', '')
         pitch_closing = request.data.get('pitch_closing', '')
-        
+
         if not all([team_id, activity_id, session_stage_id]):
             return Response(
                 {'error': 'Faltan datos necesarios (team_id, activity_id, session_stage_id)'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
+        from challenges.models import Activity
+
+        team = self._resolve_team(request, team_id)
+        if team is None:
+            return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        room_code = team['room_code']
+
         try:
-            from .models import Team, SessionStage
-            from challenges.models import Activity
-            
-            team = Team.objects.get(id=team_id)
+            activity_id = int(activity_id)
             activity = Activity.objects.get(id=activity_id)
-            session_stage = SessionStage.objects.get(id=session_stage_id)
-            
-            # Obtener o crear progreso
-            progress, created = TeamActivityProgress.objects.get_or_create(
-                team=team,
-                activity=activity,
-                session_stage=session_stage,
-                defaults={
-                    'status': 'in_progress',
-                    'started_at': timezone.now(),
-                    'progress_percentage': 0
-                }
-            )
-            
-            # Actualizar campos del pitch
-            progress.pitch_intro_problem = pitch_intro_problem
-            progress.pitch_solution = pitch_solution
-            progress.pitch_value = pitch_value
-            progress.pitch_impact = pitch_impact
-            progress.pitch_closing = pitch_closing
-            
-            # Si todos los campos están completos, marcar como completado
-            if pitch_intro_problem and pitch_solution and pitch_value and pitch_impact and pitch_closing:
-                progress.status = 'completed'
-                progress.progress_percentage = 100
-                if not progress.completed_at:
-                    progress.completed_at = timezone.now()
-            else:
-                # Calcular porcentaje de completitud (5 campos)
-                fields_completed = sum([
-                    bool(pitch_intro_problem), 
-                    bool(pitch_solution), 
-                    bool(pitch_value),
-                    bool(pitch_impact),
-                    bool(pitch_closing)
-                ])
-                progress.progress_percentage = int((fields_completed / 5) * 100)
-                progress.status = 'in_progress'
-            
-            if not progress.started_at:
-                progress.started_at = timezone.now()
-            
-            progress.save()
-            
-            # Reload para incluir relaciones
-            progress.refresh_from_db()
-            progress = TeamActivityProgress.objects.select_related(
-                'team', 'session_stage__stage', 'activity', 'selected_topic', 'selected_challenge'
-            ).get(id=progress.id)
-            
-            serializer = self.get_serializer(progress)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-            
-        except Team.DoesNotExist:
-            return Response(
-                {'error': 'Equipo no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Activity.DoesNotExist:
-            return Response(
-                {'error': 'Actividad no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except SessionStage.DoesNotExist:
-            return Response(
-                {'error': 'Etapa de sesión no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Exception as e:
-            import traceback
-            import logging
-            error_trace = traceback.format_exc()
-            logger = logging.getLogger(__name__)
-            logger.error(f'Error en save_pitch: {str(e)}')
-            logger.error(f'Traceback: {error_trace}')
-            error_message = str(e)
-            if 'pitch_value' in error_message or 'pitch_impact' in error_message:
-                error_message += ' (Nota: Ejecuta la migración: python manage.py migrate game_sessions)'
-            return Response(
-                {'error': error_message, 'details': error_trace if settings.DEBUG else None},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+        except (Activity.DoesNotExist, ValueError, TypeError):
+            return Response({'error': 'Actividad no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            session_stage_id = int(session_stage_id)
+        except (ValueError, TypeError):
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        if get_session_stage(room_code, session_stage_id) is None:
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        existing = get_progress(room_code, team_id, activity_id)
+        fields = self._existing_fields(existing)
+        if existing is None:
+            fields['progress_percentage'] = 0
+            fields['started_at'] = now_iso()
+
+        # Actualizar campos del pitch
+        fields['pitch_intro_problem'] = pitch_intro_problem
+        fields['pitch_solution'] = pitch_solution
+        fields['pitch_value'] = pitch_value
+        fields['pitch_impact'] = pitch_impact
+        fields['pitch_closing'] = pitch_closing
+
+        # Si todos los campos están completos, marcar como completado
+        if pitch_intro_problem and pitch_solution and pitch_value and pitch_impact and pitch_closing:
+            fields['status'] = 'completed'
+            fields['progress_percentage'] = 100
+            if not fields.get('completed_at'):
+                fields['completed_at'] = now_iso()
+        else:
+            # Calcular porcentaje de completitud (5 campos)
+            fields_completed = sum([
+                bool(pitch_intro_problem),
+                bool(pitch_solution),
+                bool(pitch_value),
+                bool(pitch_impact),
+                bool(pitch_closing)
+            ])
+            fields['progress_percentage'] = int((fields_completed / 5) * 100)
+            fields['status'] = 'in_progress'
+
+        if not fields.get('started_at'):
+            fields['started_at'] = now_iso()
+
+        progress = upsert_progress(room_code, team_id, activity_id, **fields)
+        annotate_team_activity_progress_display_fields(progress, team=team)
+        serializer = TeamActivityProgressSerializer(progress)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class TabletViewSet(viewsets.ModelViewSet):
