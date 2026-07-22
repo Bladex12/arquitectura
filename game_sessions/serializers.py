@@ -605,8 +605,29 @@ class TeamBubbleMapSerializer(serializers.Serializer):
     Expects display fields already attached via
     annotate_team_bubble_map_display_fields(). No standalone id attribute
     exists on this item (addressed by the composite (team_id, stage_id)
-    key) -- `id` is sourced from the item's own SK."""
-    id = serializers.CharField(source='SK', read_only=True)
+    key).
+
+    `id` is NOT sourced from the item's own SK ("TEAM#<team_id>#BUBBLEMAP#
+    <stage_id>") -- Task 20 found the same dormant issue Task 15/18/19
+    each found and fixed on their own serializers: raw SK is unusable as
+    a URL path segment ('#' is the URL fragment delimiter, silently
+    truncating any client-built "/team-bubble-maps/<id>/" request before
+    it reaches Django) -- and the live frontend does build exactly that
+    URL (BubbleMapV2.tsx's teamBubbleMapsAPI.update(mapIdRef.current, ...)
+    PATCHes /team-bubble-maps/<id>/ using the id this serializer returns
+    from list()/create()). Fixed the same way: `id` is a colon-joined
+    "<team_id>:<session_stage_id>" -- team_id is a UUID4 (no colons),
+    session_stage_id is a plain int. TeamBubbleMapViewSet._parse_pk is the
+    corresponding parser. This also happens to equal the team-scoped
+    TokenTransaction source_id this viewset's token award writes (see
+    TeamBubbleMapViewSet docstring) -- convenient, not load-bearing:
+    profesor/etapa2/BubbleMap.tsx's "is this map finalized" check compares
+    a token transaction's source_id directly against bubbleMap.id."""
+    id = serializers.SerializerMethodField()
+
+    def get_id(self, obj):
+        return f"{obj['team_id']}:{obj['stage_id']}"
+
     team = serializers.CharField(source='team_id')
     team_name = serializers.CharField(read_only=True, default=None, allow_null=True)
     session_stage = serializers.IntegerField(source='stage_id')
@@ -707,9 +728,13 @@ class ReflectionEvaluationSerializer(serializers.Serializer):
     faculty/career are (and always were) plain text fields on the item,
     not FKs, and game_session_room_code needs no lookup since room_code is
     already a plain field on the item. No standalone id attribute exists
-    on this item -- `id` is sourced from the item's own SK (which embeds a
-    real uuid4 for this entity, per game_sessions.dynamodb.keys.reflection_sk)."""
-    id = serializers.CharField(source='SK', read_only=True)
+    on the ORM model this replaces, but the DynamoDB item stores one --
+    `id` is sourced from the item's own `reflection_id` attribute, NOT the
+    raw SK ("REFLECTION#<uuid>") -- Task 20 found the same dormant '#'-in-
+    URL-path-segment issue Task 15/18/19 each found and fixed on their own
+    serializers (see game_sessions.dynamodb.evaluations.create_reflection
+    for where reflection_id is stored)."""
+    id = serializers.CharField(source='reflection_id', read_only=True)
     game_session = serializers.CharField(source='room_code')
     game_session_room_code = serializers.CharField(source='room_code', read_only=True)
     student_name = serializers.CharField()

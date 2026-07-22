@@ -96,11 +96,20 @@ def update_peer_evaluation(room_code, evaluator_team_id, evaluated_team_id, crit
 def create_reflection(room_code, student_name, student_email, value_areas=None, faculty=None,
                        career=None, satisfaction=None, entrepreneurship_interest=None, comments=None):
     """Creates a ReflectionEvaluation item. Also intended to be streamed
-    to Firehose/S3 for analytics (separate task) - rarely queried live."""
+    to Firehose/S3 for analytics (separate task) - rarely queried live.
+
+    Stores a plain `reflection_id` attribute alongside the SK (Task 20) -
+    ReflectionEvaluationSerializer's `id` field is sourced from this, not
+    the raw SK ("REFLECTION#<uuid>"), since '#' is the URL fragment
+    delimiter and would silently truncate any client-built detail-route
+    URL before it reaches Django. Same bug class Task 15/18/19 each found
+    and fixed on their own serializers."""
+    reflection_id = str(uuid.uuid4())
     item = {
         'PK': keys.session_pk(room_code),
-        'SK': keys.reflection_sk(str(uuid.uuid4())),
+        'SK': keys.reflection_sk(reflection_id),
         'type': 'ReflectionEvaluation',
+        'reflection_id': reflection_id,
         'room_code': room_code,
         'student_name': student_name,
         'student_email': student_email,
@@ -115,6 +124,68 @@ def create_reflection(room_code, student_name, student_email, value_areas=None, 
     table = get_table()
     table.put_item(Item=item)
     return item
+
+
+def list_reflections(room_code):
+    """Returns every ReflectionEvaluation item in a room."""
+    table = get_table()
+    response = table.query(
+        KeyConditionExpression=Key('PK').eq(keys.session_pk(room_code)) & Key('SK').begins_with('REFLECTION#'),
+        ConsistentRead=True,
+    )
+    return response['Items']
+
+
+def get_reflection(room_code, reflection_id):
+    """Returns the ReflectionEvaluation item dict for one reflection_id in
+    a room, or None if it doesn't exist."""
+    table = get_table()
+    response = table.get_item(
+        Key={'PK': keys.session_pk(room_code), 'SK': keys.reflection_sk(reflection_id)},
+        ConsistentRead=True,
+    )
+    return response.get('Item')
+
+
+def update_reflection(room_code, reflection_id, student_name=None, faculty=None, career=None,
+                       value_areas=None, satisfaction=None, entrepreneurship_interest=None, comments=None):
+    """Overwrites the mutable fields of an already-submitted
+    ReflectionEvaluation (a student re-submitting with the same
+    student_email). student_email/reflection_id/created_at are
+    deliberately never touched here -- mirrors the ORM version's
+    `serializer.save()` on the existing row, which only ever updated the
+    fields present in the (partial) request payload and never re-keyed
+    the row. Callers are expected to pass every field's current value as
+    a fallback for anything the caller's request didn't include (see
+    ReflectionEvaluationViewSet.create), since this function itself has
+    no notion of "unset -> leave alone" -- every keyword argument here is
+    written as-is. Returns None if the item doesn't exist (guarded so
+    update_item's default upsert behavior can't create a ghost item
+    missing `type`)."""
+    table = get_table()
+    update_expression, names, values = build_update_expression({
+        'student_name': student_name,
+        'faculty': faculty,
+        'career': career,
+        'value_areas': value_areas,
+        'satisfaction': satisfaction,
+        'entrepreneurship_interest': entrepreneurship_interest,
+        'comments': comments,
+    })
+    try:
+        response = table.update_item(
+            Key={'PK': keys.session_pk(room_code), 'SK': keys.reflection_sk(reflection_id)},
+            UpdateExpression=update_expression,
+            ConditionExpression='attribute_exists(PK)',
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+            ReturnValues='ALL_NEW',
+        )
+        return response['Attributes']
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            return None
+        raise
 
 
 def scan_all_reflections():

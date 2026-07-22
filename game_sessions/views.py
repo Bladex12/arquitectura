@@ -20,23 +20,23 @@ from django.core.files.base import ContentFile
 from django.conf import settings
 import os
 from PIL import Image
-from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 logger = logging.getLogger(__name__)
 from users.models import Professor, Student
 from .models import (
-    GameSession, SessionGroup, Team, TeamStudent, TeamPersonalization, SessionStage,
-    TeamActivityProgress, TeamBubbleMap,
-    TeamRouletteAssignment, TokenTransaction, PeerEvaluation, ReflectionEvaluation
+    SessionGroup, TeamPersonalization,
+    TeamActivityProgress,
+    TeamRouletteAssignment, PeerEvaluation
 )
 from .serializers import (
     GameSessionSerializer, GameSessionCreateSerializer, annotate_game_session_display_fields,
     TeamSerializer, TeamPersonalizationSerializer,
     SessionStageSerializer, annotate_session_stage_display_fields,
     TeamActivityProgressSerializer, annotate_team_activity_progress_display_fields,
-    TeamBubbleMapSerializer, TabletSerializer, TabletConnectionSerializer,
+    TeamBubbleMapSerializer, annotate_team_bubble_map_display_fields,
+    TabletSerializer, TabletConnectionSerializer,
     annotate_tablet_connection_display_fields,
     TeamRouletteAssignmentSerializer, annotate_team_roulette_assignment_display_fields,
     TokenTransactionSerializer, annotate_token_transaction_display_fields,
@@ -69,10 +69,11 @@ from game_sessions.dynamodb.token_transaction import (
 )
 from game_sessions.dynamodb.bubble_roulette import (
     create_roulette_assignment, get_roulette_assignment, update_roulette_assignment,
-    list_roulette_assignments,
+    list_roulette_assignments, upsert_bubble_map, get_bubble_map, list_bubble_maps,
 )
 from game_sessions.dynamodb.evaluations import (
     list_peer_evaluations, create_peer_evaluation, get_peer_evaluation, update_peer_evaluation,
+    create_reflection, list_reflections, get_reflection, update_reflection, scan_all_reflections,
 )
 from game_sessions.dynamodb.client import now_iso
 
@@ -6171,22 +6172,74 @@ class PeerEvaluationViewSet(viewsets.ViewSet):
         return Response(serializer.data)
 
 
-class ReflectionEvaluationViewSet(viewsets.ModelViewSet):
+class ReflectionEvaluationViewSet(viewsets.ViewSet):
     """
     ViewSet para Evaluaciones de Reflexión
+
+    DynamoDB cutover (Task 20, the last viewset in this file): list/
+    retrieve/create/by_room now read/write game_sessions.dynamodb.
+    evaluations instead of the ReflectionEvaluation ORM model. viewsets.
+    ModelViewSet -> viewsets.ViewSet, same shape change as every other
+    Task 13+ viewset -- there's no queryset left to back DRF's generic
+    mixins.
+
+    list/retrieve regression check (this task's lesson #1, re-verified
+    here): a repo-wide grep of frontend/src/services/reflectionEvaluations.ts
+    and every caller of it (Formulario.tsx, Reflexion.tsx x2,
+    DetalleSesion.tsx) found only `create` and `by_room` in live use --
+    zero callers of the bare list/retrieve endpoints DRF's router still
+    exposes. Ported both anyway (not left stubbed on the now-permanently-
+    empty ORM table), matching Task 18's precedent (TeamRouletteAssignmentViewSet)
+    of converting a still-routed-but-unused surface for completeness
+    rather than leaving it silently broken.
+
+    Identifier-surface fix (mirrors every other converted viewset's `id`
+    fix -- Task 15/18/19, and this task's TeamBubbleMapViewSet below):
+    ReflectionEvaluationSerializer.id now sources the item's plain
+    `reflection_id` attribute, not the raw SK ("REFLECTION#<uuid>") --
+    '#' truncates it as a URL path segment.
+
+    No token-award logic exists on this entity (verified against the ORM
+    version -- create()/by_room() never touch TokenTransaction), so this
+    task's lesson #2 doesn't apply here.
+
+    total_students in by_room(): the ORM version's three-tier fallback
+    (TeamStudent -> Team.students annotate -> per-team manual count)
+    existed because the ORM had two different, occasionally-inconsistent
+    sources of truth for a team's roster (the TeamStudent junction table
+    and a legacy Team.students m2m). game_sessions.dynamodb.team.create_team
+    embeds the roster as a single `student_ids` list on the Team item
+    itself (Task 3's design) -- there's only one source of truth here, so
+    the fallback tiers collapse to one pass over list_teams(room_code).
     """
-    queryset = ReflectionEvaluation.objects.all()
-    serializer_class = ReflectionEvaluationSerializer
     permission_classes = []  # No requiere autenticación para que los estudiantes puedan responder
     authentication_classes = []
-    
-    def get_queryset(self):
-        queryset = ReflectionEvaluation.objects.select_related('game_session')
-        room_code = self.request.query_params.get('room_code')
+
+    def list(self, request):
+        room_code = request.query_params.get('room_code')
         if room_code:
-            queryset = queryset.filter(game_session__room_code=room_code)
-        return queryset
-    
+            evaluations = list_reflections(room_code)
+        else:
+            evaluations = scan_all_reflections()
+        serializer = ReflectionEvaluationSerializer(evaluations, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        room_code = request.query_params.get('room_code')
+        if room_code:
+            evaluation = get_reflection(room_code, pk)
+        else:
+            # No room_code given -- fall back to a cross-room scan, same
+            # "no scoping hint, search everywhere" fallback other
+            # converted viewsets use for their own detail routes.
+            evaluation = next(
+                (r for r in scan_all_reflections() if r.get('reflection_id') == pk), None
+            )
+        if evaluation is None:
+            return Response({'error': 'Evaluación no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = ReflectionEvaluationSerializer(evaluation)
+        return Response(serializer.data)
+
     def create(self, request, *args, **kwargs):
         """Crear una nueva evaluación de reflexión"""
         room_code = request.data.get('room_code')
@@ -6195,55 +6248,64 @@ class ReflectionEvaluationViewSet(viewsets.ModelViewSet):
                 {'error': 'room_code es requerido'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        try:
-            game_session = GameSession.objects.get(room_code=room_code)
-        except GameSession.DoesNotExist:
+
+        if get_session(room_code) is None:
             return Response(
                 {'error': 'Sesión no encontrada'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
-        # Verificar si el estudiante ya respondió (por email)
+
+        student_name = request.data.get('student_name')
         student_email = request.data.get('student_email')
-        if student_email:
-            existing_evaluation = ReflectionEvaluation.objects.filter(
-                game_session=game_session,
-                student_email=student_email
-            ).first()
-            
-            if existing_evaluation:
-                # Si ya existe, actualizar la evaluación existente en lugar de crear una nueva
-                data = request.data.copy()
-                data['game_session'] = game_session.id
-                
-                serializer = self.get_serializer(existing_evaluation, data=data, partial=True)
-                serializer.is_valid(raise_exception=True)
-                serializer.save()
-                
-                return Response(
-                    {
-                        **serializer.data,
-                        'message': 'Evaluación actualizada (ya habías respondido anteriormente)'
-                    },
-                    status=status.HTTP_200_OK
-                )
-        
-        # Crear nueva evaluación
-        data = request.data.copy()
-        data['game_session'] = game_session.id
-        
-        serializer = self.get_serializer(data=data)
-        serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
-        
-        headers = self.get_success_headers(serializer.data)
-        return Response(
-            serializer.data,
-            status=status.HTTP_201_CREATED,
-            headers=headers
+        if not student_name or not student_email:
+            return Response(
+                {'error': 'student_name y student_email son requeridos'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Verificar si el estudiante ya respondió (por email)
+        existing_evaluation = next(
+            (r for r in list_reflections(room_code) if r.get('student_email') == student_email), None
         )
-    
+
+        if existing_evaluation:
+            # Si ya existe, actualizar la evaluación existente en lugar de
+            # crear una nueva -- only fields present in the request
+            # change, everything else is carried forward from the
+            # existing item (mirrors the ORM's serializer(..., partial=True)).
+            updated = update_reflection(
+                room_code, existing_evaluation['reflection_id'],
+                student_name=request.data.get('student_name', existing_evaluation.get('student_name')),
+                faculty=request.data.get('faculty', existing_evaluation.get('faculty')),
+                career=request.data.get('career', existing_evaluation.get('career')),
+                value_areas=request.data.get('value_areas', existing_evaluation.get('value_areas')),
+                satisfaction=request.data.get('satisfaction', existing_evaluation.get('satisfaction')),
+                entrepreneurship_interest=request.data.get(
+                    'entrepreneurship_interest', existing_evaluation.get('entrepreneurship_interest')
+                ),
+                comments=request.data.get('comments', existing_evaluation.get('comments')),
+            )
+            serializer = ReflectionEvaluationSerializer(updated)
+            return Response(
+                {
+                    **serializer.data,
+                    'message': 'Evaluación actualizada (ya habías respondido anteriormente)'
+                },
+                status=status.HTTP_200_OK
+            )
+
+        # Crear nueva evaluación
+        created = create_reflection(
+            room_code, student_name=student_name, student_email=student_email,
+            value_areas=request.data.get('value_areas'), faculty=request.data.get('faculty'),
+            career=request.data.get('career'), satisfaction=request.data.get('satisfaction'),
+            entrepreneurship_interest=request.data.get('entrepreneurship_interest'),
+            comments=request.data.get('comments'),
+        )
+
+        serializer = ReflectionEvaluationSerializer(created)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
     @action(detail=False, methods=['get'], permission_classes=[], authentication_classes=[])
     def by_room(self, request):
         """Obtener evaluaciones por código de sala"""
@@ -6253,54 +6315,31 @@ class ReflectionEvaluationViewSet(viewsets.ModelViewSet):
                 {'error': 'room_code es requerido'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        try:
-            game_session = GameSession.objects.get(room_code=room_code)
-        except GameSession.DoesNotExist:
+
+        if get_session(room_code) is None:
             return Response(
                 {'error': 'Sesión no encontrada'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
-        evaluations = ReflectionEvaluation.objects.filter(game_session=game_session)
-        serializer = self.get_serializer(evaluations, many=True)
-        
-        # Calcular total de estudiantes usando TeamStudent directamente (más eficiente y confiable)
-        from .models import Team, TeamStudent
-        from django.db.models import Count
-        
-        # Primero intentar contar desde TeamStudent (más confiable)
-        total_students = TeamStudent.objects.filter(
-            team__game_session=game_session
-        ).values('student').distinct().count()
-        
-        print(f"🔍 [by_room] Total desde TeamStudent: {total_students}")
-        
-        # Si no hay estudiantes en TeamStudent, intentar contar desde Team.students como fallback
-        if total_students == 0:
-            teams = Team.objects.filter(game_session=game_session).prefetch_related('students')
-            print(f"🔍 [by_room] Número de equipos: {teams.count()}")
-            
-            # Usar annotate para contar de forma más eficiente
-            teams_with_counts = teams.annotate(student_count=Count('students'))
-            total_students = sum(team.student_count for team in teams_with_counts)
-            print(f"🔍 [by_room] Total desde annotate: {total_students}")
-            
-            # Si aún es 0, intentar contar directamente desde la relación many-to-many
-            if total_students == 0:
-                for team in teams:
-                    count = team.students.all().count()
-                    total_students += count
-                    if count > 0:
-                        print(f"⚠️ [by_room] Equipo {team.name} tiene {count} estudiantes (contado desde team.students.all())")
-        
-        print(f"📊 [by_room] Total final de estudiantes: {total_students} para sesión {game_session.id} (room_code: {game_session.room_code})")
-        
+
+        evaluations = list_reflections(room_code)
+        serializer = ReflectionEvaluationSerializer(evaluations, many=True)
+
+        # Total de estudiantes distintos en la sala -- une el student_ids
+        # roster de cada equipo (ver docstring de la clase para por qué
+        # esto reemplaza el fallback de tres niveles de la versión ORM).
+        unique_student_ids = set()
+        for team in list_teams(room_code):
+            unique_student_ids.update(team.get('student_ids') or [])
+        total_students = len(unique_student_ids)
+
         # Contar estudiantes únicos que han respondido (por email)
         # Esto evita contar múltiples respuestas del mismo estudiante
-        unique_students_responded = evaluations.values('student_email').distinct().count()
-        total_evaluations = evaluations.count()
-        
+        unique_students_responded = len({
+            e['student_email'] for e in evaluations if e.get('student_email')
+        })
+        total_evaluations = len(evaluations)
+
         return Response({
             'count': unique_students_responded,  # Estudiantes únicos que han respondido
             'total_evaluations': total_evaluations,  # Total de evaluaciones (puede incluir duplicados)
@@ -6309,46 +6348,227 @@ class ReflectionEvaluationViewSet(viewsets.ModelViewSet):
         })
 
 
-class TeamBubbleMapViewSet(viewsets.ModelViewSet):
+class TeamBubbleMapViewSet(viewsets.ViewSet):
     """
     ViewSet para Bubble Maps de Equipos
+
+    DynamoDB cutover (Task 20, the last viewset in this file): list/
+    retrieve/create/update/partial_update/finalize_bubble_map now read/
+    write game_sessions.dynamodb.bubble_roulette instead of the
+    TeamBubbleMap ORM model. viewsets.ModelViewSet -> viewsets.ViewSet,
+    same shape change as every other Task 13+ viewset -- there's no
+    queryset left to back DRF's generic mixins. filter_backends/
+    filterset_fields (DjangoFilterBackend on team/session_stage) are gone
+    too -- list() below hand-filters on the same two query params instead.
+
+    list/retrieve regression check (this task's lesson #1): the ORM
+    version's get_permissions() opened create/update/partial_update/
+    retrieve/list to unauthenticated callers, and permission_classes was
+    already [] class-wide -- i.e. it was always fully open, the override
+    was dead code. Every current frontend caller (teamBubbleMapsAPI in
+    frontend/src/services/teamBubbleMaps.ts, used by BubbleMapV2.tsx,
+    profesor/etapa2/BubbleMap.tsx, DetalleSesion.tsx) hits list/create/
+    update/finalize_bubble_map -- list/update are live, not stubbed, so
+    both are fully ported here (not left on the now-permanently-empty ORM
+    table).
+
+    Identifier-surface fix (mirrors Task 15/18/19's own `id` fixes; see
+    TeamBubbleMapSerializer's docstring for the full explanation):
+    TeamBubbleMapSerializer.id is now a colon-joined
+    "<team_id>:<session_stage_id>", not the raw '#'-delimited SK.
+    BubbleMapV2.tsx's autosave (`teamBubbleMapsAPI.update(mapIdRef.current,
+    ...)`) PATCHes /team-bubble-maps/<id>/ using exactly this id -- this
+    was a *live*, not theoretical, bug: the raw SK ("TEAM#<team_id>#
+    BUBBLEMAP#<stage_id>") would have been truncated by the browser at
+    the first '#' before the PATCH request ever left the client.
+    `_parse_pk` is the corresponding parser.
+
+    Token-award convention (this task's lesson #2 -- verified real, unlike
+    the brief's own hedge): `_award_tokens_for_bubble_map_instance` awards
+    tokens for a finalized bubble map. Per the convention established by
+    TeamActivityProgressViewSet/TeamRouletteAssignmentViewSet/
+    PeerEvaluationViewSet, source_type stays 'activity' (unchanged from
+    the ORM version) and source_id is f'{team_id}:{session_stage_id}' --
+    which is *already* team-scoped by construction (it's exactly
+    bubble_roulette.bubble_map_sk's own natural composite key, team_id
+    leading), so no separate "team_id must lead" bug was possible here the
+    way it was for the other three classes' per-reason-tag source_ids.
+    This also happens to numerically equal TeamBubbleMapSerializer's new
+    `id` field -- convenient (profesor/etapa2/BubbleMap.tsx's "is this
+    bubble map finalized" check literally compares
+    `tx.source_id === bubbleMap.id`, and that comparison keeps working),
+    but not something this task engineered on purpose; both simply derive
+    from the same (team_id, session_stage_id) pair.
+
+    Unlike the ORM version -- which queried
+    TokenTransaction.objects.filter(source_type=..., source_id=...).first()
+    by hand before creating a new one -- create_transaction()'s real
+    (source_type, source_id) uniqueness constraint makes a repeat
+    finalize_bubble_map/update(is_final=True) call idempotent for free:
+    the bubble map's map_data still upserts on every call, but the token
+    award itself only happens once.
     """
-    queryset = TeamBubbleMap.objects.all()
-    serializer_class = TeamBubbleMapSerializer
     permission_classes = []
     authentication_classes = []  # No requerir autenticación para tablets
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['team', 'session_stage']
 
-    def get_permissions(self):
-        """
-        Permite acceso sin autenticación para tablets
-        """
-        if self.action in ['create', 'update', 'partial_update', 'retrieve', 'list']:
-            return []
-        return super().get_permissions()
+    def _resolve_team(self, request, team_id):
+        """Resolves a Team dict from a bare team_id, same fallback
+        TeamActivityProgressViewSet/TeamRouletteAssignmentViewSet
+        established: prefer a direct get_team (O(1)) when the caller
+        supplies room_code/game_session, otherwise scan every team in
+        every room for a matching team_id -- no current frontend caller
+        of this viewset sends room_code, so this is the primary path in
+        practice today."""
+        room_code = (
+            request.data.get('game_session') or request.data.get('room_code')
+            or request.query_params.get('game_session') or request.query_params.get('room_code')
+        )
+        if room_code:
+            return get_team(room_code, team_id)
+        return next((t for t in scan_all_teams() if t['team_id'] == team_id), None)
 
-    def get_queryset(self):
-        return TeamBubbleMap.objects.select_related('team', 'session_stage__stage')
-    
+    def _parse_pk(self, pk):
+        """Parses a TeamBubbleMap detail-route pk, which is
+        "<team_id>:<session_stage_id>" (see TeamBubbleMapSerializer's id
+        field). rsplit on the last ':' since team_id is a UUID4 and
+        therefore never contains one. Returns (team_id, session_stage_id),
+        or None if pk doesn't match that shape."""
+        if not pk or ':' not in pk:
+            return None
+        team_id, _, stage_id_str = pk.rpartition(':')
+        try:
+            stage_id = int(stage_id_str)
+        except ValueError:
+            return None
+        return team_id, stage_id
+
+    def list(self, request):
+        team_id = request.query_params.get('team')
+        session_stage_id = request.query_params.get('session_stage')
+        room_code = request.query_params.get('game_session') or request.query_params.get('room_code')
+
+        if team_id:
+            team = self._resolve_team(request, team_id)
+            if team is None:
+                return Response([])
+            items = list_bubble_maps(team['room_code'], team_id=team_id)
+        elif room_code:
+            items = list_bubble_maps(room_code)
+        else:
+            items = []
+
+        if session_stage_id:
+            try:
+                session_stage_id_int = int(session_stage_id)
+            except (TypeError, ValueError):
+                session_stage_id_int = None
+            items = [i for i in items if i['stage_id'] == session_stage_id_int]
+
+        team_cache = {}
+        for item in items:
+            team = team_cache.get(item['team_id'])
+            if team is None:
+                team = get_team(item['room_code'], item['team_id'])
+                team_cache[item['team_id']] = team
+            annotate_team_bubble_map_display_fields(item, team=team)
+
+        serializer = TeamBubbleMapSerializer(items, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        parsed = self._parse_pk(pk)
+        if parsed is None:
+            return Response({'error': 'Bubble map no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        team_id, stage_id = parsed
+
+        team = self._resolve_team(request, team_id)
+        if team is None:
+            return Response({'error': 'Bubble map no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+        bubble_map = get_bubble_map(team['room_code'], team_id, stage_id)
+        if bubble_map is None:
+            return Response({'error': 'Bubble map no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+        annotate_team_bubble_map_display_fields(bubble_map, team=team)
+        serializer = TeamBubbleMapSerializer(bubble_map)
+        return Response(serializer.data)
+
     def create(self, request, *args, **kwargs):
         """Crear bubble map (los tokens se otorgan solo al finalizar)"""
-        response = super().create(request, *args, **kwargs)
-        # Los tokens se otorgan solo cuando se envía explícitamente o acaba el tiempo
-        return response
-    
-    def update(self, request, *args, **kwargs):
-        """Actualizar bubble map (los tokens se otorgan solo al finalizar)"""
+        team_id = request.data.get('team')
+        session_stage_id = request.data.get('session_stage')
+        map_data = request.data.get('map_data')
+
+        if not team_id or not session_stage_id or map_data is None:
+            return Response(
+                {'error': 'Se requieren team, session_stage y map_data'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        team = self._resolve_team(request, team_id)
+        if team is None:
+            return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        room_code = team['room_code']
+
+        try:
+            session_stage_id = int(session_stage_id)
+        except (TypeError, ValueError):
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        if get_session_stage(room_code, session_stage_id) is None:
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        bubble_map = upsert_bubble_map(room_code, team_id, session_stage_id, map_data)
+
+        # Los tokens se otorgan solo cuando se envía explícitamente o
+        # acaba el tiempo -- mismo gate que la versión ORM.
+        if request.data.get('is_final', False):
+            self._award_tokens_for_bubble_map_instance(room_code, bubble_map)
+            bubble_map = get_bubble_map(room_code, team_id, session_stage_id)
+
+        annotate_team_bubble_map_display_fields(bubble_map, team=team)
+        serializer = TeamBubbleMapSerializer(bubble_map)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def _update(self, request, pk):
+        """Actualizar bubble map (los tokens se otorgan solo al finalizar).
+        Shared by update (PUT) and partial_update (PATCH) -- upsert_bubble_map
+        always fully overwrites map_data (matching the Django model's
+        single JSONField, see bubble_roulette.upsert_bubble_map's own
+        docstring), so there's no meaningful PUT/PATCH distinction here,
+        same as the ORM version's single `update()` override handled both."""
+        parsed = self._parse_pk(pk)
+        if parsed is None:
+            return Response({'error': 'Bubble map no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        team_id, stage_id = parsed
+
+        team = self._resolve_team(request, team_id)
+        if team is None:
+            return Response({'error': 'Bubble map no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        room_code = team['room_code']
+
+        existing = get_bubble_map(room_code, team_id, stage_id)
+        if existing is None:
+            return Response({'error': 'Bubble map no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+        map_data = request.data.get('map_data', existing.get('map_data'))
+        bubble_map = upsert_bubble_map(room_code, team_id, stage_id, map_data)
+
         # Verificar si es un envío final (cuando se envía explícitamente)
         is_final_submit = request.data.get('is_final', False)
-        response = super().update(request, *args, **kwargs)
-        
-        # Solo otorgar tokens si es un envío final
-        if response.status_code == 200 and is_final_submit:
-            self._award_tokens_for_bubble_map()
-        
-        return response
-    
+        if is_final_submit:
+            self._award_tokens_for_bubble_map_instance(room_code, bubble_map)
+            bubble_map = get_bubble_map(room_code, team_id, stage_id)
+
+        annotate_team_bubble_map_display_fields(bubble_map, team=team)
+        serializer = TeamBubbleMapSerializer(bubble_map)
+        return Response(serializer.data)
+
+    def update(self, request, pk=None):
+        return self._update(request, pk)
+
+    def partial_update(self, request, pk=None):
+        return self._update(request, pk)
+
     @action(detail=False, methods=['post'], permission_classes=[], authentication_classes=[])
     def finalize_bubble_map(self, request):
         """
@@ -6356,72 +6576,60 @@ class TeamBubbleMapViewSet(viewsets.ModelViewSet):
         """
         team_id = request.data.get('team')
         session_stage_id = request.data.get('session_stage')
-        
+
         if not team_id or not session_stage_id:
             return Response(
                 {'error': 'Se requieren team y session_stage'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
+        team = self._resolve_team(request, team_id)
+        if team is None:
+            return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        room_code = team['room_code']
+
         try:
-            from .models import Team, SessionStage
-            team = Team.objects.get(id=team_id)
-            session_stage = SessionStage.objects.get(id=session_stage_id)
-            
-            # Buscar el bubble map del equipo
-            bubble_map = TeamBubbleMap.objects.filter(
-                team=team,
-                session_stage=session_stage
-            ).first()
-            
-            if not bubble_map:
-                return Response(
-                    {'error': 'No se encontró bubble map para este equipo'},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-            
-            # Otorgar tokens
-            self._award_tokens_for_bubble_map_instance(bubble_map)
-            
-            # Recargar el equipo para obtener tokens actualizados
-            team.refresh_from_db()
-            
-            serializer = self.get_serializer(bubble_map)
+            session_stage_id = int(session_stage_id)
+        except (TypeError, ValueError):
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        if get_session_stage(room_code, session_stage_id) is None:
+            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        bubble_map = get_bubble_map(room_code, team_id, session_stage_id)
+        if not bubble_map:
+            return Response(
+                {'error': 'No se encontró bubble map para este equipo'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            self._award_tokens_for_bubble_map_instance(room_code, bubble_map)
+
+            team_after = get_team(room_code, team_id)
+            bubble_map = get_bubble_map(room_code, team_id, session_stage_id)
+            annotate_team_bubble_map_display_fields(bubble_map, team=team_after)
+
+            serializer = TeamBubbleMapSerializer(bubble_map)
             return Response({
                 **serializer.data,
                 'tokens_awarded': True,
-                'team_tokens_total': team.tokens_total
+                'team_tokens_total': team_after['tokens_total']
             })
-            
-        except Team.DoesNotExist:
-            return Response(
-                {'error': 'Equipo no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except SessionStage.DoesNotExist:
-            return Response(
-                {'error': 'Etapa de sesión no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
         except Exception as e:
             logger.error(f'Error en finalize_bubble_map: {str(e)}')
             return Response(
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-    
-    def _award_tokens_for_bubble_map(self):
-        """Wrapper para otorgar tokens usando el objeto actual"""
-        bubble_map = self.get_object()
-        self._award_tokens_for_bubble_map_instance(bubble_map)
-    
-    def _award_tokens_for_bubble_map_instance(self, bubble_map):
-        """Calcular y otorgar tokens basándose en todas las burbujas (preguntas + respuestas)"""
-        team = bubble_map.team
-        session_stage = bubble_map.session_stage
-        
-        map_data = bubble_map.map_data or {}
-        
+
+    def _award_tokens_for_bubble_map_instance(self, room_code, bubble_map):
+        """Calcular y otorgar tokens basándose en todas las burbujas
+        (preguntas + respuestas). Team-scoped source_id -- ver
+        docstring de la clase ("Token-award convention")."""
+        team_id = bubble_map['team_id']
+        session_stage_id = bubble_map['stage_id']
+        map_data = bubble_map.get('map_data') or {}
+
         # Calcular tokens: 1 token por burbuja (preguntas + respuestas, sin la central)
         if 'questions' in map_data:
             questions = map_data.get('questions', [])
@@ -6437,32 +6645,15 @@ class TeamBubbleMapViewSet(viewsets.ModelViewSet):
             total_bubbles = len(nodes)
             tokens_to_award = total_bubbles
             reason_text = f'Bubble Map: {total_bubbles} burbujas'
-        
-        if tokens_to_award > 0:
-            from .models import TokenTransaction
-            
-            # Verificar si ya se otorgaron tokens por este bubble map
-            existing_transaction = TokenTransaction.objects.filter(
-                team=team,
-                game_session=team.game_session,
-                session_stage=session_stage,
-                source_type='activity',
-                source_id=bubble_map.id
-            ).first()
-            
-            if not existing_transaction:
-                # Crear transacción de tokens
-                TokenTransaction.objects.create(
-                    team=team,
-                    game_session=team.game_session,
-                    session_stage=session_stage,
-                    amount=tokens_to_award,
-                    source_type='activity',
-                    source_id=bubble_map.id,
-                    reason=reason_text,
-                    awarded_by=None
-                )
-                
-                # Actualizar tokens del equipo
-                team.tokens_total += tokens_to_award
-                team.save()
+
+        if tokens_to_award <= 0:
+            return
+
+        source_id = f'{team_id}:{session_stage_id}'
+        tx = create_transaction(
+            room_code, team_id, tokens_to_award, source_type='activity',
+            source_id=source_id, session_stage_id=session_stage_id,
+            reason=reason_text, awarded_by_id=None,
+        )
+        if tx is not None:
+            update_tokens(room_code, team_id, tokens_to_award)

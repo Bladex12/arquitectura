@@ -465,7 +465,9 @@ class TeamBubbleMapSerializerTest(GameSessionsSerializersTestCase):
 
         data = TeamBubbleMapSerializer(bubble_map).data
 
-        self.assertEqual(data['id'], bubble_map['SK'])
+        # Task 20: id is a URL-safe "<team_id>:<stage_id>" composite, not
+        # the raw '#'-delimited SK (see TeamBubbleMapSerializer docstring).
+        self.assertEqual(data['id'], f"team-uuid-1:{self.stage.id}")
         self.assertEqual(data['team'], 'team-uuid-1')
         self.assertEqual(data['team_name'], 'Rojo')
         self.assertEqual(data['session_stage'], self.stage.id)
@@ -505,6 +507,7 @@ class ReflectionEvaluationSerializerTest(TestCase):
     def test_serializes_without_annotation(self):
         reflection = {
             'SK': 'REFLECTION#uuid-1',
+            'reflection_id': 'uuid-1',
             'room_code': 'ABC123',
             'student_name': 'Juan Pérez',
             'student_email': 'juan@udd.cl',
@@ -519,7 +522,9 @@ class ReflectionEvaluationSerializerTest(TestCase):
 
         data = ReflectionEvaluationSerializer(reflection).data
 
-        self.assertEqual(data['id'], reflection['SK'])
+        # Task 20: id is sourced from reflection_id, not the raw '#'-
+        # delimited SK (see ReflectionEvaluationSerializer docstring).
+        self.assertEqual(data['id'], 'uuid-1')
         self.assertEqual(data['game_session'], 'ABC123')
         self.assertEqual(data['game_session_room_code'], 'ABC123')
         self.assertEqual(data['student_name'], 'Juan Pérez')

@@ -109,6 +109,81 @@ class EvaluationsRepositoryTest(DynamoDBTestCase):
 
         self.assertEqual(created['value_areas'], [])
 
+    def test_create_reflection_stores_a_url_safe_reflection_id(self):
+        """Task 20's serializer id fix relies on a plain `reflection_id`
+        attribute (no '#') existing on the item, separate from the raw SK
+        ("REFLECTION#<uuid>")."""
+        from game_sessions.dynamodb.evaluations import create_reflection
+
+        created = create_reflection('ABC123', student_name='Ana Perez', student_email='ana@udd.cl')
+
+        self.assertIn('reflection_id', created)
+        self.assertNotIn('#', created['reflection_id'])
+        self.assertEqual(created['SK'], f"REFLECTION#{created['reflection_id']}")
+
+    def test_list_reflections_returns_all_in_room(self):
+        from game_sessions.dynamodb.evaluations import create_reflection, list_reflections
+
+        create_reflection('ABC123', student_name='Ana', student_email='ana@udd.cl')
+        create_reflection('ABC123', student_name='Bob', student_email='bob@udd.cl')
+        create_reflection('ROOM2', student_name='Charlie', student_email='charlie@udd.cl')
+
+        results = list_reflections('ABC123')
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual({r['student_email'] for r in results}, {'ana@udd.cl', 'bob@udd.cl'})
+
+    def test_get_reflection_returns_none_when_missing(self):
+        from game_sessions.dynamodb.evaluations import get_reflection
+
+        self.assertIsNone(get_reflection('ABC123', 'not-a-real-id'))
+
+    def test_get_reflection_returns_the_item(self):
+        from game_sessions.dynamodb.evaluations import create_reflection, get_reflection
+
+        created = create_reflection('ABC123', student_name='Ana', student_email='ana@udd.cl')
+
+        found = get_reflection('ABC123', created['reflection_id'])
+
+        self.assertIsNotNone(found)
+        self.assertEqual(found['student_email'], 'ana@udd.cl')
+
+    def test_update_reflection_overwrites_mutable_fields(self):
+        from game_sessions.dynamodb.evaluations import create_reflection, update_reflection
+
+        created = create_reflection(
+            'ABC123', student_name='Ana', student_email='ana@udd.cl',
+            satisfaction='si', comments='ok',
+        )
+
+        updated = update_reflection(
+            'ABC123', created['reflection_id'], student_name='Ana Perez', faculty='Ingenieria',
+            career='Civil', value_areas=['empatizar'], satisfaction='mucho',
+            entrepreneurship_interest='me_encantaria', comments='mejor aun',
+        )
+
+        self.assertEqual(updated['student_name'], 'Ana Perez')
+        self.assertEqual(updated['faculty'], 'Ingenieria')
+        self.assertEqual(updated['satisfaction'], 'mucho')
+        self.assertEqual(updated['comments'], 'mejor aun')
+
+    def test_update_reflection_never_touches_student_email_or_created_at(self):
+        from game_sessions.dynamodb.evaluations import create_reflection, update_reflection
+
+        created = create_reflection('ABC123', student_name='Ana', student_email='ana@udd.cl')
+
+        updated = update_reflection('ABC123', created['reflection_id'], satisfaction='mucho')
+
+        self.assertEqual(updated['student_email'], 'ana@udd.cl')
+        self.assertEqual(updated['created_at'], created['created_at'])
+
+    def test_update_reflection_returns_none_when_missing(self):
+        from game_sessions.dynamodb.evaluations import update_reflection
+
+        result = update_reflection('ABC123', 'not-a-real-id', satisfaction='mucho')
+
+        self.assertIsNone(result)
+
     def test_scan_all_reflections_cross_room(self):
         from game_sessions.dynamodb.evaluations import create_reflection, scan_all_reflections
 
