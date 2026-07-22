@@ -11,20 +11,76 @@ from django.db.models import Count, Q, Avg, Min, Max, F, Sum, Func, Value, Integ
 from django.db.models.functions import ExtractYear, ExtractMonth, ExtractWeek, ExtractDay, TruncDate
 from django.utils import timezone
 from datetime import timedelta, datetime, date
-from collections import Counter
+from collections import Counter, defaultdict
 import json
 
 from users.models import Administrator, Professor, Student
-from game_sessions.models import (
-    GameSession, Team, TeamStudent, SessionStage, 
-    TeamActivityProgress, ReflectionEvaluation, TokenTransaction
-)
+from game_sessions.dynamodb.game_session import scan_all_sessions
+from game_sessions.dynamodb.team import scan_all_teams
+from game_sessions.dynamodb.stage_progress import scan_all_stages, scan_all_progress
+from game_sessions.dynamodb.evaluations import scan_all_reflections
 from challenges.models import Topic, Challenge, Activity, Stage
 from academic.models import Faculty, Career, Course
 from .models import (
     ActivityDurationMetric, StageDurationMetric,
     TopicSelectionMetric, ChallengeSelectionMetric, DailyMetricsSnapshot
 )
+
+
+def _parse_iso(value):
+    """Parsea un timestamp ISO-8601 de DynamoDB (o None) a datetime.
+    Devuelve None si el valor está vacío o no es parseable. Los items de
+    game_sessions guardan created_at/started_at/completed_at como strings
+    ISO (game_sessions.dynamodb.client.now_iso), no como datetime, así que
+    toda agregación temporal debe parsearlos primero."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def _duration_seconds(item):
+    """Duración en segundos entre started_at y completed_at de un item
+    DynamoDB (SessionStage o TeamActivityProgress), o None si falta alguno
+    de los dos timestamps."""
+    started = _parse_iso(item.get('started_at'))
+    completed = _parse_iso(item.get('completed_at'))
+    if started is None or completed is None:
+        return None
+    return (completed - started).total_seconds()
+
+
+def _naive_dt(dt):
+    """Normaliza un datetime a naive (misma corrección de timezone que ya
+    hacía el bucketing manual de time_series para MySQL)."""
+    if dt is None:
+        return None
+    if timezone.is_aware(dt):
+        return timezone.make_naive(dt)
+    return dt
+
+
+def _bucket_by_period(dts, period):
+    """Agrupa una lista de datetime naive por year|month|week|day y devuelve
+    [{'period': k, 'count': n}] ordenado. Mismo esquema de claves que el
+    time_series original (default = day, para paridad exacta)."""
+    buckets = defaultdict(int)
+    for dt in dts:
+        if dt is None:
+            continue
+        if period == 'year':
+            key = str(dt.year)
+        elif period == 'month':
+            key = f"{dt.year}-{dt.month:02d}"
+        elif period == 'week':
+            year, week, _ = dt.isocalendar()
+            key = f"{year}-W{week:02d}"
+        else:  # day
+            key = dt.strftime('%Y-%m-%d')
+        buckets[key] += 1
+    return [{'period': k, 'count': v} for k, v in sorted(buckets.items())]
 
 
 class AdminDashboardViewSet(viewsets.ViewSet):
@@ -58,20 +114,19 @@ class AdminDashboardViewSet(viewsets.ViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        # Total de alumnos que han jugado (estudiantes únicos en TeamStudent)
-        total_students_played = TeamStudent.objects.values('student').distinct().count()
-        
+        # Total de alumnos que han jugado (student_ids únicos en todos los equipos)
+        total_students_played = len({
+            sid for team in scan_all_teams() for sid in team.get('student_ids', [])
+        })
+
         # Total de profesores registrados (todos los profesores, no solo los que tienen sesiones)
         total_professors_active = Professor.objects.count()
-        
-        # Total de sesiones creadas
-        total_sessions_created = GameSession.objects.count()
-        
-        # Total de sesiones completadas
-        total_sessions_completed = GameSession.objects.filter(status='completed').count()
-        
-        # Sesiones en curso
-        total_sessions_running = GameSession.objects.filter(status='running').count()
+
+        # Sesiones (una sola Scan, se agregan los estados en Python)
+        sessions = scan_all_sessions()
+        total_sessions_created = len(sessions)
+        total_sessions_completed = sum(1 for s in sessions if s.get('status') == 'completed')
+        total_sessions_running = sum(1 for s in sessions if s.get('status') == 'running')
         
         # Tasa de completitud
         completion_rate = (
@@ -113,203 +168,58 @@ class AdminDashboardViewSet(viewsets.ViewSet):
             data = []
             
             if metric == 'games':
-                # Juegos realizados (sesiones completadas o cualquier sesión creada)
-                # Incluir todas las sesiones, no solo las completadas, para ver la actividad
-                queryset = GameSession.objects.all()
-                
-                if start_date:
-                    queryset = queryset.filter(created_at__gte=start_date)
-                if end_date:
-                    queryset = queryset.filter(created_at__lte=end_date)
-                
-                try:
-                    # Siempre procesar la consulta, incluso si no hay datos
-                    # MySQL con timezone tiene problemas con ExtractYear/ExtractMonth/TruncDate
-                    # Agrupar manualmente en Python
-                    # Forzar evaluación del queryset
-                    sessions_list = list(queryset)
-                    from collections import defaultdict
-                    
-                    if period == 'year':
-                        year_data = defaultdict(int)
-                        for session in sessions_list:
-                            if session.created_at:
-                                dt = session.created_at
-                                if timezone.is_aware(dt):
-                                    dt = timezone.make_naive(dt)
-                                year = dt.year
-                                year_data[str(year)] += 1
-                        data = [{'period': k, 'count': v} for k, v in sorted(year_data.items())]
-                    elif period == 'month':
-                        # Agrupar manualmente por año-mes
-                        month_data = defaultdict(int)
-                        for session in sessions_list:
-                            if session.created_at:
-                                dt = session.created_at
-                                if timezone.is_aware(dt):
-                                    dt = timezone.make_naive(dt)
-                                period_key = f"{dt.year}-{dt.month:02d}"
-                                month_data[period_key] += 1
-                        data = [{'period': k, 'count': v} for k, v in sorted(month_data.items())]
-                    elif period == 'week':
-                        # Agrupar manualmente por semana
-                        week_data = defaultdict(int)
-                        for session in sessions_list:
-                            if session.created_at:
-                                dt = session.created_at
-                                if timezone.is_aware(dt):
-                                    dt = timezone.make_naive(dt)
-                                year, week, _ = dt.isocalendar()
-                                key = f"{year}-W{week:02d}"
-                                week_data[key] += 1
-                        data = [{'period': k, 'count': v} for k, v in sorted(week_data.items())]
-                    else:  # day
-                        day_data = defaultdict(int)
-                        for session in sessions_list:
-                            if session.created_at:
-                                dt = session.created_at
-                                # Convertir a naive datetime si es aware
-                                if timezone.is_aware(dt):
-                                    dt = timezone.make_naive(dt)
-                                # Formatear como YYYY-MM-DD
-                                period_key = dt.strftime('%Y-%m-%d')
-                                day_data[period_key] += 1
-                        # Convertir a lista ordenada
-                        data = [{'period': k, 'count': v} for k, v in sorted(day_data.items())]
-                except Exception as e:
-                    import traceback
-                    print(f"Error en consulta de games: {e}")
-                    print(traceback.format_exc())
-                    data = []
-            
+                # Juegos realizados: todas las sesiones por fecha de creación.
+                event_dts = [
+                    _naive_dt(_parse_iso(s.get('created_at')))
+                    for s in scan_all_sessions() if s.get('created_at')
+                ]
             elif metric == 'professors':
-                # Profesores nuevos (primera sesión creada)
-                # Obtener profesores con su primera sesión
-                professors = Professor.objects.annotate(
-                    first_session_date=Min('game_sessions__created_at')
-                ).filter(first_session_date__isnull=False)
-                
-                if start_date:
-                    professors = professors.filter(first_session_date__gte=start_date)
-                if end_date:
-                    professors = professors.filter(first_session_date__lte=end_date)
-                
-                # Agrupar manualmente en Python (MySQL con timezone tiene problemas)
-                try:
-                    # Forzar evaluación del queryset para que los campos anotados estén disponibles
-                    professors_list = list(professors)
-                    from collections import defaultdict
-                    
-                    if period == 'year':
-                        year_data = defaultdict(int)
-                        for prof in professors_list:
-                            if prof.first_session_date:
-                                dt = prof.first_session_date
-                                if timezone.is_aware(dt):
-                                    dt = timezone.make_naive(dt)
-                                year_data[str(dt.year)] += 1
-                        data = [{'period': k, 'count': v} for k, v in sorted(year_data.items())]
-                    elif period == 'month':
-                        month_data = defaultdict(int)
-                        for prof in professors_list:
-                            if prof.first_session_date:
-                                dt = prof.first_session_date
-                                if timezone.is_aware(dt):
-                                    dt = timezone.make_naive(dt)
-                                period_key = f"{dt.year}-{dt.month:02d}"
-                                month_data[period_key] += 1
-                        data = [{'period': k, 'count': v} for k, v in sorted(month_data.items())]
-                    elif period == 'week':
-                        week_data = defaultdict(int)
-                        for prof in professors_list:
-                            if prof.first_session_date:
-                                dt = prof.first_session_date
-                                if timezone.is_aware(dt):
-                                    dt = timezone.make_naive(dt)
-                                year, week, _ = dt.isocalendar()
-                                key = f"{year}-W{week:02d}"
-                                week_data[key] += 1
-                        data = [{'period': k, 'count': v} for k, v in sorted(week_data.items())]
-                    else:  # day
-                        day_data = defaultdict(int)
-                        for prof in professors_list:
-                            if prof.first_session_date:
-                                dt = prof.first_session_date
-                                if timezone.is_aware(dt):
-                                    dt = timezone.make_naive(dt)
-                                period_key = dt.strftime('%Y-%m-%d')
-                                day_data[period_key] += 1
-                        data = [{'period': k, 'count': v} for k, v in sorted(day_data.items())]
-                except Exception as e:
-                    import traceback
-                    print(f"Error en consulta de professors: {e}")
-                    print(traceback.format_exc())
-                    data = []
-            
+                # Profesores nuevos: fecha de la PRIMERA sesión de cada profesor
+                # (equivale al Min('game_sessions__created_at') del ORM).
+                first_by_professor = {}
+                for s in scan_all_sessions():
+                    pid = s.get('professor_id')
+                    created = _naive_dt(_parse_iso(s.get('created_at')))
+                    if pid is None or created is None:
+                        continue
+                    if pid not in first_by_professor or created < first_by_professor[pid]:
+                        first_by_professor[pid] = created
+                event_dts = list(first_by_professor.values())
             elif metric == 'students':
-                # Estudiantes nuevos (primera participación)
-                # Obtener estudiantes con su primera fecha de juego
-                students = Student.objects.annotate(
-                    first_play_date=Min('team_students__team__game_session__created_at')
-                ).filter(first_play_date__isnull=False)
-                
-                if start_date:
-                    students = students.filter(first_play_date__gte=start_date)
-                if end_date:
-                    students = students.filter(first_play_date__lte=end_date)
-                
-                # Agrupar manualmente en Python (MySQL con timezone tiene problemas)
-                try:
-                    # Forzar evaluación del queryset para que los campos anotados estén disponibles
-                    students_list = list(students)
-                    from collections import defaultdict
-                    
-                    if period == 'year':
-                        year_data = defaultdict(int)
-                        for student in students_list:
-                            if student.first_play_date:
-                                dt = student.first_play_date
-                                if timezone.is_aware(dt):
-                                    dt = timezone.make_naive(dt)
-                                year_data[str(dt.year)] += 1
-                        data = [{'period': k, 'count': v} for k, v in sorted(year_data.items())]
-                    elif period == 'month':
-                        month_data = defaultdict(int)
-                        for student in students_list:
-                            if student.first_play_date:
-                                dt = student.first_play_date
-                                if timezone.is_aware(dt):
-                                    dt = timezone.make_naive(dt)
-                                period_key = f"{dt.year}-{dt.month:02d}"
-                                month_data[period_key] += 1
-                        data = [{'period': k, 'count': v} for k, v in sorted(month_data.items())]
-                    elif period == 'week':
-                        week_data = defaultdict(int)
-                        for student in students_list:
-                            if student.first_play_date:
-                                dt = student.first_play_date
-                                if timezone.is_aware(dt):
-                                    dt = timezone.make_naive(dt)
-                                year, week, _ = dt.isocalendar()
-                                key = f"{year}-W{week:02d}"
-                                week_data[key] += 1
-                        data = [{'period': k, 'count': v} for k, v in sorted(week_data.items())]
-                    else:  # day
-                        day_data = defaultdict(int)
-                        for student in students_list:
-                            if student.first_play_date:
-                                dt = student.first_play_date
-                                if timezone.is_aware(dt):
-                                    dt = timezone.make_naive(dt)
-                                period_key = dt.strftime('%Y-%m-%d')
-                                day_data[period_key] += 1
-                        data = [{'period': k, 'count': v} for k, v in sorted(day_data.items())]
-                except Exception as e:
-                    import traceback
-                    print(f"Error en consulta de students: {e}")
-                    print(traceback.format_exc())
-                    data = []
-            
+                # Estudiantes nuevos: primera participación de cada student_id
+                # (equivale al Min('team_students__team__game_session__created_at')
+                # del ORM). La fecha de juego de un estudiante es el created_at de
+                # la sesión de cada equipo al que pertenece; nos quedamos con la
+                # más temprana por estudiante.
+                created_by_room = {}
+                for s in scan_all_sessions():
+                    created = _naive_dt(_parse_iso(s.get('created_at')))
+                    if created is not None:
+                        created_by_room[s['room_code']] = created
+                first_by_student = {}
+                for team in scan_all_teams():
+                    created = created_by_room.get(team.get('room_code'))
+                    if created is None:
+                        continue
+                    for sid in team.get('student_ids', []):
+                        if sid not in first_by_student or created < first_by_student[sid]:
+                            first_by_student[sid] = created
+                event_dts = list(first_by_student.values())
+            else:
+                event_dts = []
+
+            # Filtro de rango (misma semántica __gte/__lte que el ORM: límites
+            # inclusivos a medianoche del día indicado).
+            start_dt = _naive_dt(_parse_iso(start_date)) if start_date else None
+            end_dt = _naive_dt(_parse_iso(end_date)) if end_date else None
+            filtered = [
+                dt for dt in event_dts
+                if dt is not None
+                and (start_dt is None or dt >= start_dt)
+                and (end_dt is None or dt <= end_dt)
+            ]
+            data = _bucket_by_period(filtered, period)
+
             return Response({
                 'metric': metric,
                 'period': period,
@@ -340,10 +250,11 @@ class AdminDashboardViewSet(viewsets.ViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        total = GameSession.objects.count()
-        completed = GameSession.objects.filter(status='completed').count()
-        cancelled = GameSession.objects.filter(status='cancelled').count()
-        
+        sessions = scan_all_sessions()
+        total = len(sessions)
+        completed = sum(1 for s in sessions if s.get('status') == 'completed')
+        cancelled = sum(1 for s in sessions if s.get('status') == 'cancelled')
+
         # Calcular porcentajes solo con completadas y canceladas
         total_for_percentage = completed + cancelled
         
@@ -383,20 +294,15 @@ class AdminDashboardViewSet(viewsets.ViewSet):
             if metric and metric.total_completions > 0:
                 avg_duration = metric.avg_duration_seconds
             else:
-                # Calcular en tiempo real
-                session_stages = SessionStage.objects.filter(
-                    stage=stage,
-                    status='completed',
-                    completed_at__isnull=False,
-                    started_at__isnull=False
-                )
-                
+                # Fallback: calcular en tiempo real desde DynamoDB
                 durations = []
-                for ss in session_stages:
-                    if ss.completed_at and ss.started_at:
-                        duration = (ss.completed_at - ss.started_at).total_seconds()
+                for ss in scan_all_stages(stage_id=stage.id):
+                    if ss.get('status') != 'completed':
+                        continue
+                    duration = _duration_seconds(ss)
+                    if duration is not None:
                         durations.append(duration)
-                
+
                 avg_duration = sum(durations) / len(durations) if durations else 0
             
             data.append({
@@ -441,21 +347,17 @@ class AdminDashboardViewSet(viewsets.ViewSet):
             if metric and metric.total_completions > 0:
                 avg_duration = metric.avg_duration_seconds
             else:
-                # Calcular en tiempo real
-                progresses = TeamActivityProgress.objects.filter(
-                    activity=activity,
-                    session_stage__stage=stage,
-                    status='completed',
-                    completed_at__isnull=False,
-                    started_at__isnull=False
-                )
-                
+                # Fallback: calcular en tiempo real desde DynamoDB. Filtrar por
+                # activity_id basta: una Activity pertenece a una sola Stage, así
+                # que equivale al filtro activity+session_stage__stage del ORM.
                 durations = []
-                for progress in progresses:
-                    if progress.completed_at and progress.started_at:
-                        duration = (progress.completed_at - progress.started_at).total_seconds()
+                for progress in scan_all_progress(activity_id=activity.id):
+                    if progress.get('status') != 'completed':
+                        continue
+                    duration = _duration_seconds(progress)
+                    if duration is not None:
                         durations.append(duration)
-                
+
                 avg_duration = sum(durations) / len(durations) if durations else 0
             
             data.append({
@@ -488,20 +390,27 @@ class AdminDashboardViewSet(viewsets.ViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        # Obtener todos los progresos completados de esta actividad
-        progresses = TeamActivityProgress.objects.filter(
-            activity=activity,
-            status='completed',
-            completed_at__isnull=False,
-            started_at__isnull=False
+        # Una sola Scan de todos los progresos; se agrupa por activity_id en
+        # Python (evita N+1 Scans para la comparación con otras actividades).
+        all_progress = scan_all_progress()
+
+        def _completed_pairs(items):
+            """(item, duración) sólo para progresos completados con ambos
+            timestamps presentes."""
+            pairs = []
+            for p in items:
+                if p.get('status') != 'completed':
+                    continue
+                d = _duration_seconds(p)
+                if d is not None:
+                    pairs.append((p, d))
+            return pairs
+
+        target_pairs = _completed_pairs(
+            [p for p in all_progress if p.get('activity_id') == activity.id]
         )
-        
-        durations = []
-        for progress in progresses:
-            if progress.completed_at and progress.started_at:
-                duration = (progress.completed_at - progress.started_at).total_seconds()
-                durations.append(duration)
-        
+        durations = [d for _p, d in target_pairs]
+
         if not durations:
             return Response({
                 'activity_id': activity.id,
@@ -549,45 +458,38 @@ class AdminDashboardViewSet(viewsets.ViewSet):
         ]
         
         # Serie temporal (agrupado por fecha de completación)
-        # Calcular duración manualmente ya que Avg no funciona directamente con F() para fechas
         time_series_data = {}
-        for progress in progresses:
-            if progress.completed_at and progress.started_at:
-                date = progress.completed_at.date()
-                duration = (progress.completed_at - progress.started_at).total_seconds()
-                if date not in time_series_data:
-                    time_series_data[date] = {'durations': [], 'count': 0}
-                time_series_data[date]['durations'].append(duration)
-                time_series_data[date]['count'] += 1
-        
+        for progress, duration in target_pairs:
+            completed = _parse_iso(progress.get('completed_at'))
+            day = completed.date()
+            if day not in time_series_data:
+                time_series_data[day] = {'durations': [], 'count': 0}
+            time_series_data[day]['durations'].append(duration)
+            time_series_data[day]['count'] += 1
+
         time_series = [
             {
-                'date': str(date),
+                'date': str(day),
                 'avg_duration': round(sum(data['durations']) / len(data['durations']), 2),
                 'count': data['count']
             }
-            for date, data in sorted(time_series_data.items())
+            for day, data in sorted(time_series_data.items())
         ]
-        
+
         # Comparación con otras actividades de la misma etapa
         other_activities = Activity.objects.filter(
             stage=activity.stage
         ).exclude(id=activity.id)
-        
+
+        progress_by_activity = defaultdict(list)
+        for p in all_progress:
+            progress_by_activity[p.get('activity_id')].append(p)
+
         comparison = []
         for other_activity in other_activities:
-            other_progresses = TeamActivityProgress.objects.filter(
-                activity=other_activity,
-                status='completed',
-                completed_at__isnull=False,
-                started_at__isnull=False
-            )
-            other_durations = []
-            for progress in other_progresses:
-                if progress.completed_at and progress.started_at:
-                    duration = (progress.completed_at - progress.started_at).total_seconds()
-                    other_durations.append(duration)
-            
+            other_durations = [
+                d for _p, d in _completed_pairs(progress_by_activity.get(other_activity.id, []))
+            ]
             if other_durations:
                 comparison.append({
                     'activity_id': other_activity.id,
@@ -617,21 +519,28 @@ class AdminDashboardViewSet(viewsets.ViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        # Usar métricas cacheadas o calcular en tiempo real
+        # Preferir métricas cacheadas; sólo escanear DynamoDB si algún tema no
+        # tiene métrica (fallback en tiempo real).
         topics = Topic.objects.filter(is_active=True)
+        metrics_by_topic = {
+            m.topic_id: m for m in TopicSelectionMetric.objects.filter(topic__in=topics)
+        }
+        topic_counts = None  # scan diferido
         data = []
-        
+
         for topic in topics:
-            metric = TopicSelectionMetric.objects.filter(topic=topic).first()
-            
+            metric = metrics_by_topic.get(topic.id)
+
             if metric:
                 selection_count = metric.selection_count
             else:
-                # Calcular en tiempo real
-                selection_count = TeamActivityProgress.objects.filter(
-                    selected_topic=topic
-                ).count()
-            
+                if topic_counts is None:
+                    topic_counts = Counter(
+                        p.get('selected_topic_id') for p in scan_all_progress()
+                        if p.get('selected_topic_id') is not None
+                    )
+                selection_count = topic_counts.get(topic.id, 0)
+
             data.append({
                 'topic_id': topic.id,
                 'topic_name': topic.name,
@@ -664,21 +573,28 @@ class AdminDashboardViewSet(viewsets.ViewSet):
         
         # Obtener desafíos de este tema
         challenges = Challenge.objects.filter(topic=topic, is_active=True)
+        metrics_by_challenge = {
+            m.challenge_id: m
+            for m in ChallengeSelectionMetric.objects.filter(challenge__in=challenges)
+        }
+        challenge_counts = None  # scan diferido
         data = []
-        
+
         for challenge in challenges:
-            metric = ChallengeSelectionMetric.objects.filter(challenge=challenge).first()
-            
+            metric = metrics_by_challenge.get(challenge.id)
+
             if metric:
                 selection_count = metric.selection_count
                 avg_tokens = metric.avg_tokens_earned
             else:
-                # Calcular en tiempo real
-                selection_count = TeamActivityProgress.objects.filter(
-                    selected_challenge=challenge
-                ).count()
+                if challenge_counts is None:
+                    challenge_counts = Counter(
+                        p.get('selected_challenge_id') for p in scan_all_progress()
+                        if p.get('selected_challenge_id') is not None
+                    )
+                selection_count = challenge_counts.get(challenge.id, 0)
                 avg_tokens = 0  # TODO: calcular tokens promedio
-            
+
             data.append({
                 'challenge_id': challenge.id,
                 'challenge_title': challenge.title,
@@ -713,32 +629,50 @@ class AdminDashboardViewSet(viewsets.ViewSet):
             )
         
         # Obtener todas las selecciones de este desafío
-        selections = TeamActivityProgress.objects.filter(
-            selected_challenge=challenge
-        ).select_related('team', 'team__game_session', 'session_stage')
-        
-        # Frecuencia de selección en el tiempo
-        frequency_time_series = list(
-            selections.annotate(
-                date=TruncDate('completed_at')
-            ).values('date').annotate(
-                count=Count('id')
-            ).order_by('date')
-        )
-        
-        # Sesiones que lo usaron
-        sessions_used = GameSession.objects.filter(
-            teams__activity_progress__selected_challenge=challenge
-        ).distinct().values('id', 'room_code', 'created_at', 'status')
-        
+        selections = [
+            p for p in scan_all_progress()
+            if p.get('selected_challenge_id') == challenge.id
+        ]
+
+        # Frecuencia de selección en el tiempo (agrupado por fecha de
+        # completación; TruncDate del ORM dejaba NULL primero -> aquí None).
+        freq_counts = Counter()
+        for p in selections:
+            completed = _parse_iso(p.get('completed_at'))
+            freq_counts[completed.date() if completed else None] += 1
+        frequency_time_series = [
+            {'date': day, 'count': count}
+            for day, count in sorted(
+                freq_counts.items(),
+                key=lambda kv: (kv[0] is not None, kv[0]),
+            )
+        ]
+
+        # Sesiones que lo usaron (join DynamoDB por room_code; ya no hay id
+        # entero, el room_code ES el identificador de la sesión).
+        used_room_codes = {p.get('room_code') for p in selections if p.get('room_code')}
+        sessions_by_room = {
+            s['room_code']: s for s in scan_all_sessions()
+            if s['room_code'] in used_room_codes
+        }
+        sessions_used = [
+            {
+                'id': s['room_code'],
+                'room_code': s['room_code'],
+                'created_at': s.get('created_at'),
+                'status': s.get('status'),
+            }
+            for s in sorted(sessions_by_room.values(), key=lambda s: s['room_code'])
+        ]
+
         # Tokens promedio obtenidos (TODO: implementar cálculo real)
         avg_tokens = 0
-        
+
         return Response({
             'challenge_id': challenge.id,
             'challenge_title': challenge.title,
             'selection_frequency': frequency_time_series,
-            'sessions_used': list(sessions_used),
+            'sessions_used': sessions_used,
             'avg_tokens': round(avg_tokens, 2)
         })
     
@@ -755,12 +689,17 @@ class AdminDashboardViewSet(viewsets.ViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        # Total que jugaron
-        total_played = TeamStudent.objects.values('student').distinct().count()
-        
-        # Total que respondieron
-        total_responded = ReflectionEvaluation.objects.values('student_email').distinct().count()
-        
+        # Total que jugaron (student_ids únicos en todos los equipos)
+        total_played = len({
+            sid for team in scan_all_teams() for sid in team.get('student_ids', [])
+        })
+
+        # Total que respondieron (emails únicos en las reflexiones)
+        total_responded = len({
+            r.get('student_email') for r in scan_all_reflections()
+            if r.get('student_email')
+        })
+
         return Response({
             'total_played': total_played,
             'total_responded': total_responded,
@@ -776,26 +715,30 @@ class AdminDashboardViewSet(viewsets.ViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
+        reflections = scan_all_reflections()
+
         # Áreas de valor (múltiple selección)
         value_areas_counter = Counter()
-        for eval in ReflectionEvaluation.objects.all():
-            if eval.value_areas:
-                value_areas_counter.update(eval.value_areas)
-        
-        # Satisfacción
-        satisfaction_counts = ReflectionEvaluation.objects.values('satisfaction').annotate(
-            count=Count('id')
-        )
-        
-        # Interés en emprender
-        interest_counts = ReflectionEvaluation.objects.values('entrepreneurship_interest').annotate(
-            count=Count('id')
-        )
-        
+        for r in reflections:
+            if r.get('value_areas'):
+                value_areas_counter.update(r['value_areas'])
+
+        # Satisfacción / interés en emprender (equivale a .values(...).annotate(Count))
+        satisfaction_counter = Counter(r.get('satisfaction') for r in reflections)
+        interest_counter = Counter(r.get('entrepreneurship_interest') for r in reflections)
+
+        def _as_rows(counter, key):
+            return [
+                {key: value, 'count': count}
+                for value, count in sorted(
+                    counter.items(), key=lambda kv: (kv[0] is None, kv[0] or '')
+                )
+            ]
+
         return Response({
             'value_areas': dict(value_areas_counter),
-            'satisfaction': list(satisfaction_counts),
-            'entrepreneurship_interest': list(interest_counts)
+            'satisfaction': _as_rows(satisfaction_counter, 'satisfaction'),
+            'entrepreneurship_interest': _as_rows(interest_counter, 'entrepreneurship_interest')
         })
     
     @action(detail=False, methods=['get'])
@@ -807,47 +750,55 @@ class AdminDashboardViewSet(viewsets.ViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        queryset = ReflectionEvaluation.objects.filter(
-            comments__isnull=False
-        ).exclude(comments='').select_related('game_session')
-        
-        # Filtros
+        # Sólo reflexiones con comentario no vacío (isnull=False + excluir '')
+        reflections = [r for r in scan_all_reflections() if r.get('comments')]
+
+        # Filtros (aplicados en Python sobre la lista materializada)
+        # session_id se mapea a room_code: ya no existe el id entero de sesión,
+        # el room_code ES el identificador y es lo que devolvemos como session_id.
         session_id = request.query_params.get('session_id')
         if session_id:
-            queryset = queryset.filter(game_session_id=session_id)
-        
+            reflections = [r for r in reflections if r.get('room_code') == session_id]
+
         search = request.query_params.get('search')
         if search:
-            queryset = queryset.filter(comments__icontains=search)
-        
+            needle = search.lower()
+            reflections = [r for r in reflections if needle in (r.get('comments') or '').lower()]
+
         date_from = request.query_params.get('date_from')
         if date_from:
-            queryset = queryset.filter(created_at__gte=date_from)
-        
-        queryset = queryset.order_by('-created_at')
-        
-        # Paginación
+            bound = _naive_dt(_parse_iso(date_from))
+            if bound is not None:
+                reflections = [
+                    r for r in reflections
+                    if (_naive_dt(_parse_iso(r.get('created_at'))) or datetime.min) >= bound
+                ]
+
+        # Orden descendente por created_at (ISO ordena cronológicamente)
+        reflections.sort(key=lambda r: r.get('created_at') or '', reverse=True)
+
+        # Paginación: se corta la lista materializada, no un queryset
         page = int(request.query_params.get('page', 1))
         page_size = int(request.query_params.get('page_size', 20))
         start = (page - 1) * page_size
         end = start + page_size
-        
-        total = queryset.count()
-        comments = queryset[start:end]
-        
+
+        total = len(reflections)
+        comments = reflections[start:end]
+
         return Response({
             'total': total,
             'page': page,
             'page_size': page_size,
             'results': [
                 {
-                    'id': c.id,
-                    'student_name': c.student_name,
-                    'student_email': c.student_email,
-                    'session_room_code': c.game_session.room_code,
-                    'session_id': c.game_session.id,
-                    'created_at': c.created_at,
-                    'comment': c.comments
+                    'id': c.get('reflection_id'),
+                    'student_name': c.get('student_name'),
+                    'student_email': c.get('student_email'),
+                    'session_room_code': c.get('room_code'),
+                    'session_id': c.get('room_code'),
+                    'created_at': c.get('created_at'),
+                    'comment': c.get('comments')
                 }
                 for c in comments
             ]
@@ -866,21 +817,27 @@ class AdminDashboardViewSet(viewsets.ViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        # Obtener todas las facultades
+        # Escanear sesiones (DynamoDB) y hacer el join Course->Career->Faculty
+        # por lotes en el ORM (una sola query id__in, no N+1).
         faculties = Faculty.objects.filter(is_active=True)
-        data = []
-        
-        for faculty in faculties:
-            # Contar juegos a través de Course -> Career -> Faculty
-            games_count = GameSession.objects.filter(
-                course__career__faculty=faculty
-            ).count()
-            
-            data.append({
+        sessions = scan_all_sessions()
+        course_ids = {s.get('course_id') for s in sessions if s.get('course_id') is not None}
+        course_to_faculty = dict(
+            Course.objects.filter(id__in=course_ids).values_list('id', 'career__faculty_id')
+        )
+        faculty_counts = Counter(
+            course_to_faculty.get(s.get('course_id')) for s in sessions
+            if course_to_faculty.get(s.get('course_id')) is not None
+        )
+
+        data = [
+            {
                 'faculty_id': faculty.id,
                 'faculty_name': faculty.name,
-                'games_count': games_count
-            })
+                'games_count': faculty_counts.get(faculty.id, 0)
+            }
+            for faculty in faculties
+        ]
         
         # Ordenar por cantidad de juegos
         data.sort(key=lambda x: x['games_count'], reverse=True)
@@ -906,21 +863,26 @@ class AdminDashboardViewSet(viewsets.ViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        # Obtener carreras de esta facultad
+        # Escanear sesiones y hacer el join Course->Career por lotes (id__in).
         careers = Career.objects.filter(faculty=faculty, is_active=True)
-        data = []
-        
-        for career in careers:
-            # Contar juegos a través de Course -> Career
-            games_count = GameSession.objects.filter(
-                course__career=career
-            ).count()
-            
-            data.append({
+        sessions = scan_all_sessions()
+        course_ids = {s.get('course_id') for s in sessions if s.get('course_id') is not None}
+        course_to_career = dict(
+            Course.objects.filter(id__in=course_ids).values_list('id', 'career_id')
+        )
+        career_counts = Counter(
+            course_to_career.get(s.get('course_id')) for s in sessions
+            if course_to_career.get(s.get('course_id')) is not None
+        )
+
+        data = [
+            {
                 'career_id': career.id,
                 'career_name': career.name,
-                'games_count': games_count
-            })
+                'games_count': career_counts.get(career.id, 0)
+            }
+            for career in careers
+        ]
         
         # Ordenar por cantidad de juegos
         data.sort(key=lambda x: x['games_count'], reverse=True)
@@ -940,20 +902,12 @@ class AdminDashboardViewSet(viewsets.ViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        # Obtener todas las sesiones canceladas con sus motivos
-        cancelled_sessions = GameSession.objects.filter(
-            status='cancelled'
-        ).exclude(
-            cancellation_reason__isnull=True
-        ).exclude(
-            cancellation_reason=''
-        ).values(
-            'cancellation_reason',
-            'cancellation_reason_other'
-        )
-        
-        # Convertir a lista para poder contar
-        sessions_list = list(cancelled_sessions)
+        # Sesiones canceladas con motivo (isnull=False + excluir '') filtradas
+        # en Python desde el Scan por status='cancelled'.
+        sessions_list = [
+            s for s in scan_all_sessions(status='cancelled')
+            if s.get('cancellation_reason')
+        ]
         total_cancelled = len(sessions_list)
         
         # Agrupar por motivo de cancelación
