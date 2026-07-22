@@ -76,6 +76,7 @@ from game_sessions.dynamodb.evaluations import (
     create_reflection, list_reflections, get_reflection, update_reflection, scan_all_reflections,
 )
 from game_sessions.dynamodb.client import now_iso
+from admin_dashboard.services import record_activity_progress_metric, record_stage_duration_metric
 
 
 class GameSessionViewSet(viewsets.ViewSet):
@@ -854,10 +855,11 @@ class GameSessionViewSet(viewsets.ViewSet):
         for team in list_teams(room_code):
             existing = get_progress(room_code, team['team_id'], activity_id)
             completed_at = (existing.get('completed_at') if existing else None) or now
-            self._upsert_progress_preserving(
+            progress = self._upsert_progress_preserving(
                 room_code, team['team_id'], activity_id,
                 status='completed', progress_percentage=100, completed_at=completed_at,
             )
+            record_activity_progress_metric(progress)
 
     @action(detail=True, methods=['post'])
     def start(self, request, pk=None):
@@ -1108,10 +1110,10 @@ class GameSessionViewSet(viewsets.ViewSet):
                 self._complete_activity_progress_for_all_teams(room_code, current_activity_id)
 
                 # Marcar la etapa como completada.
-                # STATUS='COMPLETED' CALL SITE for Task 22's future
-                # admin_dashboard metric hook (SessionStage side).
                 completed_at = session_stage.get('completed_at') or now_iso()
-                update_session_stage(room_code, current_stage_id, status='completed', completed_at=completed_at)
+                updated_stage = update_session_stage(room_code, current_stage_id, status='completed', completed_at=completed_at)
+                if updated_stage:
+                    record_stage_duration_metric(updated_stage)
 
             # Limpiar current_activity para indicar que estamos en resultados
             update_session(room_code, current_activity_id=None)
@@ -1673,15 +1675,15 @@ class GameSessionViewSet(viewsets.ViewSet):
             )
 
         # Obtener o crear session_stage y marcarla como completada.
-        # STATUS='COMPLETED' CALL SITE for Task 22's future admin_dashboard
-        # metric hook (SessionStage side).
         session_stage = get_session_stage(room_code, current_stage_id)
         if session_stage is None:
             create_session_stage(room_code, current_stage_id)
-            update_session_stage(room_code, current_stage_id, status='completed', completed_at=now_iso())
+            updated_stage = update_session_stage(room_code, current_stage_id, status='completed', completed_at=now_iso())
         else:
             completed_at = session_stage.get('completed_at') or now_iso()
-            update_session_stage(room_code, current_stage_id, status='completed', completed_at=completed_at)
+            updated_stage = update_session_stage(room_code, current_stage_id, status='completed', completed_at=completed_at)
+        if updated_stage:
+            record_stage_duration_metric(updated_stage)
 
         # Si hay una actividad actual, marcarla como completada para todos los equipos
         current_activity_id = session.get('current_activity_id')
@@ -2811,9 +2813,6 @@ class SessionStageViewSet(viewsets.ViewSet):
         _complete_activity_progress_for_all_teams, which only guards
         completed_at and always re-syncs started_at unconditionally
         elsewhere).
-
-        STATUS='COMPLETED' CALL SITE for Task 22's future admin_dashboard
-        metric hook (TeamActivityProgress side).
         """
         existing = get_progress(room_code, team_id, activity_id)
         now = now_iso()
@@ -2830,7 +2829,9 @@ class SessionStageViewSet(viewsets.ViewSet):
                 'status': 'completed', 'progress_percentage': 100,
                 'completed_at': now, 'started_at': now,
             }
-        return upsert_progress(room_code, team_id, activity_id, **fields)
+        progress = upsert_progress(room_code, team_id, activity_id, **fields)
+        record_activity_progress_metric(progress)
+        return progress
 
     @action(detail=True, methods=['post'], authentication_classes=[JWTAuthentication, SessionAuthentication])
     def generate_presentation_order(self, request, pk=None):
@@ -3689,6 +3690,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
             fields['progress_percentage'] = request.data.get('progress_percentage')
 
         progress = upsert_progress(room_code, team_id, activity_id, **fields)
+        record_activity_progress_metric(progress)
         annotate_team_activity_progress_display_fields(progress, team=team)
         serializer = TeamActivityProgressSerializer(progress)
         return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
@@ -3750,6 +3752,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
             fields['progress_percentage'] = request.data.get('progress_percentage')
 
         progress = upsert_progress(room_code, team_id, activity_id, **fields)
+        record_activity_progress_metric(progress)
         annotate_team_activity_progress_display_fields(progress, team=team)
         serializer = TeamActivityProgressSerializer(progress)
         return Response(serializer.data)
@@ -4053,6 +4056,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         # (ver _award_tokens más arriba). No es necesario otorgarlos aquí de nuevo.
 
         progress = upsert_progress(room_code, team_id, activity_id, **fields)
+        record_activity_progress_metric(progress)
 
         # Recargar el equipo para obtener tokens actualizados
         team = get_team(room_code, team_id) or team
@@ -4256,6 +4260,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
             fields['progress_percentage'] = int(total_progress)
 
         progress = upsert_progress(room_code, team_id, activity_id, **fields)
+        record_activity_progress_metric(progress)
 
         # Recargar el equipo para obtener tokens actualizados
         team = get_team(room_code, team_id) or team
@@ -4442,6 +4447,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
             fields['progress_percentage'] = 100
 
         progress = upsert_progress(room_code, team_id, activity_id, **fields)
+        record_activity_progress_metric(progress)
 
         # Recargar el equipo para obtener tokens actualizados
         team = get_team(room_code, team_id) or team
@@ -4525,6 +4531,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
             fields['started_at'] = now_iso()
 
         progress = upsert_progress(room_code, team_id, activity_id, **fields)
+        record_activity_progress_metric(progress)
         annotate_team_activity_progress_display_fields(progress, team=team)
         serializer = TeamActivityProgressSerializer(progress)
         return Response(serializer.data)
@@ -4674,6 +4681,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
             fields['started_at'] = now_iso()
 
         progress = upsert_progress(room_code, team_id, activity_id, **fields)
+        record_activity_progress_metric(progress)
 
         # Recargar el desafío para obtener la imagen actualizada
         challenge.refresh_from_db()
@@ -4921,6 +4929,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
             fields['started_at'] = now_iso()
 
         progress = upsert_progress(room_code, team_id, activity_id, **fields)
+        record_activity_progress_metric(progress)
         annotate_team_activity_progress_display_fields(progress, team=team)
         serializer = TeamActivityProgressSerializer(progress)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -5907,7 +5916,9 @@ class PeerEvaluationViewSet(viewsets.ViewSet):
                 'status': 'completed', 'progress_percentage': 100,
                 'completed_at': now, 'started_at': now,
             }
-        return upsert_progress(room_code, team_id, activity_id, **fields)
+        progress = upsert_progress(room_code, team_id, activity_id, **fields)
+        record_activity_progress_metric(progress)
+        return progress
 
     def _maybe_complete_presentation_activity(self, room_code, evaluated_team_id):
         """Once a team has been evaluated by every other team in the
