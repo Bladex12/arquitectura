@@ -64,6 +64,34 @@ def delete_session_group(session_group_id):
     table.delete_item(Key={'PK': keys.session_group_pk(session_group_id), 'SK': keys.metadata_sk()})
 
 
+def delete_session_group_if_empty(session_group_id):
+    """Deletes the SessionGroup if it has no remaining GameSessions.
+    Replaces game_sessions/signals.py's post_delete-based
+    delete_empty_session_group - there is no signal equivalent for
+    DynamoDB writes, so callers that delete a GameSession must call this
+    explicitly right after, exactly once, passing the session's
+    session_group_id (if any).
+
+    Accepted risk: the ORM version wrapped this in
+    select_for_update()/transaction.atomic() to guard against a race
+    where two concurrent deletes of the last two sessions in a group
+    both see "1 remaining" and neither deletes the group, leaving an
+    orphaned SessionGroup. There's no cheap DynamoDB-native equivalent
+    (would need a distributed lock or conditional counter), so at
+    course-project scale and low deletion frequency this races and is
+    accepted rather than engineered around."""
+    from game_sessions.dynamodb.game_session import list_sessions_for_professor
+    group = get_session_group(session_group_id)
+    if group is None:
+        return
+    remaining = [
+        s for s in list_sessions_for_professor(group['professor_id'])
+        if s.get('session_group_id') == session_group_id
+    ]
+    if not remaining:
+        delete_session_group(session_group_id)
+
+
 def create_tablet(tablet_code):
     """Creates a new Tablet catalog item. Returns None instead of
     raising if tablet_code is already registered."""

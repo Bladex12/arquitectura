@@ -54,7 +54,7 @@ from game_sessions.dynamodb.team import (
 )
 from game_sessions.dynamodb.catalog import (
     create_session_group, list_tablets, create_tablet, get_tablet,
-    deactivate_tablet, activate_tablet, delete_tablet,
+    deactivate_tablet, activate_tablet, delete_tablet, delete_session_group_if_empty,
 )
 from game_sessions.dynamodb.stage_progress import (
     create_session_stage, get_session_stage, update_session_stage, upsert_progress, get_progress,
@@ -287,11 +287,12 @@ class GameSessionViewSet(viewsets.ViewSet):
         return Response(serializer.data)
 
     def destroy(self, request, pk=None):
-        # No SessionGroup-empty cascade check here -- that's Task 21's job.
         session = get_session(pk)
         if session is None:
             return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
         delete_session(pk)
+        if session.get('session_group_id'):
+            delete_session_group_if_empty(session['session_group_id'])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     # ------------------------------------------------------------------

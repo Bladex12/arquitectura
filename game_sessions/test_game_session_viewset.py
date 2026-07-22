@@ -20,6 +20,7 @@ from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from academic.models import Career, Course, Faculty
+from game_sessions.dynamodb.catalog import create_session_group, get_session_group
 from game_sessions.dynamodb.game_session import create_session, get_session, update_session_status
 from game_sessions.dynamodb.team import list_teams
 from game_sessions.dynamodb.testing import create_test_table
@@ -263,7 +264,7 @@ class UpdateTest(GameSessionViewSetTestCase):
 
 
 class DestroyTest(GameSessionViewSetTestCase):
-    def test_destroy_deletes_session_no_cascade_check(self):
+    def test_destroy_deletes_session_without_group(self):
         prof = make_professor()
         course = make_course()
         create_session('ROOMD', professor_id=prof.id, course_id=course.id)
@@ -281,6 +282,47 @@ class DestroyTest(GameSessionViewSetTestCase):
         response = client.delete('/api/sessions/game-sessions/UNKNOWN/')
 
         self.assertEqual(response.status_code, 404)
+
+    def test_destroy_last_session_in_group_deletes_group(self):
+        prof = make_professor()
+        course = make_course()
+        group = create_session_group(
+            professor_id=prof.id, course_id=course.id, total_students=10, number_of_sessions=1,
+        )
+        create_session(
+            'ROOMLAST', professor_id=prof.id, course_id=course.id,
+            session_group_id=group['session_group_id'],
+        )
+        client = make_client_for(prof.user)
+
+        response = client.delete('/api/sessions/game-sessions/ROOMLAST/')
+
+        self.assertEqual(response.status_code, 204)
+        self.assertIsNone(get_session('ROOMLAST'))
+        self.assertIsNone(get_session_group(group['session_group_id']))
+
+    def test_destroy_one_of_two_sessions_in_group_keeps_group(self):
+        prof = make_professor()
+        course = make_course()
+        group = create_session_group(
+            professor_id=prof.id, course_id=course.id, total_students=10, number_of_sessions=2,
+        )
+        create_session(
+            'ROOMONE', professor_id=prof.id, course_id=course.id,
+            session_group_id=group['session_group_id'],
+        )
+        create_session(
+            'ROOMTWO', professor_id=prof.id, course_id=course.id,
+            session_group_id=group['session_group_id'],
+        )
+        client = make_client_for(prof.user)
+
+        response = client.delete('/api/sessions/game-sessions/ROOMONE/')
+
+        self.assertEqual(response.status_code, 204)
+        self.assertIsNone(get_session('ROOMONE'))
+        self.assertIsNotNone(get_session('ROOMTWO'))
+        self.assertIsNotNone(get_session_group(group['session_group_id']))
 
 
 class CreateWithExcelTest(GameSessionViewSetTestCase):
