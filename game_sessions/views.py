@@ -1240,9 +1240,9 @@ class GameSessionViewSet(viewsets.ViewSet):
             all_acts = list(Activity.objects.filter(stage=stage_1).values(
                 'id', 'name', 'order_number', 'is_active', 'activity_type__code'
             ))
-            print(f'[start_stage_1] ⚠️ Ninguna estrategia encontró Personalización. '
-                  f'Actividades en Stage {stage_1.id}: {all_acts}')
-            print(f'[start_stage_1] ⚙️ Auto-creando ActivityType + Activity "Personalización"...')
+            logger.warning(f'[start_stage_1] ⚠️ Ninguna estrategia encontró Personalización. '
+                           f'Actividades en Stage {stage_1.id}: {all_acts}')
+            logger.info(f'[start_stage_1] ⚙️ Auto-creando ActivityType + Activity "Personalización"...')
 
             personalizacion_type, _ = ActivityType.objects.get_or_create(
                 code='personalizacion',
@@ -1272,9 +1272,9 @@ class GameSessionViewSet(viewsets.ViewSet):
                 order_number=free_order,
                 is_active=True,
             )
-            print(f'[start_stage_1] ✅ Actividad "Personalización" auto-creada '
-                  f'(id={first_activity.id}, order={free_order}). '
-                  f'Ejecuta create_initial_data para seedear correctamente.')
+            logger.info(f'[start_stage_1] ✅ Actividad "Personalización" auto-creada '
+                        f'(id={first_activity.id}, order={free_order}). '
+                        f'Ejecuta create_initial_data para seedear correctamente.')
 
         if not first_activity:
             # Esto no debería alcanzarse nunca tras la Estrategia 4, pero es una red de seguridad.
@@ -1324,11 +1324,11 @@ class GameSessionViewSet(viewsets.ViewSet):
         }
 
         # Log para debugging
-        print(f'[start_stage_1] Etapa 1 iniciada - Session: {room_code}')
-        print(f'  - current_stage: {stage_1.name} (ID: {stage_1.id})')
-        print(f'  - current_activity: {first_activity.name} (ID: {first_activity.id})')
-        print(f'  - current_stage_number: {response_data.get("current_stage_number")}')
-        print(f'  - current_activity_name: {response_data.get("current_activity_name")}')
+        logger.info(f'[start_stage_1] Etapa 1 iniciada - Session: {room_code}')
+        logger.info(f'  - current_stage: {stage_1.name} (ID: {stage_1.id})')
+        logger.info(f'  - current_activity: {first_activity.name} (ID: {first_activity.id})')
+        logger.info(f'  - current_stage_number: {response_data.get("current_stage_number")}')
+        logger.info(f'  - current_activity_name: {response_data.get("current_activity_name")}')
 
         return Response(response_data)
 

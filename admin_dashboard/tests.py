@@ -117,6 +117,30 @@ class RecordActivityProgressMetricTest(TestCase):
         self.assertEqual(TopicSelectionMetric.objects.get(topic=self.topic).selection_count, 1)
         self.assertEqual(ChallengeSelectionMetric.objects.get(challenge=self.challenge).selection_count, 1)
 
+    def test_missing_activity_does_not_raise(self):
+        # The DynamoDB write behind this dict has already committed by the
+        # time this is called -- a deleted Activity must not turn into a
+        # 500 for an analytics side-effect (Finding 2, final review).
+        item = self._completed_item(activity_id=999999)
+        with self.assertLogs('admin_dashboard.services', level='ERROR'):
+            record_activity_progress_metric(item)
+        self.assertFalse(ActivityDurationMetric.objects.exists())
+
+    def test_missing_topic_does_not_raise(self):
+        item = self._completed_item(status='in_progress', completed_at=None, selected_topic_id=999999)
+        with self.assertLogs('admin_dashboard.services', level='ERROR'):
+            record_activity_progress_metric(item)
+        self.assertFalse(TopicSelectionMetric.objects.exists())
+
+    def test_missing_challenge_does_not_raise(self):
+        item = self._completed_item(selected_challenge_id=999999)
+        with self.assertLogs('admin_dashboard.services', level='ERROR'):
+            record_activity_progress_metric(item)
+        self.assertFalse(ChallengeSelectionMetric.objects.exists())
+        # the duration metric (a separate, unrelated Activity lookup) still
+        # fires normally -- the missing-challenge failure doesn't leak into it.
+        self.assertEqual(ActivityDurationMetric.objects.get(activity=self.activity).total_completions, 1)
+
 
 class RecordStageDurationMetricTest(TestCase):
     def setUp(self):
@@ -159,6 +183,15 @@ class RecordStageDurationMetricTest(TestCase):
     def test_no_metric_when_timestamps_missing(self):
         record_stage_duration_metric(self._completed_item(started_at=None))
         record_stage_duration_metric(self._completed_item(completed_at=None))
+        self.assertFalse(StageDurationMetric.objects.exists())
+
+    def test_missing_stage_does_not_raise(self):
+        # Same defensive-write guarantee as record_activity_progress_metric
+        # above: the DynamoDB write already committed, a deleted Stage must
+        # not turn into a 500 (Finding 2, final review).
+        item = self._completed_item(stage_id=999999)
+        with self.assertLogs('admin_dashboard.services', level='ERROR'):
+            record_stage_duration_metric(item)
         self.assertFalse(StageDurationMetric.objects.exists())
 
 
