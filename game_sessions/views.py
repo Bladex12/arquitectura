@@ -25,11 +25,6 @@ from django.utils.dateparse import parse_datetime
 
 logger = logging.getLogger(__name__)
 from users.models import Professor, Student
-from .models import (
-    SessionGroup, TeamPersonalization,
-    TeamActivityProgress,
-    TeamRouletteAssignment, PeerEvaluation
-)
 from .serializers import (
     GameSessionSerializer, GameSessionCreateSerializer, annotate_game_session_display_fields,
     TeamSerializer, TeamPersonalizationSerializer,
