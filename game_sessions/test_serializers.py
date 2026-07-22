@@ -492,7 +492,7 @@ class PeerEvaluationSerializerTest(TestCase):
 
         data = PeerEvaluationSerializer(evaluation).data
 
-        self.assertEqual(data['id'], evaluation['SK'])
+        self.assertEqual(data['id'], 'team-a:team-b')
         self.assertEqual(data['evaluator_team'], 'team-a')
         self.assertEqual(data['evaluator_team_name'], 'Rojo')
         self.assertEqual(data['evaluated_team'], 'team-b')

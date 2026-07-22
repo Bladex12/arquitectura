@@ -56,3 +56,44 @@ def list_transactions(room_code):
         ConsistentRead=True,
     )
     return response['Items']
+
+
+def get_transaction(room_code, source_type, source_id):
+    """Returns the TokenTransaction item dict for one deterministic
+    (source_type, source_id) pair, or None if it doesn't exist. Only
+    valid for source-tied transactions (source_id is not None) - manual/
+    system transactions have no deterministic SK to look up by."""
+    table = get_table()
+    response = table.get_item(
+        Key={'PK': keys.session_pk(room_code), 'SK': keys.token_tx_sk_for_source(source_type, source_id)},
+        ConsistentRead=True,
+    )
+    return response.get('Item')
+
+
+def adjust_transaction_amount(room_code, source_type, source_id, new_amount):
+    """Changes an already-recorded source-tied transaction's amount (e.g.
+    a PeerEvaluation resubmitted with a different total_score changes how
+    many tokens the earlier award should have been). Returns
+    (updated_item, delta) where delta = new_amount - old_amount, so the
+    caller can apply the same delta to the team's tokens_total via
+    team.update_tokens (atomic ADD, not a fresh award). Returns (None, 0)
+    if no transaction exists for this (source_type, source_id) - this
+    function only adjusts an existing award, it never creates one (that's
+    create_transaction's job). Also returns (item, 0) as a no-op, without
+    writing, when new_amount already matches the stored amount."""
+    existing = get_transaction(room_code, source_type, source_id)
+    if existing is None:
+        return None, 0
+    delta = new_amount - existing['amount']
+    if delta == 0:
+        return existing, 0
+    table = get_table()
+    response = table.update_item(
+        Key={'PK': keys.session_pk(room_code), 'SK': keys.token_tx_sk_for_source(source_type, source_id)},
+        UpdateExpression='SET #amount = :amount',
+        ExpressionAttributeNames={'#amount': 'amount'},
+        ExpressionAttributeValues={':amount': new_amount},
+        ReturnValues='ALL_NEW',
+    )
+    return response['Attributes'], delta

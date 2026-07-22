@@ -40,7 +40,7 @@ from .serializers import (
     annotate_tablet_connection_display_fields,
     TeamRouletteAssignmentSerializer, annotate_team_roulette_assignment_display_fields,
     TokenTransactionSerializer, annotate_token_transaction_display_fields,
-    PeerEvaluationSerializer, ReflectionEvaluationSerializer
+    PeerEvaluationSerializer, annotate_peer_evaluation_display_fields, ReflectionEvaluationSerializer
 )
 from users.models import Student
 from botocore.exceptions import ClientError
@@ -64,12 +64,16 @@ from game_sessions.dynamodb.tablet_connection import (
     list_connections, disconnect, create_connection, get_connection, update_heartbeat,
     reactivate, find_connection_by_token,
 )
-from game_sessions.dynamodb.token_transaction import list_transactions, create_transaction
+from game_sessions.dynamodb.token_transaction import (
+    list_transactions, create_transaction, adjust_transaction_amount,
+)
 from game_sessions.dynamodb.bubble_roulette import (
     create_roulette_assignment, get_roulette_assignment, update_roulette_assignment,
     list_roulette_assignments,
 )
-from game_sessions.dynamodb.evaluations import list_peer_evaluations
+from game_sessions.dynamodb.evaluations import (
+    list_peer_evaluations, create_peer_evaluation, get_peer_evaluation, update_peer_evaluation,
+)
 from game_sessions.dynamodb.client import now_iso
 
 
@@ -5721,25 +5725,94 @@ class TokenTransactionViewSet(viewsets.ViewSet):
         return Response({'error': 'No implementado'}, status=status.HTTP_404_NOT_FOUND)
 
 
-class PeerEvaluationViewSet(viewsets.ModelViewSet):
+class PeerEvaluationViewSet(viewsets.ViewSet):
     """
     ViewSet para Evaluaciones Peer
+
+    DynamoDB cutover (Task 19): the entire class -- list/retrieve
+    (previously ORM-backed DRF mixins via ModelViewSet, never overridden
+    despite create/for_professor/for_team already being hand-written) plus
+    create/for_professor/for_team -- now reads/writes
+    game_sessions.dynamodb.evaluations (PeerEvaluation) /
+    game_sessions.dynamodb.token_transaction (the token-bookkeeping side
+    effect) / game_sessions.dynamodb.stage_progress (the presentation-
+    activity-completion side effect) instead of the PeerEvaluation/
+    TokenTransaction/TeamActivityProgress ORM models. viewsets.ModelViewSet
+    -> viewsets.ViewSet, same shape change as every other viewset this
+    cutover has touched -- there's no queryset left to back DRF's generic
+    mixins.
+
+    WHY list/retrieve had to be converted too, not just create (lesson
+    from Tasks 14/15's live-break mistake): frontend/src/pages/tablets/
+    etapa4/PresentacionPitch.tsx calls peerEvaluationsAPI.list({
+    evaluator_team, evaluated_team, game_session }) BEFORE every
+    submitEvaluation() call, specifically to check whether this pair
+    already submitted (see isCheckingEvaluation / checkExisting there).
+    Leaving list() ORM-backed while create() wrote DynamoDB-only would
+    have made that pre-submit check permanently blind to every
+    Dynamo-backed evaluation -- exactly Task 14/15's mistake pattern.
+    retrieve() has no confirmed live caller (peerEvaluations.ts exports no
+    retrieve/get-by-id), but is implemented for real (not stubbed) anyway
+    since the composite id fix below makes it cheap and correct, mirroring
+    Task 15/18's "done anyway for completeness/parity" call on their own
+    unused-but-implemented detail routes.
+
+    Token-bookkeeping side effect (pattern 2b, read-modify-write): a new
+    evaluation with tokens_awarded > 0 calls create_transaction() once
+    (idempotent per (room_code, source_type, source_id)), then
+    team.update_tokens(). A *re-submitted* evaluation for the same
+    (evaluator_team_id, evaluated_team_id) pair instead adjusts the
+    already-recorded transaction's amount via
+    token_transaction.adjust_transaction_amount() (get existing -> diff ->
+    single amount update) and applies only the delta to tokens_total --
+    mirrors the ORM's own "update the existing TokenTransaction.amount by
+    the difference" logic, adapted for DynamoDB's transaction items having
+    no update-in-place semantics without an explicit adjust helper. Both
+    paths are gated on a Stage(number=4) SessionStage existing in this
+    room, exactly like the ORM version (no session_stage -> no token
+    bookkeeping at all, evaluation is still created/updated).
+
+    source_id disambiguation convention for this class's token award
+    (settles pattern 2b's question, per Tasks 15/16/18's established
+    precedent): source_type stays 'peer_evaluation' (unchanged from the
+    ORM version); source_id is f'{evaluated_team_id}:{evaluator_team_id}'.
+    evaluated_team_id (the team actually RECEIVING the tokens via
+    update_tokens) leads the composite -- not evaluator_team_id -- because
+    create_transaction()'s uniqueness check is keyed on (room_code,
+    source_type, source_id), which is room-scoped only. Without the
+    awarded team's id leading source_id, two different evaluated teams
+    both receiving peer-evaluation tokens from evaluations in the same
+    room would risk colliding on the same key and only the first evaluated
+    team would ever be awarded -- the exact class of bug Tasks 15/16/18
+    each found and fixed for their own token-award call sites. See
+    _peer_eval_source_id and the cross-team regression test in this task's
+    test file.
+
+    Identifier-surface note (mirrors every other converted viewset's `id`
+    fix -- Task 15 on TeamActivityProgressSerializer, Task 18 on
+    TeamRouletteAssignmentSerializer): PeerEvaluationSerializer.id is now
+    a "<evaluator_team_id>:<evaluated_team_id>" composite, not the raw SK
+    (which contains '#' and is truncated by any real HTTP client before
+    the request reaches Django). _parse_peer_eval_pk parses it back.
     """
-    queryset = PeerEvaluation.objects.all()
-    serializer_class = PeerEvaluationSerializer
     permission_classes = [IsAuthenticated]
     authentication_classes = []  # No requerir autenticación (se controla con get_permissions)
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['evaluator_team', 'evaluated_team', 'game_session']
-    search_fields = ['evaluator_team__name', 'evaluated_team__name', 'game_session__room_code']
-    ordering_fields = ['submitted_at', 'total_score']
-    ordering = ['-submitted_at']
 
-    def get_queryset(self):
-        return PeerEvaluation.objects.select_related(
-            'evaluator_team', 'evaluated_team', 'game_session'
-        )
-    
+    # TeamActivityProgress fields upsert_progress() writes as a full
+    # overwrite -- _mark_progress_completed reads these forward from any
+    # existing item first so marking the presentation activity completed
+    # never silently discards whatever else was already saved on that row
+    # (e.g. pitch_* fields written by save_pitch). Duplicated from
+    # SessionStageViewSet._mark_progress_completed /
+    # TeamActivityProgressViewSet._PROGRESS_FIELD_NAMES rather than shared
+    # across viewsets, matching the established convention (see those
+    # classes' own docstrings) -- out of this task's scope to refactor.
+    _PROGRESS_FIELD_NAMES = (
+        'status', 'started_at', 'completed_at', 'progress_percentage', 'response_data',
+        'selected_topic_id', 'selected_challenge_id', 'prototype_image_url',
+        'pitch_intro_problem', 'pitch_solution', 'pitch_value', 'pitch_impact', 'pitch_closing',
+    )
+
     def get_permissions(self):
         """
         Permite leer sin autenticación para tablets
@@ -5748,305 +5821,354 @@ class PeerEvaluationViewSet(viewsets.ModelViewSet):
         if self.action in ['list', 'retrieve', 'create', 'for_professor', 'for_team']:
             return []  # Sin autenticación para tablets
         return super().get_permissions()
-    
+
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
+
+    def _parse_peer_eval_pk(self, pk):
+        """Parses a PeerEvaluation detail-route pk, which is
+        "<evaluator_team_id>:<evaluated_team_id>" (see
+        PeerEvaluationSerializer's id field for why it's ':'-joined rather
+        than the item's raw SK -- a URL-safety fix, not an arbitrary
+        choice). Both halves are UUID4 team ids (no colons), so a plain
+        partition on the first ':' is unambiguous. Returns
+        (evaluator_team_id, evaluated_team_id), or None if pk doesn't
+        match that shape."""
+        if not pk or ':' not in pk:
+            return None
+        evaluator_team_id, _, evaluated_team_id = pk.partition(':')
+        if not evaluator_team_id or not evaluated_team_id:
+            return None
+        return evaluator_team_id, evaluated_team_id
+
+    def _resolve_room_code(self, request, *team_ids):
+        """Resolves a room_code from the request's game_session/room_code
+        param, or falls back to scanning every team in every room for the
+        first of team_ids that matches -- same fallback TeamViewSet/
+        TeamActivityProgressViewSet/TokenTransactionViewSet already
+        established for callers that only send a bare team id."""
+        room_code = (
+            request.query_params.get('game_session') or request.query_params.get('room_code')
+            or request.data.get('game_session') or request.data.get('room_code')
+        )
+        if room_code:
+            return room_code
+        for team_id in team_ids:
+            if not team_id:
+                continue
+            team = next((t for t in scan_all_teams() if t['team_id'] == team_id), None)
+            if team:
+                return team['room_code']
+        return None
+
+    def _get_stage_4_session_stage(self, room_code):
+        """Returns the Etapa 4 SessionStage dict for this room, or None if
+        either Stage(number=4) doesn't exist in the challenges catalog or
+        this room never started it -- same gate the ORM version used
+        (`SessionStage.objects.filter(game_session=game_session,
+        stage__number=4).first()`) before doing any token bookkeeping or
+        presentation-completion check."""
+        from challenges.models import Stage
+
+        stage_4 = Stage.objects.filter(number=4, is_active=True).first()
+        if not stage_4:
+            return None
+        return get_session_stage(room_code, stage_4.id)
+
+    @staticmethod
+    def _peer_eval_source_id(evaluated_team_id, evaluator_team_id):
+        """Team-scoped composite source_id for this class's token award --
+        see the class docstring's "source_id disambiguation convention"
+        section for why evaluated_team_id (the team receiving the tokens)
+        must lead, not evaluator_team_id."""
+        return f'{evaluated_team_id}:{evaluator_team_id}'
+
+    def _mark_progress_completed(self, room_code, team_id, activity_id):
+        """Idempotent completion write for the Etapa 4 presentation
+        activity -- read existing -> preserve other fields -> single
+        upsert_progress write. Same shape as
+        SessionStageViewSet._mark_progress_completed (Task 14), duplicated
+        rather than shared (see class docstring)."""
+        existing = get_progress(room_code, team_id, activity_id)
+        now = now_iso()
+        if existing:
+            fields = {name: existing.get(name) for name in self._PROGRESS_FIELD_NAMES}
+            fields['status'] = 'completed'
+            fields['progress_percentage'] = 100
+            if not fields.get('completed_at'):
+                fields['completed_at'] = now
+            if not fields.get('started_at'):
+                fields['started_at'] = now
+        else:
+            fields = {
+                'status': 'completed', 'progress_percentage': 100,
+                'completed_at': now, 'started_at': now,
+            }
+        return upsert_progress(room_code, team_id, activity_id, **fields)
+
+    def _maybe_complete_presentation_activity(self, room_code, evaluated_team_id):
+        """Once a team has been evaluated by every other team in the
+        room, marks its Etapa 4 presentation Activity 'completed'. Mirrors
+        the ORM create()'s tail block exactly (same stage/activity lookup,
+        same presentation_order-length-based total_teams count, same
+        >= threshold), wrapped defensively so a failure here never breaks
+        the evaluation create/update response -- same "log, don't fail"
+        intent the ORM version had, now via the module logger instead of
+        print() (avoids the Windows-console UnicodeEncodeError class of
+        bug documented in prior tasks' reports for print() + non-ASCII)."""
+        try:
+            from challenges.models import Activity
+
+            session_stage = self._get_stage_4_session_stage(room_code)
+            if not session_stage or not session_stage.get('presentation_order'):
+                return
+
+            presentation_activity = Activity.objects.filter(
+                stage__number=4, activity_type__name__icontains='presentación'
+            ).first()
+            if not presentation_activity:
+                return
+
+            total_teams = len(session_stage['presentation_order'])
+            evaluations_received = sum(
+                1 for e in list_peer_evaluations(room_code)
+                if e['evaluated_team_id'] == evaluated_team_id
+            )
+
+            if evaluations_received >= (total_teams - 1):
+                self._mark_progress_completed(room_code, evaluated_team_id, presentation_activity.id)
+        except Exception as e:
+            logger.error(f'Error al verificar completitud de actividad de presentación: {str(e)}')
+
+    # ------------------------------------------------------------------
+    # list / retrieve
+    # ------------------------------------------------------------------
+
+    def list(self, request):
+        evaluator_team_id = request.query_params.get('evaluator_team')
+        evaluated_team_id = request.query_params.get('evaluated_team')
+        room_code = self._resolve_room_code(request, evaluator_team_id, evaluated_team_id)
+        if room_code is None:
+            return Response([])
+
+        evaluations = list_peer_evaluations(room_code)
+        if evaluator_team_id:
+            evaluations = [e for e in evaluations if e['evaluator_team_id'] == evaluator_team_id]
+        if evaluated_team_id:
+            evaluations = [e for e in evaluations if e['evaluated_team_id'] == evaluated_team_id]
+
+        team_cache = {}
+        for item in evaluations:
+            self._annotate_with_team_cache(item, room_code, team_cache)
+
+        serializer = PeerEvaluationSerializer(evaluations, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        parsed = self._parse_peer_eval_pk(pk)
+        if parsed is None:
+            return Response({'error': 'Evaluación no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        evaluator_team_id, evaluated_team_id = parsed
+
+        room_code = self._resolve_room_code(request, evaluator_team_id, evaluated_team_id)
+        if room_code is None:
+            return Response({'error': 'Evaluación no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        evaluation = get_peer_evaluation(room_code, evaluator_team_id, evaluated_team_id)
+        if evaluation is None:
+            return Response({'error': 'Evaluación no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        self._annotate_with_team_cache(evaluation, room_code, {})
+        serializer = PeerEvaluationSerializer(evaluation)
+        return Response(serializer.data)
+
+    def _annotate_with_team_cache(self, evaluation, room_code, team_cache):
+        """annotate_peer_evaluation_display_fields, but batching Team
+        lookups across many evaluations in the same room/list call via a
+        caller-supplied cache dict (mutated in place) -- same batching
+        intent GameSessionViewSet/TeamActivityProgressViewSet's own
+        per-list team_cache dicts have."""
+        for role in ('evaluator_team_id', 'evaluated_team_id'):
+            team_id = evaluation[role]
+            if team_id not in team_cache:
+                team_cache[team_id] = get_team(room_code, team_id)
+        annotate_peer_evaluation_display_fields(
+            evaluation,
+            evaluator_team=team_cache[evaluation['evaluator_team_id']],
+            evaluated_team=team_cache[evaluation['evaluated_team_id']],
+        )
+
+    # ------------------------------------------------------------------
+    # create
+    # ------------------------------------------------------------------
+
     def create(self, request, *args, **kwargs):
         """
-        Crear una evaluación peer (desde tablets)
+        Crear o actualizar una evaluación peer (desde tablets)
         """
+        evaluator_team_id = request.data.get('evaluator_team_id')
+        evaluated_team_id = request.data.get('evaluated_team_id')
+        room_code = request.data.get('game_session_id') or request.data.get('game_session')
+        criteria_scores = request.data.get('criteria_scores', {})
+        feedback = request.data.get('feedback', '')
+
+        if not all([evaluator_team_id, evaluated_team_id, room_code]):
+            return Response(
+                {'error': 'Faltan datos necesarios (evaluator_team_id, evaluated_team_id, game_session_id)'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # No permitir que un equipo se evalúe a sí mismo
+        if evaluator_team_id == evaluated_team_id:
+            return Response(
+                {'error': 'Un equipo no puede evaluarse a sí mismo'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        evaluator_team = get_team(room_code, evaluator_team_id)
+        if evaluator_team is None:
+            return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        evaluated_team = get_team(room_code, evaluated_team_id)
+        if evaluated_team is None:
+            return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        if get_session(room_code) is None:
+            return Response({'error': 'Sesion de juego no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Calcular puntuación total (suma de todos los criterios) y tokens
+        # otorgados (1 token por punto)
+        total_score = sum(criteria_scores.values()) if isinstance(criteria_scores, dict) else 0
+        tokens_awarded = total_score
+
+        existing = get_peer_evaluation(room_code, evaluator_team_id, evaluated_team_id)
+
+        if existing:
+            old_tokens_awarded = existing.get('tokens_awarded', 0)
+            evaluation = update_peer_evaluation(
+                room_code, evaluator_team_id, evaluated_team_id,
+                criteria_scores=criteria_scores, total_score=total_score,
+                tokens_awarded=tokens_awarded, feedback=feedback,
+            )
+            if old_tokens_awarded != tokens_awarded:
+                self._adjust_token_award(room_code, evaluator_team_id, evaluated_team_id, tokens_awarded)
+        else:
+            evaluation = create_peer_evaluation(
+                room_code, evaluator_team_id, evaluated_team_id, criteria_scores,
+                total_score, tokens_awarded=tokens_awarded, feedback=feedback,
+            )
+            if tokens_awarded > 0:
+                self._award_tokens(
+                    room_code, evaluator_team, evaluated_team, tokens_awarded,
+                )
+
+        # Verificar si se evaluó al último equipo y todas las evaluaciones
+        # están completadas -- marca la actividad de presentación como
+        # completada para el equipo evaluado.
+        self._maybe_complete_presentation_activity(room_code, evaluated_team_id)
+
+        self._annotate_with_team_cache(evaluation, room_code, {
+            evaluator_team_id: evaluator_team, evaluated_team_id: evaluated_team,
+        })
+        serializer = PeerEvaluationSerializer(evaluation)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def _award_tokens(self, room_code, evaluator_team, evaluated_team, amount):
+        """New-evaluation token award: gated on a Stage(number=4)
+        SessionStage existing in this room (mirrors the ORM version's own
+        gate), idempotent per (source_type, source_id) via
+        create_transaction(). Wrapped defensively -- a bookkeeping failure
+        here must not break evaluation creation, matching the ORM
+        version's own try/except-and-log intent around this block."""
         try:
-            evaluator_team_id = request.data.get('evaluator_team_id')
-            evaluated_team_id = request.data.get('evaluated_team_id')
-            game_session_id = request.data.get('game_session_id')
-            criteria_scores = request.data.get('criteria_scores', {})
-            feedback = request.data.get('feedback', '')
-            
-            if not all([evaluator_team_id, evaluated_team_id, game_session_id]):
-                return Response(
-                    {'error': 'Faltan datos necesarios (evaluator_team_id, evaluated_team_id, game_session_id)'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            from .models import Team, GameSession
-            from django.utils import timezone
-            
-            evaluator_team = Team.objects.get(id=evaluator_team_id)
-            evaluated_team = Team.objects.get(id=evaluated_team_id)
-            game_session = GameSession.objects.get(id=game_session_id)
-            
-            # No permitir que un equipo se evalúe a sí mismo
-            if evaluator_team_id == evaluated_team_id:
-                return Response(
-                    {'error': 'Un equipo no puede evaluarse a sí mismo'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Calcular puntuación total (suma de todos los criterios)
-            total_score = sum(criteria_scores.values()) if isinstance(criteria_scores, dict) else 0
-            
-            # Calcular tokens otorgados: 1 token por punto
-            tokens_awarded = total_score
-            
-            # Verificar si ya existe una evaluación
-            existing_evaluation = PeerEvaluation.objects.filter(
-                evaluator_team=evaluator_team,
-                evaluated_team=evaluated_team,
-                game_session=game_session
-            ).first()
-            
-            if existing_evaluation:
-                # Actualizar evaluación existente
-                old_tokens_awarded = existing_evaluation.tokens_awarded
-                existing_evaluation.criteria_scores = criteria_scores
-                existing_evaluation.total_score = total_score
-                existing_evaluation.tokens_awarded = tokens_awarded
-                existing_evaluation.feedback = feedback
-                existing_evaluation.save()
-                evaluation = existing_evaluation
-                
-                # Si los tokens cambiaron, actualizar la transacción
-                if old_tokens_awarded != tokens_awarded:
-                    try:
-                        from .models import TokenTransaction, SessionStage
-                        
-                        session_stage = SessionStage.objects.filter(
-                            game_session=game_session,
-                            stage__number=4
-                        ).first()
-                        
-                        if session_stage:
-                            # Buscar la transacción existente
-                            existing_transaction = TokenTransaction.objects.filter(
-                                team=evaluated_team,
-                                game_session=game_session,
-                                session_stage=session_stage,
-                                source_type='peer_evaluation',
-                                source_id=evaluation.id
-                            ).first()
-                            
-                            if existing_transaction:
-                                # Calcular la diferencia de tokens
-                                token_difference = tokens_awarded - old_tokens_awarded
-                                
-                                if token_difference != 0:
-                                    # Actualizar la transacción
-                                    existing_transaction.amount = tokens_awarded
-                                    existing_transaction.save()
-                                    
-                                    # Actualizar tokens del equipo
-                                    evaluated_team.tokens_total += token_difference
-                                    evaluated_team.save()
-                    except Exception as e:
-                        # Si hay un error al actualizar tokens, registrar pero no fallar
-                        import logging
-                        logger = logging.getLogger(__name__)
-                        try:
-                            logger.error(f'Error al actualizar tokens para evaluacion {evaluation.id}: {str(e)}')
-                        except:
-                            logger.error('Error al actualizar tokens para evaluacion')
-            else:
-                # Crear nueva evaluación
-                evaluation = PeerEvaluation.objects.create(
-                    evaluator_team=evaluator_team,
-                    evaluated_team=evaluated_team,
-                    game_session=game_session,
-                    criteria_scores=criteria_scores,
-                    total_score=total_score,
-                    tokens_awarded=tokens_awarded,
-                    feedback=feedback
-                )
-                
-                # Otorgar tokens al equipo evaluado (solo para nuevas evaluaciones)
-                if tokens_awarded > 0:
-                    try:
-                        from .models import TokenTransaction, SessionStage
-                        
-                        # Obtener el session_stage de la Etapa 4
-                        session_stage = SessionStage.objects.filter(
-                            game_session=game_session,
-                            stage__number=4
-                        ).first()
-                        
-                        if session_stage:
-                            # Verificar si ya se otorgaron tokens por esta evaluación
-                            existing_transaction = TokenTransaction.objects.filter(
-                                team=evaluated_team,
-                                game_session=game_session,
-                                session_stage=session_stage,
-                                source_type='peer_evaluation',
-                                source_id=evaluation.id
-                            ).exists()
-                            
-                            if not existing_transaction:
-                                # Crear transacción de tokens
-                                TokenTransaction.objects.create(
-                                    team=evaluated_team,
-                                    game_session=game_session,
-                                    session_stage=session_stage,
-                                    amount=tokens_awarded,
-                                    source_type='peer_evaluation',
-                                    source_id=evaluation.id,
-                                    reason=f'Evaluación peer: {evaluator_team.name} → {evaluated_team.name}',
-                                    awarded_by=None  # Sistema automático
-                                )
-                                
-                                # Actualizar tokens del equipo evaluado
-                                evaluated_team.tokens_total += tokens_awarded
-                                evaluated_team.save()
-                    except Exception as e:
-                        # Si hay un error al otorgar tokens, registrar pero no fallar
-                        import logging
-                        logger = logging.getLogger(__name__)
-                        try:
-                            logger.error(f'Error al otorgar tokens para evaluacion {evaluation.id}: {str(e)}')
-                        except:
-                            logger.error('Error al otorgar tokens para evaluacion')
-            
-            # Verificar si se evaluó al último equipo y todas las evaluaciones están completadas
-            # Esto marca la actividad como completada
-            try:
-                from challenges.models import Activity
-                
-                # Obtener el session_stage de la Etapa 4
-                session_stage = SessionStage.objects.filter(
-                    game_session=game_session,
-                    stage__number=4
-                ).first()
-                
-                if session_stage and session_stage.presentation_order:
-                    # Obtener la actividad de presentación pitch
-                    presentation_activity = Activity.objects.filter(
-                        stage__number=4,
-                        activity_type__name__icontains='presentación'
-                    ).first()
-                    
-                    if presentation_activity:
-                        # Contar cuántos equipos hay en total
-                        total_teams = len(session_stage.presentation_order)
-                        
-                        # Contar cuántas evaluaciones se han completado para el equipo evaluado
-                        # Cada equipo debe ser evaluado por todos los demás equipos
-                        evaluations_received = PeerEvaluation.objects.filter(
-                            evaluated_team=evaluated_team,
-                            game_session=game_session
-                        ).count()
-                        
-                        # Si todas las evaluaciones están completadas (todos los demás equipos evaluaron)
-                        if evaluations_received >= (total_teams - 1):
-                            # Marcar la actividad como completada para el equipo evaluado
-                            progress, created = TeamActivityProgress.objects.get_or_create(
-                                team=evaluated_team,
-                                activity=presentation_activity,
-                                session_stage=session_stage,
-                                defaults={
-                                    'status': 'completed',
-                                    'progress_percentage': 100,
-                                    'completed_at': timezone.now()
-                                }
-                            )
-                            
-                            if not created:
-                                progress.status = 'completed'
-                                progress.progress_percentage = 100
-                                if not progress.completed_at:
-                                    progress.completed_at = timezone.now()
-                                progress.save()
-                            
-                            try:
-                                print(f'[Backend] Actividad de presentacion marcada como completada para equipo {evaluated_team.name}')
-                            except:
-                                pass
-            except Exception as e:
-                try:
-                    print(f'[Backend] Error al verificar completitud de actividad: {str(e)}')
-                except:
-                    pass
-            
-            serializer = self.get_serializer(evaluation)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-            
-        except Team.DoesNotExist:
-            return Response(
-                {'error': 'Equipo no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
+            session_stage = self._get_stage_4_session_stage(room_code)
+            if not session_stage:
+                return
+            source_id = self._peer_eval_source_id(evaluated_team['team_id'], evaluator_team['team_id'])
+            tx = create_transaction(
+                room_code, evaluated_team['team_id'], amount, source_type='peer_evaluation',
+                source_id=source_id, session_stage_id=session_stage['stage_id'],
+                reason=f"Evaluación peer: {evaluator_team.get('name')} → {evaluated_team.get('name')}",
+                awarded_by_id=None,
             )
-        except GameSession.DoesNotExist:
-            return Response(
-                {'error': 'Sesion de juego no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            if tx is not None:
+                update_tokens(room_code, evaluated_team['team_id'], amount)
         except Exception as e:
-            # Manejar errores de codificación al convertir a string
-            try:
-                error_msg = str(e)
-            except:
-                error_msg = 'Error interno del servidor'
-            return Response(
-                {'error': error_msg},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            logger.error(f'Error al otorgar tokens para evaluacion: {str(e)}')
+
+    def _adjust_token_award(self, room_code, evaluator_team_id, evaluated_team_id, new_tokens_awarded):
+        """Re-submission token adjustment: only ever touches an *already
+        recorded* transaction (never creates one -- mirrors the ORM
+        version, which only updated `existing_transaction` and never
+        awarded tokens on the update path for a pair that had none
+        before). Gated the same way _award_tokens is."""
+        try:
+            session_stage = self._get_stage_4_session_stage(room_code)
+            if not session_stage:
+                return
+            source_id = self._peer_eval_source_id(evaluated_team_id, evaluator_team_id)
+            updated_tx, delta = adjust_transaction_amount(
+                room_code, 'peer_evaluation', source_id, new_tokens_awarded
             )
-    
+            if updated_tx is not None and delta != 0:
+                update_tokens(room_code, evaluated_team_id, delta)
+        except Exception as e:
+            logger.error(f'Error al actualizar tokens para evaluacion: {str(e)}')
+
+    # ------------------------------------------------------------------
+    # for_professor / for_team
+    # ------------------------------------------------------------------
+
     @action(detail=False, methods=['get'], permission_classes=[], authentication_classes=[])
     def for_professor(self, request):
         """
         Obtener todas las evaluaciones de una sesión (para el profesor)
         """
-        game_session_id = request.query_params.get('game_session_id')
-        
-        if not game_session_id:
+        room_code = request.query_params.get('game_session_id')
+
+        if not room_code:
             return Response(
                 {'error': 'Se requiere game_session_id'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        try:
-            game_session = GameSession.objects.get(id=game_session_id)
-            evaluations = PeerEvaluation.objects.filter(
-                game_session=game_session
-            ).select_related('evaluator_team', 'evaluated_team')
-            
-            serializer = self.get_serializer(evaluations, many=True)
-            return Response(serializer.data)
-        except GameSession.DoesNotExist:
-            return Response(
-                {'error': 'Sesión no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-    
+
+        if get_session(room_code) is None:
+            return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        evaluations = list_peer_evaluations(room_code)
+        team_cache = {}
+        for item in evaluations:
+            self._annotate_with_team_cache(item, room_code, team_cache)
+
+        serializer = PeerEvaluationSerializer(evaluations, many=True)
+        return Response(serializer.data)
+
     @action(detail=False, methods=['get'], permission_classes=[], authentication_classes=[])
     def for_team(self, request):
         """
         Obtener evaluaciones recibidas por un equipo (para tablets)
         """
         team_id = request.query_params.get('team_id')
-        game_session_id = request.query_params.get('game_session_id')
-        
-        if not team_id or not game_session_id:
+        room_code = request.query_params.get('game_session_id')
+
+        if not team_id or not room_code:
             return Response(
                 {'error': 'Se requieren team_id y game_session_id'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        try:
-            team = Team.objects.get(id=team_id)
-            game_session = GameSession.objects.get(id=game_session_id)
-            
-            evaluations = PeerEvaluation.objects.filter(
-                evaluated_team=team,
-                game_session=game_session
-            ).select_related('evaluator_team', 'evaluated_team')
-            
-            serializer = self.get_serializer(evaluations, many=True)
-            return Response(serializer.data)
-        except Team.DoesNotExist:
-            return Response(
-                {'error': 'Equipo no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except GameSession.DoesNotExist:
-            return Response(
-                {'error': 'Sesión no encontrada'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+
+        team = get_team(room_code, team_id)
+        if team is None:
+            return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        if get_session(room_code) is None:
+            return Response({'error': 'Sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        evaluations = [e for e in list_peer_evaluations(room_code) if e['evaluated_team_id'] == team_id]
+        team_cache = {team_id: team}
+        for item in evaluations:
+            self._annotate_with_team_cache(item, room_code, team_cache)
+
+        serializer = PeerEvaluationSerializer(evaluations, many=True)
+        return Response(serializer.data)
 
 
 class ReflectionEvaluationViewSet(viewsets.ModelViewSet):

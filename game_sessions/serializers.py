@@ -647,8 +647,21 @@ class PeerEvaluationSerializer(serializers.Serializer):
     Expects display fields already attached via
     annotate_peer_evaluation_display_fields(). No standalone id attribute
     exists on this item (addressed by the composite (evaluator_team_id,
-    evaluated_team_id) key) -- `id` is sourced from the item's own SK."""
-    id = serializers.CharField(source='SK', read_only=True)
+    evaluated_team_id) key).
+
+    `id` is a computed "<evaluator_team_id>:<evaluated_team_id>" string,
+    NOT the item's raw SK. The raw SK (keys.peer_eval_sk) is
+    "PEEREVAL#<evaluator_team_id>#<evaluated_team_id>" -- '#' is the URL
+    fragment delimiter, so any HTTP client (browser fetch/axios, not just
+    a test client) silently truncates a detail-route URL built from it
+    before the request ever reaches Django. Same bug class Task 15 found
+    on TeamActivityProgressSerializer and Task 18 found on
+    TeamRouletteAssignmentSerializer -- both team_id/activity_id and
+    team_id/stage_id are UUID4/plain-int, so ':' is a safe, URL-clean
+    separator; team_id here (both evaluator and evaluated) is likewise a
+    UUID4 with no colons. PeerEvaluationViewSet._parse_peer_eval_pk parses
+    this format back via partition(':')."""
+    id = serializers.SerializerMethodField()
     evaluator_team = serializers.CharField(source='evaluator_team_id')
     evaluator_team_name = serializers.CharField(read_only=True, default=None, allow_null=True)
     evaluated_team = serializers.CharField(source='evaluated_team_id')
@@ -660,6 +673,9 @@ class PeerEvaluationSerializer(serializers.Serializer):
     tokens_awarded = serializers.IntegerField()
     feedback = serializers.CharField(allow_null=True, required=False, allow_blank=True)
     submitted_at = serializers.DateTimeField()
+
+    def get_id(self, obj):
+        return f"{obj['evaluator_team_id']}:{obj['evaluated_team_id']}"
 
 
 def annotate_peer_evaluation_display_fields(evaluation_dict, evaluator_team=None, evaluated_team=None):

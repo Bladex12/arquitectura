@@ -31,6 +31,65 @@ class EvaluationsRepositoryTest(DynamoDBTestCase):
 
         self.assertEqual(len(results), 2)
 
+    def test_get_peer_evaluation_returns_none_when_missing(self):
+        from game_sessions.dynamodb.evaluations import get_peer_evaluation
+
+        self.assertIsNone(get_peer_evaluation('ABC123', 'team-1', 'team-2'))
+
+    def test_get_peer_evaluation_returns_the_item(self):
+        from game_sessions.dynamodb.evaluations import create_peer_evaluation, get_peer_evaluation
+
+        create_peer_evaluation('ABC123', evaluator_team_id='team-1', evaluated_team_id='team-2', criteria_scores={'teamwork': 5}, total_score=5)
+
+        found = get_peer_evaluation('ABC123', 'team-1', 'team-2')
+
+        self.assertIsNotNone(found)
+        self.assertEqual(found['total_score'], 5)
+
+    def test_update_peer_evaluation_overwrites_mutable_fields(self):
+        from game_sessions.dynamodb.evaluations import create_peer_evaluation, update_peer_evaluation
+
+        create_peer_evaluation(
+            'ABC123', evaluator_team_id='team-1', evaluated_team_id='team-2',
+            criteria_scores={'teamwork': 5}, total_score=5, tokens_awarded=5, feedback='ok',
+        )
+
+        updated = update_peer_evaluation(
+            'ABC123', 'team-1', 'team-2', criteria_scores={'teamwork': 8}, total_score=8,
+            tokens_awarded=8, feedback='mejor',
+        )
+
+        self.assertEqual(updated['total_score'], 8)
+        self.assertEqual(updated['tokens_awarded'], 8)
+        self.assertEqual(updated['feedback'], 'mejor')
+        self.assertEqual(updated['criteria_scores'], {'teamwork': 8})
+
+    def test_update_peer_evaluation_never_touches_submitted_at(self):
+        """Mirrors the Django model's auto_now_add=True on submitted_at,
+        which .save() never re-triggers on an already-existing row."""
+        from game_sessions.dynamodb.evaluations import create_peer_evaluation, update_peer_evaluation
+
+        created = create_peer_evaluation(
+            'ABC123', evaluator_team_id='team-1', evaluated_team_id='team-2',
+            criteria_scores={}, total_score=5, tokens_awarded=5,
+        )
+
+        updated = update_peer_evaluation(
+            'ABC123', 'team-1', 'team-2', criteria_scores={}, total_score=9,
+            tokens_awarded=9, feedback=None,
+        )
+
+        self.assertEqual(updated['submitted_at'], created['submitted_at'])
+
+    def test_update_peer_evaluation_returns_none_when_missing(self):
+        from game_sessions.dynamodb.evaluations import update_peer_evaluation
+
+        result = update_peer_evaluation(
+            'ABC123', 'team-1', 'team-2', criteria_scores={}, total_score=1, tokens_awarded=1, feedback=None,
+        )
+
+        self.assertIsNone(result)
+
     def test_create_reflection(self):
         from game_sessions.dynamodb.evaluations import create_reflection
 

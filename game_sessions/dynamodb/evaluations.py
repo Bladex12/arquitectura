@@ -5,7 +5,7 @@ from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 from game_sessions.dynamodb import keys
-from game_sessions.dynamodb.client import get_table, now_iso
+from game_sessions.dynamodb.client import build_update_expression, get_table, now_iso
 
 
 def create_peer_evaluation(room_code, evaluator_team_id, evaluated_team_id, criteria_scores,
@@ -45,6 +45,52 @@ def list_peer_evaluations(room_code):
         ConsistentRead=True,
     )
     return response['Items']
+
+
+def get_peer_evaluation(room_code, evaluator_team_id, evaluated_team_id):
+    """Returns the PeerEvaluation item dict for one (evaluator, evaluated)
+    pair in a room, or None if it doesn't exist. Used by
+    PeerEvaluationViewSet.create to decide create vs. re-submission
+    (matching the Django model's unique_together get-or-update flow),
+    and by retrieve()."""
+    table = get_table()
+    response = table.get_item(
+        Key={'PK': keys.session_pk(room_code), 'SK': keys.peer_eval_sk(evaluator_team_id, evaluated_team_id)},
+        ConsistentRead=True,
+    )
+    return response.get('Item')
+
+
+def update_peer_evaluation(room_code, evaluator_team_id, evaluated_team_id, criteria_scores,
+                            total_score, tokens_awarded, feedback):
+    """Overwrites the mutable fields of an already-submitted PeerEvaluation
+    (a team re-submitting its evaluation of another team). submitted_at is
+    deliberately never touched here -- mirrors the Django model's
+    submitted_at = DateTimeField(auto_now_add=True), which a second
+    .save() on an existing row never re-triggers. Returns None if the
+    item doesn't exist (guarded so update_item's default upsert behavior
+    can't create a ghost item missing `type`)."""
+    table = get_table()
+    update_expression, names, values = build_update_expression({
+        'criteria_scores': criteria_scores,
+        'total_score': total_score,
+        'tokens_awarded': tokens_awarded,
+        'feedback': feedback,
+    })
+    try:
+        response = table.update_item(
+            Key={'PK': keys.session_pk(room_code), 'SK': keys.peer_eval_sk(evaluator_team_id, evaluated_team_id)},
+            UpdateExpression=update_expression,
+            ConditionExpression='attribute_exists(PK)',
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+            ReturnValues='ALL_NEW',
+        )
+        return response['Attributes']
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            return None
+        raise
 
 
 def create_reflection(room_code, student_name, student_email, value_areas=None, faculty=None,
