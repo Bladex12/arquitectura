@@ -43,7 +43,7 @@ interface Professor {
   user?: { username: string; first_name?: string; last_name?: string };
 }
 interface GameSession {
-  id: number;
+  id: string;
   room_code: string;
   status: 'lobby' | 'running' | 'completed' | 'cancelled';
   course_name?: string;
@@ -56,7 +56,7 @@ interface GameSession {
   current_stage?: { id: number };
 }
 interface Team {
-  id: number; name: string; tokens?: number;
+  id: string; name: string; tokens?: number;
   student_count?: number; color?: string;
   personalization?: { team_name?: string; color?: string };
 }
@@ -195,7 +195,7 @@ export function ProfesorPanel() {
   // ── Cancel modal state ──
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [sessionToCancel, setSessionToCancel] = useState<{
-    id: number; roomCode: string; currentStage?: string | null; currentActivity?: string | null;
+    id: string; roomCode: string; currentStage?: string | null; currentActivity?: string | null;
   } | null>(null);
 
 
@@ -235,7 +235,7 @@ export function ProfesorPanel() {
   };
 
   // ── Data loaders ──────────────────────────────────────────────────────────
-  const loadTeams = useCallback(async (sessionId: number) => {
+  const loadTeams = useCallback(async (sessionId: string) => {
     try {
       const data = await teamsAPI.list({ game_session: sessionId });
       setTeams(Array.isArray(data) ? data : []);
@@ -428,7 +428,7 @@ export function ProfesorPanel() {
     navigate(url);
   };
 
-  const handleFinishSessionById = (sessionId: number, roomCode: string, currentStage?: string | null, currentActivity?: string | null) => {
+  const handleFinishSessionById = (sessionId: string, roomCode: string, currentStage?: string | null, currentActivity?: string | null) => {
     setSessionToCancel({ id: sessionId, roomCode, currentStage, currentActivity });
     setCancelModalOpen(true);
   };

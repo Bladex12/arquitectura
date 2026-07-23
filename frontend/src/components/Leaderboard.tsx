@@ -5,7 +5,7 @@ import { Trophy, Medal, Award, Coins } from 'lucide-react';
 // ---------------------------------------------------------------------------
 
 export interface TeamResult {
-  team_id: number;
+  team_id: string;
   team_name: string;
   team_color: string;
   tokens_total: number;
@@ -21,12 +21,12 @@ interface LeaderboardProps {
 // ---------------------------------------------------------------------------
 
 export const MOCK_EQUIPOS: TeamResult[] = [
-  { team_id: 1, team_name: 'Emprendedores Alpha', team_color: 'Azul',     tokens_total: 420, tokens_stage: 140 },
-  { team_id: 2, team_name: 'Los Innovadores',     team_color: 'Verde',    tokens_total: 390, tokens_stage: 130 },
-  { team_id: 3, team_name: 'Startup Dreams',      team_color: 'Rojo',     tokens_total: 355, tokens_stage: 120 },
-  { team_id: 4, team_name: 'Equipo Naranja',       team_color: 'Naranja',  tokens_total: 310, tokens_stage: 100 },
-  { team_id: 5, team_name: 'Creativos UDD',        team_color: 'Morado',   tokens_total: 275, tokens_stage:  90 },
-  { team_id: 6, team_name: 'Futuros Líderes',      team_color: 'Amarillo', tokens_total: 240, tokens_stage:  80 },
+  { team_id: '1', team_name: 'Emprendedores Alpha', team_color: 'Azul',     tokens_total: 420, tokens_stage: 140 },
+  { team_id: '2', team_name: 'Los Innovadores',     team_color: 'Verde',    tokens_total: 390, tokens_stage: 130 },
+  { team_id: '3', team_name: 'Startup Dreams',      team_color: 'Rojo',     tokens_total: 355, tokens_stage: 120 },
+  { team_id: '4', team_name: 'Equipo Naranja',       team_color: 'Naranja',  tokens_total: 310, tokens_stage: 100 },
+  { team_id: '5', team_name: 'Creativos UDD',        team_color: 'Morado',   tokens_total: 275, tokens_stage:  90 },
+  { team_id: '6', team_name: 'Futuros Líderes',      team_color: 'Amarillo', tokens_total: 240, tokens_stage:  80 },
 ];
 
 // ---------------------------------------------------------------------------

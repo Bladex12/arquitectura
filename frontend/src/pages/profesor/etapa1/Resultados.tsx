@@ -33,7 +33,7 @@ const fixEncoding = (text: string | null | undefined): string => {
 };
 
 interface TeamResult {
-  team_id: number;
+  team_id: string;
   team_name: string;
   team_color: string;
   tokens_stage: number;
@@ -48,7 +48,7 @@ interface StageResults {
 }
 
 interface GameSession {
-  id: number;
+  id: string;
   room_code: string;
   status: string;
   current_stage_number?: number;
@@ -67,7 +67,7 @@ export function ProfesorResultadosEtapa1() {
   const [advancing, setAdvancing] = useState(false);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<Record<number, boolean>>({});
+  const [syncStatus, setSyncStatus] = useState<Record<string, boolean>>({});
   const showResultsCalledRef = useRef(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -100,10 +100,10 @@ export function ProfesorResultadosEtapa1() {
 
       try {
         const lobbyData = await sessionsAPI.getLobby(sessionId);
-        const connections: Array<{ team: number; current_screen: string }> =
+        const connections: Array<{ team: string; current_screen: string }> =
           lobbyData.tablet_connections ?? [];
         const stageNum = resultsData.stage_number;
-        const status: Record<number, boolean> = {};
+        const status: Record<string, boolean> = {};
         for (const conn of connections) {
           status[conn.team] = conn.current_screen === `results_${stageNum}`;
         }
@@ -180,7 +180,7 @@ export function ProfesorResultadosEtapa1() {
   const handleConfirmCancel = async (reason: string, reasonOther?: string) => {
     if (!sessionId) return;
     try {
-      await sessionsAPI.finish(parseInt(sessionId), reason, reasonOther);
+      await sessionsAPI.finish(sessionId, reason, reasonOther);
       toast.success('Sesión cancelada correctamente');
       setCancelModalOpen(false);
       setTimeout(() => { navigate('/profesor/panel'); }, 1500);

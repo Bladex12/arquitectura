@@ -6,7 +6,7 @@ import { sessionsAPI } from '@/services';
 import { toast } from 'sonner';
 
 interface GameSession {
-  id: number;
+  id: string;
   room_code: string;
   status: 'lobby' | 'running' | 'completed' | 'cancelled';
   course_name?: string;
@@ -50,7 +50,7 @@ export function Historial() {
     }
   };
 
-  const viewSessionDetail = (sessionId: number) => {
+  const viewSessionDetail = (sessionId: string) => {
     if (isAdminRoute) {
       navigate(`/admin/historial/${sessionId}`);
     } else {

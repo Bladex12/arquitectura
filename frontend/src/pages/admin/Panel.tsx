@@ -26,7 +26,7 @@ interface Admin {
 }
 
 interface GameSession {
-  id: number;
+  id: string;
   room_code: string;
   status: 'lobby' | 'running' | 'completed' | 'cancelled';
   course_name?: string;

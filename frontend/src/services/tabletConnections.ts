@@ -24,7 +24,7 @@ export const tabletConnectionsAPI = {
     return response.data;
   },
 
-  disconnect: async (connectionId: number) => {
+  disconnect: async (connectionId: string) => {
     const response = await api.post(
       `/sessions/tablet-connections/${connectionId}/disconnect/`
     );

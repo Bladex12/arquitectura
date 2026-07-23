@@ -15,7 +15,7 @@ interface Student {
 }
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
   students_count: number;
@@ -23,8 +23,8 @@ interface Team {
 }
 
 interface Personalization {
-  id?: number;
-  team: number;
+  id?: string;
+  team: string;
   team_name?: string;
   team_members_know_each_other?: boolean | null;
   created_at?: string;
@@ -32,7 +32,7 @@ interface Personalization {
 }
 
 interface GameSession {
-  id: number;
+  id: string;
   room_code: string;
   status: string;
   current_activity_name?: string;
@@ -45,7 +45,7 @@ export function ProfesorPersonalizacion() {
   const navigate = useNavigate();
   const [gameSession, setGameSession] = useState<GameSession | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
-  const [personalizations, setPersonalizations] = useState<Record<number, Personalization>>({});
+  const [personalizations, setPersonalizations] = useState<Record<string, Personalization>>({});
   const [loading, setLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [timerRemaining, setTimerRemaining] = useState<string>('--:--');
@@ -123,7 +123,7 @@ export function ProfesorPersonalizacion() {
       setTeams(teamsData);
 
       // Obtener personalizaciones de todos los equipos
-      const persMap: Record<number, Personalization> = {};
+      const persMap: Record<string, Personalization> = {};
       for (const team of teamsData) {
         try {
           const persList = await teamPersonalizationsAPI.list({ team: team.id });
@@ -139,7 +139,7 @@ export function ProfesorPersonalizacion() {
 
       // Iniciar temporizador
       if (!timerIntervalRef.current) {
-        startTimer(0, parseInt(sessionId));
+        startTimer(0, sessionId);
       }
     } catch (error: any) {
       console.error('Error loading game control:', {
@@ -158,7 +158,7 @@ export function ProfesorPersonalizacion() {
     }
   };
 
-  const startTimer = async (activityId: number, sessionId: number) => {
+  const startTimer = async (activityId: number, sessionId: string) => {
     try {
       const timerData = await sessionsAPI.getActivityTimer(sessionId);
 

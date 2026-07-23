@@ -15,7 +15,7 @@ const videoUrls = [
 ];
 
 interface GameSession {
-  id: number;
+  id: string;
   room_code: string;
   status: string;
   current_activity_name?: string;
@@ -69,7 +69,7 @@ export function ProfesorVideoInstitucional() {
       // Si hay una actividad establecida, significa que ya pasamos el video, redirigir
       if (data.current_activity_name && data.current_stage_number) {
         console.log('🔄 Ya se inició la Etapa 1, redirigiendo desde Video Institucional:', data.current_activity_name);
-        determineAndRedirectToActivity(parseInt(sessionId));
+        determineAndRedirectToActivity(sessionId);
         return;
       }
 
@@ -89,7 +89,7 @@ export function ProfesorVideoInstitucional() {
     }
   };
 
-  const determineAndRedirectToActivity = async (sessionId: number) => {
+  const determineAndRedirectToActivity = async (sessionId: string) => {
     try {
       const gameData = await sessionsAPI.getById(sessionId);
 

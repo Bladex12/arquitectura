@@ -22,7 +22,7 @@ export function useGameStateRedirect(enabled: boolean = true) {
       isChecking.current = true;
       
       try {
-        const gameData = await sessionsAPI.getById(Number(sessionId));
+        const gameData = await sessionsAPI.getById(sessionId);
         
         // Si el juego está finalizado o cancelado, no redirigir
         // EXCEPCIÓN: Si estamos en reflexión o resultados, permitir permanecer aunque esté finalizada
@@ -68,7 +68,7 @@ export function useGameStateRedirect(enabled: boolean = true) {
             if (currentStageNumber === 4 && !isResultsPage) {
               // Solo verificar reflexión si NO estamos en la página de resultados
               try {
-                const stagesData = await sessionsAPI.getSessionStages(Number(sessionId));
+                const stagesData = await sessionsAPI.getSessionStages(sessionId);
                 const stagesArray = Array.isArray(stagesData) ? stagesData : [stagesData];
                 const stage4 = stagesArray.find((s: any) => s.stage_number === 4);
                 if (stage4?.presentation_timestamps?._reflection === true) {
@@ -135,7 +135,7 @@ export function useGameStateRedirect(enabled: boolean = true) {
               if (!isResultsPage) {
                 // Solo verificar reflexión si NO estamos en la página de resultados
                 try {
-                  const stagesData = await sessionsAPI.getSessionStages(Number(sessionId));
+                  const stagesData = await sessionsAPI.getSessionStages(sessionId);
                   const stagesArray = Array.isArray(stagesData) ? stagesData : [stagesData];
                   const stage4 = stagesArray.find((s: any) => s.stage_number === 4);
                   if (stage4?.presentation_timestamps?._reflection === true) {
@@ -170,7 +170,7 @@ export function useGameStateRedirect(enabled: boolean = true) {
             setTimeout(async () => {
               if (hasRedirected.current) return; // ya redirigido por otro path
               try {
-                const recheckData = await sessionsAPI.getById(Number(sessionId));
+                const recheckData = await sessionsAPI.getById(sessionId);
                 const recheckActivity = recheckData.current_activity_name?.toLowerCase() || '';
                 const recheckStage = recheckData.current_stage_number;
                 // Solo permitir el retroceso si la re-verificación CONFIRMA el estado upstream

@@ -12,7 +12,7 @@ import { useGameStateRedirect } from '@/hooks/useGameStateRedirect';
 const ANIM_CSS = `@keyframes badgePulse{0%,100%{opacity:1}50%{opacity:0.55}}`;
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
 }
@@ -20,7 +20,7 @@ interface Team {
 interface TeamPitch {
   team: Team;
   progress: {
-    id: number;
+    id: string;
     pitch_intro_problem: string | null;
     pitch_solution: string | null;
     pitch_value: string | null;
@@ -32,7 +32,7 @@ interface TeamPitch {
 }
 
 interface GameSession {
-  id: number;
+  id: string;
   room_code: string;
   current_activity: number | null;
   current_activity_name: string | null;
@@ -55,7 +55,7 @@ export function ProfesorFormularioPitch() {
   const [timerRemaining, setTimerRemaining] = useState<string>('--:--');
   const [previewTeam, setPreviewTeam] = useState<TeamPitch | null>(null);
   const [showEtapaIntro, setShowEtapaIntro] = useState(false);
-  const [personalizations, setPersonalizations] = useState<Record<number, { team_name?: string }>>({});
+  const [personalizations, setPersonalizations] = useState<Record<string, { team_name?: string }>>({});
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -106,13 +106,13 @@ export function ProfesorFormularioPitch() {
       }
 
       if (sessionData.current_activity) {
-        const stagesData = await sessionsAPI.getSessionStages(Number(sessionId));
+        const stagesData = await sessionsAPI.getSessionStages(sessionId);
         const sessionStages = Array.isArray(stagesData) ? stagesData : [stagesData];
         const sessionStage = sessionStages.find((s: any) => s.stage_number === 4) || null;
 
         if (sessionStage) {
           await loadTeamsPitch(sessionId, sessionData.current_activity, sessionStage.id);
-          startTimer(sessionData.current_activity, parseInt(sessionId));
+          startTimer(sessionData.current_activity, sessionId);
         }
       }
 
@@ -133,7 +133,7 @@ export function ProfesorFormularioPitch() {
       const teams = await sessionsAPI.getTeams(gameSessionId);
       const teamsArray: Team[] = Array.isArray(teams) ? teams : [teams];
 
-      const persMap: Record<number, { team_name?: string }> = {};
+      const persMap: Record<string, { team_name?: string }> = {};
       for (const team of teamsArray) {
         try {
           const persList = await teamPersonalizationsAPI.list({ team: team.id });
@@ -169,7 +169,7 @@ export function ProfesorFormularioPitch() {
     }
   };
 
-  const startTimer = async (_activityId: number, gameSessionId: number) => {
+  const startTimer = async (_activityId: number, gameSessionId: string) => {
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
       timerIntervalRef.current = null;

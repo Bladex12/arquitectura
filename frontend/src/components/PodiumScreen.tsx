@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { StarfieldBackground } from './StarfieldBackground';
 
 interface TeamResult {
-  team_id: number;
+  team_id: string;
   team_name: string;
   team_color: string;
   tokens_stage: number;
@@ -13,7 +13,7 @@ interface PodiumScreenProps {
   teams: TeamResult[];          // unsorted — component sorts by tokens_total desc
   stageName: string;            // e.g. "Trabajo en Equipo"
   onContinue: () => void;
-  syncStatus?: Record<number, boolean>;   // team_id → tablet is on results screen
+  syncStatus?: Record<string, boolean>;   // team_id → tablet is on results screen
   actionButtons?: React.ReactNode;        // replaces the default Continuar button
 }
 

@@ -11,7 +11,7 @@ import { GalacticPage } from '@/components/GalacticPage';
 import { TimerBlock } from '@/components/TimerBlock';
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
 }
@@ -19,7 +19,7 @@ interface Team {
 interface TeamProgress {
   team: Team;
   progress: {
-    id: number;
+    id: string;
     status: string;
     prototype_image_url?: string;
     completed_at?: string;
@@ -27,7 +27,7 @@ interface TeamProgress {
 }
 
 interface GameSession {
-  id: number;
+  id: string;
   room_code: string;
   status: string;
   current_activity?: number;
@@ -51,7 +51,7 @@ export function ProfesorPrototipo() {
   const [timerRemaining, setTimerRemaining] = useState<string>('--:--');
   const [showEtapaIntro, setShowEtapaIntro] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [personalizations, setPersonalizations] = useState<Record<number, { team_name?: string }>>({});
+  const [personalizations, setPersonalizations] = useState<Record<string, { team_name?: string }>>({});
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerSyncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -128,7 +128,7 @@ export function ProfesorPrototipo() {
       }
 
       if (gameData.current_activity && !timerIntervalRef.current) {
-        await startTimer(gameData.current_activity, parseInt(sessionId));
+        await startTimer(gameData.current_activity, sessionId);
       }
 
       await loadTeamsPrototypes();
@@ -159,7 +159,7 @@ export function ProfesorPrototipo() {
       }
 
       // Obtener session_stage para la etapa actual (Etapa 3: Creatividad)
-      const stagesData = await sessionsAPI.getSessionStages(Number(sessionId));
+      const stagesData = await sessionsAPI.getSessionStages(sessionId);
       const sessionStages = Array.isArray(stagesData) ? stagesData : [stagesData];
 
       // Buscar el session_stage de la Etapa 3 (Creatividad)
@@ -180,7 +180,7 @@ export function ProfesorPrototipo() {
       const activity = await challengesAPI.getActivityById(sessionData.current_activity);
 
       // Fetch personalizations for all teams
-      const persMap: Record<number, { team_name?: string }> = {};
+      const persMap: Record<string, { team_name?: string }> = {};
       for (const team of teamsArray) {
         try {
           const persList = await teamPersonalizationsAPI.list({ team: team.id });
@@ -235,7 +235,7 @@ export function ProfesorPrototipo() {
     }
   };
 
-  const syncTimer = async (gameSessionId: number) => {
+  const syncTimer = async (gameSessionId: string) => {
     try {
       const data = await sessionsAPI.getActivityTimer(gameSessionId);
 
@@ -248,7 +248,7 @@ export function ProfesorPrototipo() {
     }
   };
 
-  const startTimer = async (_activityId: number, gameSessionId: number) => {
+  const startTimer = async (_activityId: number, gameSessionId: string) => {
     try {
       await syncTimer(gameSessionId);
 

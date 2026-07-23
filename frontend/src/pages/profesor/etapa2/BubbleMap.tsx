@@ -10,7 +10,7 @@ import { isDevMode } from '@/utils/devMode';
 import { useGameStateRedirect } from '@/hooks/useGameStateRedirect';
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
   tokens_total: number;
@@ -38,8 +38,8 @@ interface BubbleMapData {
 }
 
 interface BubbleMap {
-  id: number;
-  team: number;
+  id: string;
+  team: string;
   map_data: BubbleMapData | {
     // Compatibilidad con estructura antigua
     nodes?: any[];
@@ -87,9 +87,9 @@ export function ProfesorBubbleMap() {
   const [allTeamsCompleted, setAllTeamsCompleted] = useState(false);
   const [previewMap, setPreviewMap] = useState<{ team: Team; bubbleMap: BubbleMap } | null>(null);
   const [showEtapaIntro, setShowEtapaIntro] = useState(false);
-  const [personalizations, setPersonalizations] = useState<Record<number, { team_name?: string }>>({});
-  const [teamChallenges, setTeamChallenges] = useState<Record<number, { persona_name?: string; persona_image_url?: string }>>({});
-  const [teamFinalizedMap, setTeamFinalizedMap] = useState<Record<number, boolean>>({});
+  const [personalizations, setPersonalizations] = useState<Record<string, { team_name?: string }>>({});
+  const [teamChallenges, setTeamChallenges] = useState<Record<string, { persona_name?: string; persona_image_url?: string }>>({});
+  const [teamFinalizedMap, setTeamFinalizedMap] = useState<Record<string, boolean>>({});
 
   // Tamaño fijo para el bubble map (sin zoom)
   const BUBBLE_MAP_SIZE = { width: 1000, height: 1000 };
@@ -134,6 +134,7 @@ export function ProfesorBubbleMap() {
   };
 
   const loadGameControl = async () => {
+    if (!sessionId) return;
     try {
       const token = localStorage.getItem('authToken');
       if (!token) {
@@ -210,7 +211,7 @@ export function ProfesorBubbleMap() {
       }
 
       // Fetch current session stage
-      const stages = await sessionsAPI.getSessionStages(Number(sessionId));
+      const stages = await sessionsAPI.getSessionStages(sessionId);
       const stagesList = Array.isArray(stages) ? stages : [stages];
       const stage2 = stagesList.find((s: any) => s.stage_number === 2);
       setCurrentSessionStage(stage2);
@@ -221,7 +222,7 @@ export function ProfesorBubbleMap() {
 
       // Start timer
       if (currentActivityId) {
-        startTimer(currentActivityId, parseInt(sessionId));
+        startTimer(currentActivityId, sessionId);
       }
 
       setLoading(false);
@@ -241,7 +242,7 @@ export function ProfesorBubbleMap() {
       const teamsArray: Team[] = Array.isArray(teams) ? teams : [teams];
 
       // Fetch personalizations for all teams
-      const persMap: Record<number, { team_name?: string }> = {};
+      const persMap: Record<string, { team_name?: string }> = {};
       for (const team of teamsArray) {
         try {
           const persList = await teamPersonalizationsAPI.list({ team: team.id });
@@ -333,7 +334,7 @@ export function ProfesorBubbleMap() {
     }
   };
 
-  const syncTimer = async (gameSessionId: number) => {
+  const syncTimer = async (gameSessionId: string) => {
     try {
       const timerData = await sessionsAPI.getActivityTimer(gameSessionId);
 
@@ -364,7 +365,7 @@ export function ProfesorBubbleMap() {
     }
   };
 
-  const startTimer = async (activityId: number, gameSessionId: number) => {
+  const startTimer = async (activityId: number, gameSessionId: string) => {
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
       timerIntervalRef.current = null;
@@ -441,7 +442,7 @@ export function ProfesorBubbleMap() {
     }
   };
 
-  const getBubbleMapStatus = (bubbleMap: BubbleMap | null, teamId: number) => {
+  const getBubbleMapStatus = (bubbleMap: BubbleMap | null, teamId: string) => {
     if (!bubbleMap) {
       return { text: 'Pendiente', status: 'pending' };
     }

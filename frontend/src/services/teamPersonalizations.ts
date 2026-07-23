@@ -7,7 +7,7 @@ export const teamPersonalizationsAPI = {
   },
 
   create: async (data: {
-    team: number;
+    team: string;
     team_name: string;
     team_members_know_each_other: boolean;
   }) => {
@@ -16,7 +16,7 @@ export const teamPersonalizationsAPI = {
   },
 
   createOrUpdate: async (data: {
-    team: number;
+    team: string;
     team_name: string;
     team_members_know_each_other: boolean;
   }) => {

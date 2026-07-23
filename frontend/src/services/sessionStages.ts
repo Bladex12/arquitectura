@@ -6,7 +6,7 @@ export const sessionStagesAPI = {
     return response.data;
   },
 
-  updatePresentationOrder: async (stageId: number, presentationOrder: number[]) => {
+  updatePresentationOrder: async (stageId: number, presentationOrder: string[]) => {
     const response = await api.post(`/sessions/session-stages/${stageId}/update_presentation_order/`, {
       presentation_order: presentationOrder,
     });

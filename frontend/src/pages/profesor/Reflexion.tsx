@@ -7,7 +7,7 @@ import { sessionsAPI, reflectionEvaluationsAPI } from '@/services';
 import { toast } from 'sonner';
 
 interface GameSession {
-  id: number;
+  id: string;
   room_code: string;
   status: string;
   current_stage_name?: string;
@@ -15,7 +15,7 @@ interface GameSession {
 }
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
   tokens_total?: number;
@@ -143,7 +143,7 @@ export function ProfesorReflexion() {
   const loadCompletedStages = async () => {
     if (!sessionId) return;
     try {
-      const stagesData = await sessionsAPI.getSessionStages(Number(sessionId));
+      const stagesData = await sessionsAPI.getSessionStages(sessionId);
       const stagesArray = Array.isArray(stagesData) ? stagesData : [stagesData];
       const completed = stagesArray
         .filter((stage: any) => stage.status === 'completed')
@@ -182,7 +182,7 @@ export function ProfesorReflexion() {
     if (!sessionId) return;
     setFinalizing(true);
     try {
-      await sessionsAPI.finish(Number(sessionId), reason, reasonOther || 'Sesión completada después de reflexión');
+      await sessionsAPI.finish(sessionId, reason, reasonOther || 'Sesión completada después de reflexión');
       toast.success('Sesión finalizada correctamente. Las tablets permanecerán en reflexión.');
       if (gameSession) setGameSession({ ...gameSession, status: 'completed' });
     } catch (error: any) {

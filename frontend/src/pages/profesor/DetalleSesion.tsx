@@ -407,7 +407,7 @@ export function DetalleSesion() {
       // Primero, intentar obtener las etapas desde session_stage para inicializar todas
       let allStageNumbers = [1, 2, 3, 4]; // Por defecto, todas las etapas
       try {
-        const stagesData = await sessionsAPI.getSessionStages(Number(sessionId));
+        const stagesData = await sessionsAPI.getSessionStages(sessionId);
         const stagesList = Array.isArray(stagesData) ? stagesData : [stagesData];
         
         if (stagesList.length > 0) {

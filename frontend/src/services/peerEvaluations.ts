@@ -7,9 +7,9 @@ export const peerEvaluationsAPI = {
   },
 
   create: async (data: {
-    evaluator_team_id: number;
-    evaluated_team_id: number;
-    game_session_id: number;
+    evaluator_team_id: string;
+    evaluated_team_id: string;
+    game_session_id: string;
     criteria_scores: {
       clarity: number;
       solution: number;
@@ -21,12 +21,12 @@ export const peerEvaluationsAPI = {
     return response.data;
   },
 
-  forProfessor: async (gameSessionId: number) => {
+  forProfessor: async (gameSessionId: string) => {
     const response = await api.get(`/sessions/peer-evaluations/for_professor/?game_session_id=${gameSessionId}`);
     return response.data || [];
   },
 
-  forTeam: async (teamId: number, gameSessionId: number) => {
+  forTeam: async (teamId: string, gameSessionId: string) => {
     const response = await api.get(`/sessions/peer-evaluations/for_team/?team_id=${teamId}&game_session_id=${gameSessionId}`);
     return response.data || [];
   },

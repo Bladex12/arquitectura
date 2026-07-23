@@ -59,14 +59,14 @@ interface Student {
 }
 
 interface LocalTeam {
-  backendId?: number; // backend team ID for API sync (undefined for extra teams)
+  backendId?: string; // backend team ID for API sync (undefined for extra teams)
   name: string;
   hex: string;
   students: Student[];
 }
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
   students_count: number;
@@ -74,14 +74,14 @@ interface Team {
 }
 
 interface TabletConnection {
-  id: number;
-  team: number;
+  id: string;
+  team: string;
   is_connected: boolean;
 }
 
 interface LobbyData {
   game_session: {
-    id: number;
+    id: string;
     room_code: string;
     qr_code?: string;
     status: string;
@@ -202,7 +202,7 @@ export function ProfesorLobby() {
       const data: LobbyData = await sessionsAPI.getLobby(sessionId);
 
       if (data.game_session.status === 'running') {
-        await determineAndRedirectToActivity(parseInt(sessionId));
+        await determineAndRedirectToActivity(sessionId);
         return;
       }
 
@@ -247,7 +247,7 @@ export function ProfesorLobby() {
     }
   };
 
-  const determineAndRedirectToActivity = async (sessionId: number) => {
+  const determineAndRedirectToActivity = async (sessionId: string) => {
     try {
       const gameData = await sessionsAPI.getById(sessionId);
 
@@ -396,9 +396,9 @@ export function ProfesorLobby() {
     // Sync with backend if both teams have a backend ID
     const srcBackendId = sourceTeam.backendId;
     const tgtBackendId = localTeams[targetTeamIdx]?.backendId;
-    if (srcBackendId && tgtBackendId) {
+    if (srcBackendId && tgtBackendId && sessionId) {
       try {
-        await teamsAPI.moveStudent(srcBackendId, studentId, tgtBackendId);
+        await teamsAPI.moveStudent(srcBackendId, studentId, tgtBackendId, sessionId);
         toast.success('Estudiante movido', {
           duration: 1500,
           style: { fontSize: '0.875rem', padding: '0.5rem 0.75rem' },
@@ -418,7 +418,7 @@ export function ProfesorLobby() {
   };
 
   // ─── Disconnect tablet ────────────────────────────────────────────────────────
-  const disconnectTablet = async (connectionId: number) => {
+  const disconnectTablet = async (connectionId: string) => {
     if (!confirm('¿Desconectar esta tablet?')) return;
     try {
       await tabletConnectionsAPI.disconnect(connectionId);
@@ -516,9 +516,10 @@ export function ProfesorLobby() {
   };
 
   const handleConfirmCancel = async (reason: string, reasonOther?: string) => {
+    if (!sessionId) return;
     setFinalizingSession(true);
     try {
-      const data = await sessionsAPI.finish(Number(sessionId), reason, reasonOther);
+      const data = await sessionsAPI.finish(sessionId, reason, reasonOther);
       toast.success(`¡Sesión cancelada exitosamente! Se desconectaron ${data.tablets_disconnected || 0} tablets.`);
       setCancelModalOpen(false);
       setTimeout(() => navigate('/profesor/panel'), 2000);

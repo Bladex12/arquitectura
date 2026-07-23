@@ -21,21 +21,21 @@ const ANIM_CSS = `
 const FIELD_COLORS = ['#ef4444', '#3b82f6', '#c026d3', '#10b981', '#f59e0b'];
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
 }
 
 interface SessionStage {
   id: number;
-  presentation_order: number[] | null;
-  current_presentation_team_id: number | null;
+  presentation_order: string[] | null;
+  current_presentation_team_id: string | null;
   presentation_state: string;
   presentation_timestamps?: Record<string, string>;
 }
 
 interface GameSession {
-  id: number;
+  id: string;
   room_code: string;
   current_stage_number?: number;
 }
@@ -52,8 +52,8 @@ export function ProfesorPresentacionPitch() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [gameSession, setGameSession] = useState<GameSession | null>(null);
   const [sessionStage, setSessionStage] = useState<SessionStage | null>(null);
-  const [presentationOrder, setPresentationOrder] = useState<number[]>([]);
-  const [currentPresentationTeamId, setCurrentPresentationTeamId] = useState<number | null>(null);
+  const [presentationOrder, setPresentationOrder] = useState<string[]>([]);
+  const [currentPresentationTeamId, setCurrentPresentationTeamId] = useState<string | null>(null);
   const [presentationState, setPresentationState] = useState<string | null>(null);
   const [timerRemaining, setTimerRemaining] = useState<string>('01:30');
   const [currentTeamPrototype, setCurrentTeamPrototype] = useState<string | null>(null);
@@ -69,7 +69,7 @@ export function ProfesorPresentacionPitch() {
   const [allEvaluations, setAllEvaluations] = useState<any[]>([]);
   const [showEvaluations, setShowEvaluations] = useState(false);
   const [showEtapaIntro, setShowEtapaIntro] = useState(false);
-  const [personalizations, setPersonalizations] = useState<Record<number, { team_name?: string }>>({});
+  const [personalizations, setPersonalizations] = useState<Record<string, { team_name?: string }>>({});
 
   // Roulette state
   const rlAngleRef = useRef(0);
@@ -149,7 +149,7 @@ export function ProfesorPresentacionPitch() {
     }
   }, [allPresentationsCompleted, gameSession, showEvaluations]);
 
-  const previousTeamIdRef = useRef<number | null>(null);
+  const previousTeamIdRef = useRef<string | null>(null);
   const personalizationsLoadedRef = useRef<boolean>(false);
 
   const loadGameControl = async () => {
@@ -177,7 +177,7 @@ export function ProfesorPresentacionPitch() {
         return;
       }
 
-      const stagesData = await sessionsAPI.getSessionStages(Number(sessionId));
+      const stagesData = await sessionsAPI.getSessionStages(sessionId);
       const stagesList = Array.isArray(stagesData) ? stagesData : [stagesData];
       const stage4 = stagesList.find((s: any) => s.stage_number === 4) || null;
 
@@ -231,7 +231,7 @@ export function ProfesorPresentacionPitch() {
             setTeams(teamsArray);
 
             if (!personalizationsLoadedRef.current) {
-              const persMap: Record<number, { team_name?: string }> = {};
+              const persMap: Record<string, { team_name?: string }> = {};
               Promise.all(
                 teamsArray.map(async (team: Team) => {
                   try {
@@ -280,7 +280,7 @@ export function ProfesorPresentacionPitch() {
     }
   };
 
-  const loadEvaluationProgress = async (_presentingTeamId: number) => {
+  const loadEvaluationProgress = async (_presentingTeamId: string) => {
     try {
       if (!sessionStage?.id) return;
       const progressData = await sessionStagesAPI.getPresentationEvaluationProgress(sessionStage.id);
@@ -391,7 +391,7 @@ export function ProfesorPresentacionPitch() {
   const drawRouletteWheel = (
     angle: number,
     teamList: Team[],
-    pers: Record<number, { team_name?: string }> = {}
+    pers: Record<string, { team_name?: string }> = {}
   ) => {
     const canvas = rlCanvasRef.current;
     if (!canvas || teamList.length === 0) return;
@@ -478,7 +478,7 @@ export function ProfesorPresentacionPitch() {
         sessionStagesAPI
           .generatePresentationOrder(sessionStage.id)
           .then((orderResponse) => {
-            const serverOrder: number[] = orderResponse.presentation_order || [];
+            const serverOrder: string[] = orderResponse.presentation_order || [];
             const newOrder = [winner.id, ...serverOrder.filter((id) => id !== winner.id)];
             return sessionStagesAPI
               .updatePresentationOrder(sessionStage.id, newOrder)
@@ -627,7 +627,7 @@ export function ProfesorPresentacionPitch() {
     return colorMap[color] || '#667eea';
   };
 
-  const getTeamById = (teamId: number) => teams.find((t) => t.id === teamId);
+  const getTeamById = (teamId: string) => teams.find((t) => t.id === teamId);
 
   const currentTeam = currentPresentationTeamId ? getTeamById(currentPresentationTeamId) : null;
   const currentTeamIndex = presentationOrder.findIndex((id) => id === currentPresentationTeamId);

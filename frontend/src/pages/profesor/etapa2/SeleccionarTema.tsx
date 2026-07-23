@@ -10,7 +10,7 @@ import { isDevMode } from '@/utils/devMode';
 import { useGameStateRedirect } from '@/hooks/useGameStateRedirect';
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
   tokens_total: number;
@@ -169,7 +169,7 @@ export function ProfesorSeleccionarTema() {
       // El nombre de la actividad ya viene del backend en sessionData.current_activity_name
       // No necesitamos hacer llamadas adicionales
 
-      const gameSessionId = parseInt(ensuredSessionId);
+      const gameSessionId = ensuredSessionId;
 
       const [stages, fetchedTeams] = await Promise.all([
         sessionsAPI.getSessionStages(gameSessionId),
@@ -213,7 +213,7 @@ export function ProfesorSeleccionarTema() {
         session_stage: stageId,
       });
       const progressArray = Array.isArray(progressList) ? progressList : [progressList];
-      const progressMap = new Map<number, any>();
+      const progressMap = new Map<string, any>();
       progressArray.forEach((p: any) => {
         if (p?.team != null) {
           progressMap.set(p.team, p);
@@ -262,7 +262,7 @@ export function ProfesorSeleccionarTema() {
     }
   };
 
-  const startTimer = async (gameSessionId: number) => {
+  const startTimer = async (gameSessionId: string) => {
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
       timerIntervalRef.current = null;

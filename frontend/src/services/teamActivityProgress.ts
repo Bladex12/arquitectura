@@ -12,7 +12,7 @@ export const teamActivityProgressAPI = {
   },
 
   selectTopic: async (data: {
-    team: number;
+    team: string;
     activity: number;
     session_stage: number;
     topic: number;
@@ -27,7 +27,7 @@ export const teamActivityProgressAPI = {
   },
 
   create: async (data: {
-    team: number;
+    team: string;
     activity: number;
     session_stage: number;
     status?: string;
@@ -47,7 +47,7 @@ export const teamActivityProgressAPI = {
   },
 
   savePitch: async (data: {
-    team_id: number;
+    team_id: string;
     activity_id: number;
     session_stage_id: number;
     pitch_intro_problem?: string;

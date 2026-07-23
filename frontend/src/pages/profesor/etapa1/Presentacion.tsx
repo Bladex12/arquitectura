@@ -32,7 +32,7 @@ interface Student {
 }
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
   students_count: number;
@@ -40,15 +40,15 @@ interface Team {
 }
 
 interface Personalization {
-  id?: number;
-  team: number;
+  id?: string;
+  team: string;
   team_name?: string;
   team_members_know_each_other?: boolean | null;
 }
 
 interface ActivityProgress {
-  id?: number;
-  team: number;
+  id?: string;
+  team: string;
   status: string;
   response_data?: {
     type?: string;
@@ -82,7 +82,7 @@ interface ActivityProgress {
 }
 
 interface GameSession {
-  id: number;
+  id: string;
   room_code: string;
   status: string;
   current_activity_name?: string;
@@ -100,8 +100,8 @@ export function ProfesorPresentacion() {
   
   const [gameSession, setGameSession] = useState<GameSession | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
-  const [personalizations, setPersonalizations] = useState<Record<number, Personalization>>({});
-  const [activityProgress, setActivityProgress] = useState<Record<number, ActivityProgress>>({});
+  const [personalizations, setPersonalizations] = useState<Record<string, Personalization>>({});
+  const [activityProgress, setActivityProgress] = useState<Record<string, ActivityProgress>>({});
   const [loading, setLoading] = useState(true);
   const [timerRemaining, setTimerRemaining] = useState<string>('--:--');
   const [advancing, setAdvancing] = useState(false);
@@ -172,13 +172,13 @@ export function ProfesorPresentacion() {
       setTeams(teamsData);
 
       // Obtener session_stage
-      const stagesData = await sessionsAPI.getSessionStages(Number(sessionId));
+      const stagesData = await sessionsAPI.getSessionStages(sessionId);
       const stagesArray = Array.isArray(stagesData) ? stagesData : [stagesData];
       const sessionStageId = stagesArray.length > 0 ? stagesArray[0].id : null;
 
       // Obtener personalizaciones y progreso de actividad para todos los equipos
-      const fetchedPersonalizations: Record<number, Personalization> = {};
-      const fetchedProgress: Record<number, ActivityProgress> = {};
+      const fetchedPersonalizations: Record<string, Personalization> = {};
+      const fetchedProgress: Record<string, ActivityProgress> = {};
 
       for (const team of teamsData) {
         // Obtener personalización
@@ -231,7 +231,7 @@ export function ProfesorPresentacion() {
     }
   };
 
-  const startTimer = async (activityId: number, gameSessionId: number) => {
+  const startTimer = async (activityId: number, gameSessionId: string) => {
     try {
       const timerData = await sessionsAPI.getActivityTimer(gameSessionId);
 

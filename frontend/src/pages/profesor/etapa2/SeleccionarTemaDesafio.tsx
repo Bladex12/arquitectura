@@ -18,7 +18,7 @@ import api from '@/services/api';
 import { toast } from 'sonner';
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
   tokens_total?: number;
@@ -49,7 +49,7 @@ interface TeamProgress {
 }
 
 interface GameSession {
-  id: number;
+  id: string;
   room_code: string;
   status: string;
   current_activity?: number;

@@ -48,7 +48,7 @@ export const sessionsAPI = {
     return response.data;
   },
 
-  finish: async (sessionId: number, cancellationReason: string, cancellationReasonOther?: string) => {
+  finish: async (sessionId: string, cancellationReason: string, cancellationReasonOther?: string) => {
     const response = await api.post(
       `/sessions/game-sessions/${sessionId}/end/`,
       {
@@ -64,7 +64,7 @@ export const sessionsAPI = {
     return response.data;
   },
 
-  getSessionStages: async (gameSessionId: number, params?: Record<string, any>) => {
+  getSessionStages: async (gameSessionId: string, params?: Record<string, any>) => {
     const response = await api.get('/sessions/session-stages/', {
       params: { game_session: gameSessionId, ...params },
     });
@@ -83,7 +83,7 @@ export const sessionsAPI = {
 
   syncTeams: async (
     sessionId: number | string,
-    teams: { id?: number; name: string; color: string; student_ids: number[] }[]
+    teams: { id?: string; name: string; color: string; student_ids: number[] }[]
   ) => {
     const response = await api.post(`/sessions/game-sessions/${sessionId}/sync_teams/`, { teams });
     return response.data;

@@ -7,7 +7,7 @@ export const teamBubbleMapsAPI = {
   },
 
   create: async (data: {
-    team: number;
+    team: string;
     session_stage: number;
     map_data: any;
   }) => {
@@ -15,12 +15,12 @@ export const teamBubbleMapsAPI = {
     return response.data;
   },
 
-  update: async (bubbleMapId: number, data: { map_data: any }) => {
+  update: async (bubbleMapId: string, data: { map_data: any }) => {
     const response = await api.patch(`/sessions/team-bubble-maps/${bubbleMapId}/`, data);
     return response.data;
   },
 
-  finalize: async (teamId: number, sessionStageId: number) => {
+  finalize: async (teamId: string, sessionStageId: number) => {
     const response = await api.post('/sessions/team-bubble-maps/finalize_bubble_map/', {
       team: teamId,
       session_stage: sessionStageId,
