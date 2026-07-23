@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react';
 import { GalacticPage } from '@/components/GalacticPage';
 import { sessionsAPI, reflectionEvaluationsAPI, tabletConnectionsAPI } from '@/services';
 import { toast } from 'sonner';
+import { useRoomSync } from '@/hooks/useRoomSync';
 
 export function TabletReflexion() {
   const [searchParams] = useSearchParams();
@@ -23,9 +24,12 @@ export function TabletReflexion() {
     }
     setConnectionId(connId);
     loadSessionData(connId);
-    const interval = setInterval(() => { loadProgress(); }, 5000);
-    return () => clearInterval(interval);
   }, [searchParams, navigate]);
+
+  useRoomSync(() => loadProgress(), {
+    token: localStorage.getItem('team_session_token'),
+    roomCode: localStorage.getItem('roomCode'),
+  });
 
   const loadSessionData = async (connId: string) => {
     try {

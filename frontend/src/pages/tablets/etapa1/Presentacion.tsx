@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { UBotPresentacionModal } from '@/components/UBotPresentacionModal';
 import { toast } from 'sonner';
 import { tabletConnectionsAPI, sessionsAPI, teamPersonalizationsAPI, teamActivityProgressAPI, challengesAPI } from '@/services';
+import { useRoomSync } from '@/hooks/useRoomSync';
 import { advanceActivityOnTimerExpiration } from '@/utils/timerAutoAdvance';
 import { getResultsRedirectUrl } from '@/utils/tabletResultsRedirect';
 import { GeneralKnowledgeQuiz } from '@/components/minigames/GeneralKnowledgeQuiz';
@@ -13,7 +14,7 @@ import { GalacticPage } from '@/components/GalacticPage';
 import { GlassCard } from '@/components/GlassCard';
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
   tokens_total?: number;
@@ -28,12 +29,11 @@ export function TabletPresentacion() {
   const [completed, setCompleted] = useState(false);
   const [timerRemaining, setTimerRemaining] = useState<string>('--:--');
   const [connectionId, setConnectionId] = useState<string | null>(null);
-  const [gameSessionId, setGameSessionId] = useState<number | null>(null);
+  const [gameSessionId, setGameSessionId] = useState<string | null>(null);
   const [currentActivityId, setCurrentActivityId] = useState<number | null>(null);
   const [currentSessionStageId, setCurrentSessionStageId] = useState<number | null>(null);
   const [showUBotModal, setShowUBotModal] = useState(false);
   const [personalization, setPersonalization] = useState<{ team_name?: string } | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeExpiredRef = useRef<boolean>(false);
   
@@ -72,20 +72,17 @@ export function TabletPresentacion() {
     setConnectionId(connId);
     loadGameState(connId);
 
-    // Polling cada 5 segundos
-    intervalRef.current = setInterval(() => {
-      loadGameState(connId);
-    }, 5000);
-
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
       if (timerIntervalRef.current) {
         clearInterval(timerIntervalRef.current);
       }
     };
   }, [searchParams, navigate]);
+
+  useRoomSync(() => { if (connectionId) loadGameState(connectionId); }, {
+    token: localStorage.getItem('team_session_token'),
+    roomCode: localStorage.getItem('roomCode'),
+  });
 
   const loadGameState = async (connId: string) => {
     try {
@@ -227,7 +224,7 @@ export function TabletPresentacion() {
     }
   };
 
-  const checkExistingProgress = async (teamId: number, activityId: number, sessionStageId: number) => {
+  const checkExistingProgress = async (teamId: string, activityId: number, sessionStageId: number) => {
     try {
       console.log('[checkExistingProgress] 🔍 Iniciando verificación de progreso...', { teamId, activityId, sessionStageId });
       
@@ -384,7 +381,7 @@ export function TabletPresentacion() {
   };
 
   // Función helper para cargar actividad con todos los datos del backend
-  const loadActivityWithData = async (activityId: number, teamId: number, sessionStageId: number | null) => {
+  const loadActivityWithData = async (activityId: number, teamId: string, sessionStageId: number | null) => {
     const activityUrl = new URL(
       `${import.meta.env.VITE_API_URL || 'http://localhost:8000/api'}/challenges/activities/${activityId}/`
     );
@@ -398,7 +395,7 @@ export function TabletPresentacion() {
     return await response.json();
   };
 
-  const loadPresentacionActivity = async (activityId: number, teamId: number, sessionStageId: number) => {
+  const loadPresentacionActivity = async (activityId: number, teamId: string, sessionStageId: number) => {
     // Evitar cargar múltiples veces
     if (loadingPresentacionRef.current) {
       console.log('[loadPresentacionActivity] Ya se está cargando, omitiendo...');
@@ -463,7 +460,7 @@ export function TabletPresentacion() {
     }
   };
 
-  const startTimer = async (_activityId: number, gameSessionId: number) => {
+  const startTimer = async (_activityId: number, gameSessionId: string) => {
     if (timerIntervalRef.current) {
       return;
     }

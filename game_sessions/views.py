@@ -72,6 +72,7 @@ from game_sessions.dynamodb.evaluations import (
 )
 from game_sessions.dynamodb.client import now_iso
 from admin_dashboard.services import record_activity_progress_metric, record_stage_duration_metric
+from game_sessions.broadcast import broadcast_room
 
 
 class GameSessionViewSet(viewsets.ViewSet):
@@ -934,6 +935,7 @@ class GameSessionViewSet(viewsets.ViewSet):
 
         annotate_game_session_display_fields(session, teams=list_teams(room_code))
         serializer = GameSessionSerializer(session)
+        broadcast_room(room_code)
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'], parser_classes=[JSONParser])
@@ -1012,6 +1014,7 @@ class GameSessionViewSet(viewsets.ViewSet):
 
         final_teams = [t for t in (get_team(room_code, tid) for tid in updated_team_ids) if t is not None]
         serializer = TeamSerializer(final_teams, many=True)
+        broadcast_room(room_code)
         return Response({
             'message': 'Configuración de equipos guardada',
             'teams': serializer.data
@@ -1113,6 +1116,7 @@ class GameSessionViewSet(viewsets.ViewSet):
             # Limpiar current_activity para indicar que estamos en resultados
             update_session(room_code, current_activity_id=None)
 
+            broadcast_room(room_code)
             # Retornar información de que se completó la etapa
             return Response({
                 'stage_completed': True,
@@ -1150,6 +1154,7 @@ class GameSessionViewSet(viewsets.ViewSet):
 
         annotate_game_session_display_fields(session, teams=list_teams(room_code))
         serializer = GameSessionSerializer(session)
+        broadcast_room(room_code)
         return Response({
             **serializer.data,
             'message': f'Actividad actualizada a: {next_activity.name}',
@@ -1330,6 +1335,7 @@ class GameSessionViewSet(viewsets.ViewSet):
         logger.info(f'  - current_stage_number: {response_data.get("current_stage_number")}')
         logger.info(f'  - current_activity_name: {response_data.get("current_activity_name")}')
 
+        broadcast_room(room_code)
         return Response(response_data)
 
     @action(detail=True, methods=['post'])
@@ -1453,6 +1459,7 @@ class GameSessionViewSet(viewsets.ViewSet):
 
         annotate_game_session_display_fields(session, teams=list_teams(room_code))
         serializer = GameSessionSerializer(session)
+        broadcast_room(room_code)
         return Response({
             **serializer.data,
             'message': 'Actividad Video Institucional establecida',
@@ -1622,6 +1629,7 @@ class GameSessionViewSet(viewsets.ViewSet):
             'current_stage_name': None
         }
 
+        broadcast_room(room_code)
         return Response(response_data)
 
     @action(detail=True, methods=['post'], parser_classes=[JSONParser])
@@ -1701,6 +1709,7 @@ class GameSessionViewSet(viewsets.ViewSet):
             'message': f'Etapa {current_stage.number} completada. Mostrando resultados...'
         }
 
+        broadcast_room(room_code)
         return Response(response_data)
 
     @action(detail=True, methods=['get'], permission_classes=[], authentication_classes=[])
@@ -1970,6 +1979,7 @@ class GameSessionViewSet(viewsets.ViewSet):
 
         annotate_game_session_display_fields(session, teams=list_teams(room_code))
         serializer = GameSessionSerializer(session)
+        broadcast_room(room_code)
         return Response({
             **serializer.data,
             'message': f'Avanzando a Etapa {next_stage_obj.number}: {next_stage_obj.name}',
@@ -1996,6 +2006,7 @@ class GameSessionViewSet(viewsets.ViewSet):
             return Response({'error': 'stage debe estar entre 0 y 4'}, status=status.HTTP_400_BAD_REQUEST)
 
         session = update_session(room_code, show_results_stage=stage) or session
+        broadcast_room(room_code)
         return Response({'show_results_stage': session['show_results_stage']})
 
     @action(detail=True, methods=['post'], parser_classes=[JSONParser])
@@ -2073,6 +2084,7 @@ class GameSessionViewSet(viewsets.ViewSet):
 
         annotate_game_session_display_fields(session, teams=list_teams(room_code))
         serializer = GameSessionSerializer(session)
+        broadcast_room(room_code)
         return Response({
             **serializer.data,
             'tablets_disconnected': tablets_disconnected,
@@ -2170,6 +2182,7 @@ class GameSessionViewSet(viewsets.ViewSet):
             update_session_status(room_code, expected_status='running', new_status='completed')
             update_session(room_code, ended_at=now_iso())
 
+        broadcast_room(room_code)
         return Response({
             'message': 'Fase de reflexión iniciada',
             'reflection_started': True,
@@ -2383,6 +2396,7 @@ class TeamViewSet(viewsets.ViewSet):
             team = updated if updated is not None else team
 
         out_serializer = TeamSerializer(team)
+        broadcast_room(validated['room_code'])
         return Response(out_serializer.data, status=status.HTTP_201_CREATED)
 
     def update(self, request, pk=None):
@@ -2414,6 +2428,7 @@ class TeamViewSet(viewsets.ViewSet):
                 team = updated
 
         serializer = TeamSerializer(team)
+        broadcast_room(room_code)
         return Response(serializer.data)
 
     def destroy(self, request, pk=None):
@@ -2426,6 +2441,7 @@ class TeamViewSet(viewsets.ViewSet):
             return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
 
         delete_team(room_code, pk)
+        broadcast_room(room_code)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=['post'])
@@ -2482,6 +2498,7 @@ class TeamViewSet(viewsets.ViewSet):
         updated_source = set_roster(room_code, pk, source_roster)
         updated_target = set_roster(room_code, target_team_id, target_roster)
 
+        broadcast_room(room_code)
         return Response({
             'message': 'Estudiante movido exitosamente',
             'source_team': TeamSerializer(updated_source or team).data,
@@ -2559,6 +2576,7 @@ class TeamViewSet(viewsets.ViewSet):
 
         teams_serializer = TeamSerializer(updated_teams, many=True)
 
+        broadcast_room(room_code)
         return Response({
             'message': 'Estudiantes reorganizados aleatoriamente',
             'teams': teams_serializer.data
@@ -2651,6 +2669,7 @@ class TeamPersonalizationViewSet(viewsets.ViewSet):
         team = updated if updated is not None else team
 
         serializer = TeamPersonalizationSerializer(team)
+        broadcast_room(room_code)
         return Response(
             serializer.data,
             status=status.HTTP_201_CREATED if is_new else status.HTTP_200_OK,
@@ -2861,8 +2880,9 @@ class SessionStageViewSet(viewsets.ViewSet):
         annotate_session_stage_display_fields(session_stage)
 
         serializer = SessionStageSerializer(session_stage)
+        broadcast_room(room_code)
         return Response(serializer.data)
-    
+
     @action(detail=True, methods=['post'], authentication_classes=[JWTAuthentication, SessionAuthentication])
     def update_presentation_order(self, request, pk=None):
         """
@@ -2897,8 +2917,9 @@ class SessionStageViewSet(viewsets.ViewSet):
         annotate_session_stage_display_fields(session_stage)
 
         serializer = SessionStageSerializer(session_stage)
+        broadcast_room(session_stage['room_code'])
         return Response(serializer.data)
-    
+
     @action(detail=True, methods=['post'], authentication_classes=[JWTAuthentication, SessionAuthentication])
     def start_presentation(self, request, pk=None):
         """
@@ -2927,8 +2948,9 @@ class SessionStageViewSet(viewsets.ViewSet):
         annotate_session_stage_display_fields(session_stage)
 
         serializer = SessionStageSerializer(session_stage)
+        broadcast_room(session_stage['room_code'])
         return Response(serializer.data)
-    
+
     @action(detail=True, methods=['post'], authentication_classes=[JWTAuthentication, SessionAuthentication])
     def next_presentation(self, request, pk=None):
         """
@@ -2977,8 +2999,9 @@ class SessionStageViewSet(viewsets.ViewSet):
         annotate_session_stage_display_fields(session_stage)
 
         serializer = SessionStageSerializer(session_stage)
+        broadcast_room(session_stage['room_code'])
         return Response(serializer.data)
-    
+
     @action(detail=True, methods=['post'], authentication_classes=[JWTAuthentication, SessionAuthentication])
     def start_team_pitch(self, request, pk=None):
         """
@@ -3030,8 +3053,9 @@ class SessionStageViewSet(viewsets.ViewSet):
         response_data['presentation_started_at'] = presentation_started_at.isoformat()
         response_data['presentation_duration'] = presentation_duration
 
+        broadcast_room(session_stage['room_code'])
         return Response(response_data)
-    
+
     @action(detail=True, methods=['post'], authentication_classes=[JWTAuthentication, SessionAuthentication])
     def finish_team_presentation(self, request, pk=None):
         """
@@ -3064,8 +3088,9 @@ class SessionStageViewSet(viewsets.ViewSet):
         annotate_session_stage_display_fields(session_stage)
 
         serializer = SessionStageSerializer(session_stage)
+        broadcast_room(session_stage['room_code'])
         return Response(serializer.data)
-    
+
     @action(detail=True, methods=['get'], permission_classes=[], authentication_classes=[])
     def presentation_status(self, request, pk=None):
         """
@@ -3284,6 +3309,7 @@ class SessionStageViewSet(viewsets.ViewSet):
             annotate_team_activity_progress_display_fields(progress, team=team)
 
             serializer = TeamActivityProgressSerializer(progress)
+            broadcast_room(room_code)
             return Response(serializer.data, status=status.HTTP_200_OK)
 
         except Exception as e:
@@ -3291,7 +3317,7 @@ class SessionStageViewSet(viewsets.ViewSet):
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-    
+
     @action(detail=True, methods=['get'], permission_classes=[], authentication_classes=[])
     def presentation_evaluation_progress(self, request, pk=None):
         """
@@ -3688,6 +3714,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         record_activity_progress_metric(progress)
         annotate_team_activity_progress_display_fields(progress, team=team)
         serializer = TeamActivityProgressSerializer(progress)
+        broadcast_room(room_code)
         return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
     def update(self, request, *args, **kwargs):
@@ -3750,6 +3777,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         record_activity_progress_metric(progress)
         annotate_team_activity_progress_display_fields(progress, team=team)
         serializer = TeamActivityProgressSerializer(progress)
+        broadcast_room(room_code)
         return Response(serializer.data)
 
     @action(detail=False, methods=['post'], permission_classes=[], authentication_classes=[])
@@ -4058,6 +4086,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
 
         annotate_team_activity_progress_display_fields(progress, team=team)
         serializer = TeamActivityProgressSerializer(progress)
+        broadcast_room(room_code)
         return Response({
             **serializer.data,
             'correct_answers': total_correct_anagram,
@@ -4262,6 +4291,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
 
         annotate_team_activity_progress_display_fields(progress, team=team)
         serializer = TeamActivityProgressSerializer(progress)
+        broadcast_room(room_code)
         return Response({
             **serializer.data,
             'found_words': combined_found_words,
@@ -4453,6 +4483,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         # Log final para debugging
         logger.info(f'[submit_general_knowledge] RESULTADO FINAL: total_questions={total_questions}, total_correct={total_correct}, new_tokens={new_tokens_awarded}, team_tokens={team["tokens_total"]}')
 
+        broadcast_room(room_code)
         return Response({
             **serializer.data,
             'correct_count': total_correct,
@@ -4529,6 +4560,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         record_activity_progress_metric(progress)
         annotate_team_activity_progress_display_fields(progress, team=team)
         serializer = TeamActivityProgressSerializer(progress)
+        broadcast_room(room_code)
         return Response(serializer.data)
 
     @action(detail=False, methods=['post'], permission_classes=[], authentication_classes=[])
@@ -4683,6 +4715,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
 
         annotate_team_activity_progress_display_fields(progress, team=team)
         serializer = TeamActivityProgressSerializer(progress)
+        broadcast_room(room_code)
         return Response(serializer.data)
 
     @action(detail=False, methods=['post'], permission_classes=[], authentication_classes=[])
@@ -4838,6 +4871,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         progress = upsert_progress(room_code, team_id, activity_id, **fields)
         annotate_team_activity_progress_display_fields(progress, team=team)
         serializer = TeamActivityProgressSerializer(progress)
+        broadcast_room(room_code)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'], permission_classes=[], authentication_classes=[])
@@ -4927,6 +4961,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         record_activity_progress_metric(progress)
         annotate_team_activity_progress_display_fields(progress, team=team)
         serializer = TeamActivityProgressSerializer(progress)
+        broadcast_room(room_code)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
@@ -5156,6 +5191,7 @@ class TabletConnectionViewSet(viewsets.ViewSet):
             serializer = TabletConnectionSerializer(connection)
             team_serializer = TeamSerializer(available_team)
 
+            broadcast_room(room_code)
             return Response({
                 'connection': serializer.data,
                 'team': team_serializer.data,
@@ -5209,6 +5245,7 @@ class TabletConnectionViewSet(viewsets.ViewSet):
 
         annotate_tablet_connection_display_fields(updated)
         serializer = TabletConnectionSerializer(updated)
+        broadcast_room(connection['room_code'])
         return Response(serializer.data)
 
     @action(detail=False, methods=['post'], permission_classes=[], authentication_classes=[])
@@ -5258,6 +5295,7 @@ class TabletConnectionViewSet(viewsets.ViewSet):
             serializer = TabletConnectionSerializer(connection)
             team_serializer = TeamSerializer(team) if team else None
 
+            broadcast_room(room_code)
             return Response({
                 'connection': serializer.data,
                 'team': team_serializer.data if team_serializer else None,
@@ -5539,6 +5577,7 @@ class TeamRouletteAssignmentViewSet(viewsets.ViewSet):
         )
         annotate_team_roulette_assignment_display_fields(assignment, team=team)
         serializer = TeamRouletteAssignmentSerializer(assignment)
+        broadcast_room(room_code)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def _get_assignment_or_404(self, request, pk):
@@ -5580,6 +5619,7 @@ class TeamRouletteAssignmentViewSet(viewsets.ViewSet):
         )
         annotate_team_roulette_assignment_display_fields(assignment, team=team)
         serializer = TeamRouletteAssignmentSerializer(assignment)
+        broadcast_room(team['room_code'])
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
@@ -5602,6 +5642,7 @@ class TeamRouletteAssignmentViewSet(viewsets.ViewSet):
         )
         annotate_team_roulette_assignment_display_fields(assignment, team=team)
         serializer = TeamRouletteAssignmentSerializer(assignment)
+        broadcast_room(team['room_code'])
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
@@ -5643,6 +5684,7 @@ class TeamRouletteAssignmentViewSet(viewsets.ViewSet):
             update_tokens(room_code, team_id, assignment['token_reward'])
 
         serializer = TeamRouletteAssignmentSerializer(assignment)
+        broadcast_room(room_code)
         return Response(serializer.data)
 
 
@@ -6078,6 +6120,7 @@ class PeerEvaluationViewSet(viewsets.ViewSet):
             evaluator_team_id: evaluator_team, evaluated_team_id: evaluated_team,
         })
         serializer = PeerEvaluationSerializer(evaluation)
+        broadcast_room(room_code)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def _award_tokens(self, room_code, evaluator_team, evaluated_team, amount):
@@ -6293,6 +6336,7 @@ class ReflectionEvaluationViewSet(viewsets.ViewSet):
                 comments=request.data.get('comments', existing_evaluation.get('comments')),
             )
             serializer = ReflectionEvaluationSerializer(updated)
+            broadcast_room(room_code)
             return Response(
                 {
                     **serializer.data,
@@ -6311,6 +6355,7 @@ class ReflectionEvaluationViewSet(viewsets.ViewSet):
         )
 
         serializer = ReflectionEvaluationSerializer(created)
+        broadcast_room(room_code)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['get'], permission_classes=[], authentication_classes=[])
@@ -6534,6 +6579,7 @@ class TeamBubbleMapViewSet(viewsets.ViewSet):
 
         annotate_team_bubble_map_display_fields(bubble_map, team=team)
         serializer = TeamBubbleMapSerializer(bubble_map)
+        broadcast_room(room_code)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def _update(self, request, pk):
@@ -6617,6 +6663,7 @@ class TeamBubbleMapViewSet(viewsets.ViewSet):
             annotate_team_bubble_map_display_fields(bubble_map, team=team_after)
 
             serializer = TeamBubbleMapSerializer(bubble_map)
+            broadcast_room(room_code)
             return Response({
                 **serializer.data,
                 'tokens_awarded': True,

@@ -12,10 +12,11 @@ import {
 import { getResultsRedirectUrl } from '@/utils/tabletResultsRedirect';
 import { advanceActivityOnTimerExpiration } from '@/utils/timerAutoAdvance';
 import { toast } from 'sonner';
+import { useRoomSync } from '@/hooks/useRoomSync';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Team { id: number; name: string; }
+interface Team { id: string; name: string; }
 
 interface Challenge {
   id: number; title: string;
@@ -24,7 +25,7 @@ interface Challenge {
 }
 
 interface GameSession {
-  id: number; status: string;
+  id: string; status: string;
   current_activity?: number; current_activity_name?: string;
   current_stage_number?: number;
 }
@@ -105,7 +106,7 @@ export function TabletBubbleMapV2() {
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [sessionStageId, setSessionStageId] = useState<number | null>(null);
   const [connectionId, setConnectionId] = useState<string | null>(null);
-  const [mapId, setMapId] = useState<number | null>(null);
+  const [mapId, setMapId] = useState<string | null>(null);
 
   const [mapData, setMapData] = useState<MapState | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -124,10 +125,9 @@ export function TabletBubbleMapV2() {
   const mapAreaRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const mapDataRef = useRef<MapState | null>(null);
-  const mapIdRef = useRef<number | null>(null);
+  const mapIdRef = useRef<string | null>(null);
   const teamRef = useRef<Team | null>(null);
   const autoSaveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerSyncRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isFetchingRef = useRef(false);
@@ -150,9 +150,6 @@ export function TabletBubbleMapV2() {
     if (!connId) { navigate('/tablet/join'); return; }
     setConnectionId(connId);
     loadGameState(connId, true);
-    intervalRef.current = setInterval(() => {
-      if (!isFetchingRef.current) loadGameState(connId, false);
-    }, 5000);
 
     const onMove = (e: PointerEvent) => handleDragMove(e);
     const onUp = () => handleDragEnd();
@@ -163,7 +160,6 @@ export function TabletBubbleMapV2() {
     window.addEventListener('resize', onResize);
 
     return () => {
-      clearInterval(intervalRef.current!);
       clearInterval(timerIntervalRef.current!);
       clearInterval(timerSyncRef.current!);
       if (autoSaveTimeout.current) clearTimeout(autoSaveTimeout.current);
@@ -172,6 +168,11 @@ export function TabletBubbleMapV2() {
       window.removeEventListener('resize', onResize);
     };
   }, []);
+
+  useRoomSync(() => { if (connectionId) loadGameState(connectionId, false); }, {
+    token: localStorage.getItem('team_session_token'),
+    roomCode: localStorage.getItem('roomCode'),
+  });
 
   // ── Game state ────────────────────────────────────────────────────────────
 
@@ -218,7 +219,7 @@ export function TabletBubbleMapV2() {
     }
   };
 
-  const loadBubbleMapData = async (teamId: number, stageId: number) => {
+  const loadBubbleMapData = async (teamId: string, stageId: number) => {
     try {
       // Load selected challenge from progress
       const progressList = await teamActivityProgressAPI.list({ team: teamId, session_stage: stageId });
@@ -261,7 +262,7 @@ export function TabletBubbleMapV2() {
     }
   };
 
-  const syncTimer = async (gsId: number, connId: string, stageId: number) => {
+  const syncTimer = async (gsId: string, connId: string, stageId: number) => {
     try {
       const timerData = await sessionsAPI.getActivityTimer(gsId);
       if (!timerData) return;

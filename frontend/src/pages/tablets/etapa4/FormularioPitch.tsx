@@ -9,6 +9,7 @@ import {
 import { getResultsRedirectUrl } from '@/utils/tabletResultsRedirect';
 import { advanceActivityOnTimerExpiration } from '@/utils/timerAutoAdvance';
 import { toast } from 'sonner';
+import { useRoomSync } from '@/hooks/useRoomSync';
 
 const GALACTIC_CSS = `
 @keyframes phPulse{0%,100%{opacity:1}50%{opacity:.55}}
@@ -48,14 +49,14 @@ const BOX_CONFIG = [
 ] as const;
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
   tokens_total?: number;
 }
 
 interface GameSession {
-  id: number;
+  id: string;
   current_activity: number | null;
   current_activity_name: string | null;
   current_stage_number?: number;
@@ -88,11 +89,11 @@ export function TabletFormularioPitch() {
   const isTypingRef = useRef<boolean>(false);
   const focusedFieldRef = useRef<string | null>(null);
 
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerSyncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerStartTimeRef = useRef<number | null>(null);
   const timerDurationRef = useRef<number | null>(null);
+  const connIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const connId = searchParams.get('connection_id') || localStorage.getItem('tabletConnectionId');
@@ -100,15 +101,24 @@ export function TabletFormularioPitch() {
       navigate('/tablet/join');
       return;
     }
+    connIdRef.current = connId;
     loadGameState(connId);
 
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       if (timerSyncIntervalRef.current) clearInterval(timerSyncIntervalRef.current);
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
   }, [searchParams, navigate]);
+
+  useRoomSync(() => {
+    if (connIdRef.current && !isTypingRef.current && !focusedFieldRef.current && !isUpdatingFromServerRef.current) {
+      loadGameState(connIdRef.current);
+    }
+  }, {
+    token: localStorage.getItem('team_session_token'),
+    roomCode: localStorage.getItem('roomCode'),
+  });
 
   const loadGameState = async (connId: string) => {
     try {
@@ -191,16 +201,6 @@ export function TabletFormularioPitch() {
 
       setLoading(false);
       void loadPersonaAndPrototype(teamData.id, statusData.game_session.id);
-
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-
-      intervalRef.current = setInterval(() => {
-        if (!isTypingRef.current && !focusedFieldRef.current && !isUpdatingFromServerRef.current) {
-          loadGameState(connId);
-        }
-      }, 5000);
     } catch (error: any) {
       if (error.code === 'ECONNABORTED' || error.message === 'Request aborted') {
         return;
@@ -213,7 +213,7 @@ export function TabletFormularioPitch() {
     }
   };
 
-  const loadPitchStatus = async (teamId: number, activityId: number, sessionStageId: number) => {
+  const loadPitchStatus = async (teamId: string, activityId: number, sessionStageId: number) => {
     if (isTypingRef.current || focusedFieldRef.current || isUpdatingFromServerRef.current) {
       return;
     }
@@ -273,7 +273,7 @@ export function TabletFormularioPitch() {
     }
   };
 
-  const loadPersonaAndPrototype = async (teamId: number, sessionId: number) => {
+  const loadPersonaAndPrototype = async (teamId: string, sessionId: string) => {
     try {
       const stages = await sessionsAPI.getSessionStages(sessionId);
       const stagesArray = Array.isArray(stages) ? stages : [];
@@ -301,7 +301,7 @@ export function TabletFormularioPitch() {
     }
   };
 
-  const startTimer = async (gameSessionId: number) => {
+  const startTimer = async (gameSessionId: string) => {
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
       timerIntervalRef.current = null;

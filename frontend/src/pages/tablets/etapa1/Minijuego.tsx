@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { UBotMinijuegoModal } from '@/components/UBotMinijuegoModal';
 import { toast } from 'sonner';
 import { tabletConnectionsAPI, sessionsAPI, teamPersonalizationsAPI, teamActivityProgressAPI } from '@/services';
+import { useRoomSync } from '@/hooks/useRoomSync';
 import { advanceActivityOnTimerExpiration } from '@/utils/timerAutoAdvance';
 import { getResultsRedirectUrl } from '@/utils/tabletResultsRedirect';
 import { AnagramGame } from '@/components/minigames/AnagramGame';
@@ -18,7 +19,7 @@ import { GalacticPage } from '@/components/GalacticPage';
 import { GlassCard } from '@/components/GlassCard';
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
   tokens_total?: number;
@@ -51,7 +52,6 @@ export function TabletMinijuego() {
   const previousGeneralKnowledgeAnswersRef = useRef<Map<number, number>>(new Map());
   const [personalization, setPersonalization] = useState<{ team_name?: string } | null>(null);
   const [showUBotModal, setShowUBotModal] = useState(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeExpiredRef = useRef<boolean>(false);
 
@@ -64,20 +64,17 @@ export function TabletMinijuego() {
     setConnectionId(connId);
     loadGameState(connId);
 
-    // Polling cada 5 segundos
-    intervalRef.current = setInterval(() => {
-      loadGameState(connId);
-    }, 5000);
-
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
       if (timerIntervalRef.current) {
         clearInterval(timerIntervalRef.current);
       }
     };
   }, [searchParams, navigate]);
+
+  useRoomSync(() => { if (connectionId) loadGameState(connectionId); }, {
+    token: localStorage.getItem('team_session_token'),
+    roomCode: localStorage.getItem('roomCode'),
+  });
 
   const loadGameState = async (connId: string) => {
     try {
@@ -216,7 +213,7 @@ export function TabletMinijuego() {
   };
 
   // Función helper para cargar actividad con word_search_data del backend
-  const loadActivityWithWordSearch = async (activityId: number, teamId: number, sessionStageId: number | null) => {
+  const loadActivityWithWordSearch = async (activityId: number, teamId: string, sessionStageId: number | null) => {
     const activityUrl = new URL(
       `${import.meta.env.VITE_API_URL || 'http://localhost:8000/api'}/challenges/activities/${activityId}/`
     );
@@ -234,7 +231,7 @@ export function TabletMinijuego() {
   const progressCheckedRef = useRef(false);
   const minigameDataLoadedRef = useRef(false); // Ref para rastrear si ya se cargó inicialmente
 
-  const loadMinijuegoActivity = async (activityId: number, teamId: number, sessionStageIdParam?: number | null) => {
+  const loadMinijuegoActivity = async (activityId: number, teamId: string, sessionStageIdParam?: number | null) => {
     // Protecciones para evitar cargas múltiples
     if (minigameDataLoadedRef.current || loadingMinijuegoRef.current || minigameData || currentPart === 'general_knowledge') {
       return;
@@ -645,7 +642,7 @@ export function TabletMinijuego() {
     }
   };
 
-  const checkExistingProgress = async (teamId: number, activityId: number, sessionStageId: number) => {
+  const checkExistingProgress = async (teamId: string, activityId: number, sessionStageId: number) => {
     try {
       if (progressCheckedRef.current) {
         return;
@@ -942,7 +939,7 @@ export function TabletMinijuego() {
     }
   };
 
-  const startTimer = async (activityId: number, gameSessionId: number) => {
+  const startTimer = async (activityId: number, gameSessionId: string) => {
     if (timerIntervalRef.current) {
       return;
     }

@@ -7,16 +7,17 @@ import { StarfieldBackground } from '@/components/StarfieldBackground';
 import { PodiumScreen } from '@/components/PodiumScreen';
 import { sessionsAPI, tabletConnectionsAPI } from '@/services';
 import { toast } from 'sonner';
+import { useRoomSync } from '@/hooks/useRoomSync';
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
   tokens_total?: number;
 }
 
 interface TeamResult {
-  team_id: number;
+  team_id: string;
   team_name: string;
   team_color: string;
   tokens_stage: number;
@@ -42,9 +43,8 @@ export function TabletResultadosEtapa1() {
   const [myTeamResult, setMyTeamResult] = useState<TeamResult | null>(null);
   const [myRank, setMyRank] = useState<number>(0);
   const [connectionId, setConnectionId] = useState<string | null>(null);
-  const [gameSessionId, setGameSessionId] = useState<number | null>(null);
+  const [gameSessionId, setGameSessionId] = useState<string | null>(null);
   const [showUBotModal, setShowUBotModal] = useState(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const ubotModalShownRef = useRef(false);
   const hasLoadedRef = useRef(false);
 
@@ -57,20 +57,18 @@ export function TabletResultadosEtapa1() {
     setConnectionId(connId);
     loadGameState(connId);
 
-    intervalRef.current = setInterval(() => {
-      loadGameState(connId);
-    }, 5000);
-
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
       const connId = searchParams.get('connection_id') || localStorage.getItem('tabletConnectionId');
       if (connId) {
         tabletConnectionsAPI.updateTabletScreen(connId, 'lobby').catch(() => {});
       }
     };
   }, [searchParams, navigate]);
+
+  useRoomSync(() => { if (connectionId) loadGameState(connectionId); }, {
+    token: localStorage.getItem('team_session_token'),
+    roomCode: localStorage.getItem('roomCode'),
+  });
 
   const loadGameState = async (connId: string) => {
     try {
@@ -299,7 +297,7 @@ export function TabletResultadosEtapa1() {
     return '';
   };
 
-  const loadStageResults = async (gameSessionId: number, stageId: number | undefined, currentTeam: Team, stageNumber?: number) => {
+  const loadStageResults = async (gameSessionId: string, stageId: number | undefined, currentTeam: Team, stageNumber?: number) => {
     try {
       const validStageId = (stageId !== undefined && stageId !== null && !isNaN(Number(stageId)) && Number(stageId) > 0)
         ? stageId

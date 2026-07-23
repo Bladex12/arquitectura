@@ -10,11 +10,12 @@ import {
 import { getResultsRedirectUrl } from '@/utils/tabletResultsRedirect';
 import { advanceActivityOnTimerExpiration } from '@/utils/timerAutoAdvance';
 import { toast } from 'sonner';
+import { useRoomSync } from '@/hooks/useRoomSync';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
   tokens_total?: number;
@@ -131,7 +132,6 @@ export function TabletPrototipoV2() {
   const [confettiPieces, setConfettiPieces] = useState<React.CSSProperties[]>([]);
 
   // Refs
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerSyncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerStartTimeRef = useRef<number | null>(null);
@@ -141,6 +141,7 @@ export function TabletPrototipoV2() {
   const personaLoadedRef = useRef(false);
   const gameSessionIdRef = useRef<number | null>(null);
   const isFetchingRef = useRef(false);
+  const connIdRef = useRef<string | null>(null);
 
   // ─── Game state loading ──────────────────────────────────────────────────────
 
@@ -151,14 +152,19 @@ export function TabletPrototipoV2() {
       navigate('/tablet/join');
       return;
     }
+    connIdRef.current = connId;
     loadGameState(connId);
-    intervalRef.current = setInterval(() => loadGameState(connId), 3000);
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       if (timerSyncIntervalRef.current) clearInterval(timerSyncIntervalRef.current);
     };
   }, []);
+
+  useRoomSync(() => { if (connIdRef.current) loadGameState(connIdRef.current); }, {
+    token: localStorage.getItem('team_session_token'),
+    roomCode: localStorage.getItem('roomCode'),
+    intervalMs: 3000,
+  });
 
   const loadGameState = async (connId: string) => {
     if (isFetchingRef.current) return;
@@ -257,7 +263,7 @@ export function TabletPrototipoV2() {
 
   // ─── Persona fetch ────────────────────────────────────────────────────────────
 
-  const loadPersona = async (teamId: number, stage2Id: number) => {
+  const loadPersona = async (teamId: string, stage2Id: number) => {
     try {
       const progressList = await teamActivityProgressAPI.list({
         team: teamId,
@@ -281,7 +287,7 @@ export function TabletPrototipoV2() {
 
   // ─── Timer sync ───────────────────────────────────────────────────────────────
 
-  const syncTimer = async (gsId: number) => {
+  const syncTimer = async (gsId: string) => {
     try {
       const data = await sessionsAPI.getActivityTimer(gsId);
       if (data.started_at && data.timer_duration) {
@@ -293,7 +299,7 @@ export function TabletPrototipoV2() {
     }
   };
 
-  const startTimerSync = (gsId: number) => {
+  const startTimerSync = (gsId: string) => {
     if (timerSyncIntervalRef.current) return;
     syncTimer(gsId);
     timerSyncIntervalRef.current = setInterval(() => syncTimer(gsId), 5000);

@@ -25,6 +25,13 @@ Parameters:
   SubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Private/default subnets for the Django Lambda and RDS.
+  RouteTableIds:
+    Type: CommaDelimitedList
+    Description: >
+      Route table(s) associated with SubnetIds (or the VPC's main route
+      table, if those subnets have no explicit association) -- Gateway
+      VPC endpoints (DynamoDB, S3) attach here. (No List<AWS::EC2::RouteTable::Id>
+      parameter type exists in CloudFormation, hence CommaDelimitedList.)
   DBPassword:
     Type: String
     NoEcho: true
@@ -69,6 +76,58 @@ Resources:
     Properties:
       DBSubnetGroupDescription: Subnets for the RDS MySQL instance
       SubnetIds: !Ref SubnetIds
+
+  # Lambda's ENIs sit in these subnets with no public IP, so the default
+  # VPC's "0.0.0.0/0 -> igw" route on the main route table is unusable to
+  # them -- DynamoDB and S3 calls hang until Lambda's own timeout with no
+  # error (confirmed via a real deploy attempt). Gateway endpoints route
+  # this traffic privately instead, at no hourly cost (unlike a NAT Gateway).
+  DynamoDBVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.dynamodb
+      VpcEndpointType: Gateway
+      RouteTableIds: !Ref RouteTableIds
+
+  S3VpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      VpcEndpointType: Gateway
+      RouteTableIds: !Ref RouteTableIds
+
+  # Tried an execute-api Interface VPC endpoint here first -- confirmed via a
+  # real deploy that it doesn't work: that endpoint type only grants private
+  # access to REST APIs configured as PRIVATE endpoint type, not to a
+  # WebSocket API's PostToConnection Management API call (ForbiddenException).
+  # Fix instead: DjangoFunction (in the VPC, for RDS) async-invokes
+  # BroadcastFunction (NOT in the VPC, see below) to do the actual
+  # ConnectionsTable query + post_to_connection fan-out. Lambda-to-Lambda
+  # invoke via this endpoint is a standard, fully-supported PrivateLink
+  # pattern (unlike execute-api's Management API), so this one actually works.
+  LambdaVpcEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow the Django Lambda to reach the lambda Interface VPC endpoint
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+
+  LambdaVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.lambda
+      VpcEndpointType: Interface
+      SubnetIds: !Ref SubnetIds
+      SecurityGroupIds:
+        - !Ref LambdaVpcEndpointSecurityGroup
+      PrivateDnsEnabled: true
 
   # ==========================================================
   # Relational data: users / academic / challenges catalog
@@ -130,7 +189,11 @@ Resources:
           ALLOWED_HOSTS: !Sub "127.0.0.1,localhost,.execute-api.${AWS::Region}.amazonaws.com"
           STATIC_MEDIA_BUCKET: !Ref StaticMediaBucket
           GAME_SESSIONS_TABLE: !Ref GameSessionTable
-          CONNECTIONS_TABLE: !Ref ConnectionsTable
+          # game_sessions/broadcast.py async-invokes this (not in the VPC)
+          # rather than calling ConnectionsTable/apigatewaymanagementapi
+          # directly -- see BroadcastFunction and the LambdaVpcEndpoint
+          # comment above for why.
+          BROADCAST_FUNCTION_NAME: !Ref BroadcastFunction
       Events:
         RootApi:
           Type: Api
@@ -259,6 +322,7 @@ Resources:
       Environment:
         Variables:
           CONNECTIONS_TABLE: !Ref ConnectionsTable
+          GAME_SESSIONS_TABLE: !Ref GameSessionTable
 
   WsDisconnectFunction:
     Type: AWS::Serverless::Function
@@ -278,6 +342,23 @@ Resources:
       Handler: index.handler
       CodeUri: lambda/ws-default/
       Role: !Ref LabRoleArn
+
+  # Deliberately NOT in DjangoFunction's VPC -- this is exactly why it works
+  # where a direct call from DjangoFunction didn't (see LambdaVpcEndpoint's
+  # comment above). Plain Lambda networking has normal access to the
+  # regional execute-api Management API without needing any VPC endpoint.
+  BroadcastFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.11
+      Handler: handler.handler
+      CodeUri: lambda/broadcast/
+      Role: !Ref LabRoleArn
+      Timeout: 10
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+          WS_API_ENDPOINT: !Sub "${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
 
   WsConnectIntegration:
     Type: AWS::ApiGatewayV2::Integration

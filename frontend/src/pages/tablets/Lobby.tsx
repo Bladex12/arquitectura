@@ -19,6 +19,7 @@ import { sessionsAPI, tabletConnectionsAPI } from '@/services';
 import { UBotWelcomeModal } from '@/components/UBotWelcomeModal';
 import { getResultsRedirectUrl } from '@/utils/tabletResultsRedirect';
 import { toast } from 'sonner';
+import { useRoomSync } from '@/hooks/useRoomSync';
 
 interface Student {
   id: number;
@@ -27,7 +28,7 @@ interface Student {
 }
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
   students_count: number;
@@ -36,14 +37,14 @@ interface Team {
 }
 
 interface TabletConnection {
-  id: number;
-  team: number;
+  id: string;
+  team: string;
   is_connected: boolean;
 }
 
 interface LobbyData {
   game_session: {
-    id: number;
+    id: string;
     room_code: string;
     status: string;
   };
@@ -59,16 +60,15 @@ export function TabletLobby() {
   const navigate = useNavigate();
   const [lobbyData, setLobbyData] = useState<LobbyData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [myTeamId, setMyTeamId] = useState<number | null>(null);
+  const [myTeamId, setMyTeamId] = useState<string | null>(null);
   const [gameStarted, setGameStarted] = useState(false);
   const [loadingDots, setLoadingDots] = useState('');
   const [showLoadingScreen, setShowLoadingScreen] = useState(false);
   const [currentMessage, setCurrentMessage] = useState(0);
   const [progress, setProgress] = useState(0);
   const [showUBotModal, setShowUBotModal] = useState(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const activityCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const checkActivityRef = useRef<() => void>(() => {});
 
   const loadingMessages = [
     'Preparando tu misión',
@@ -142,8 +142,9 @@ export function TabletLobby() {
           const initialSessionStageId = gameData.current_session_stage;
           const initialStageNumber = gameData.current_stage_number;
 
-          // Verificar actividad y etapa periódicamente (COMO EN ETAPA 2)
-          activityCheckIntervalRef.current = setInterval(async () => {
+          // Verificar actividad y etapa (llamado por useRoomSync: WS push en
+          // producción, setInterval de 3s como fallback en dev local)
+          const checkActivity = async () => {
             try {
               // Usar lobby en lugar de getById para evitar problemas de autenticación
               const updatedLobbyData = await sessionsAPI.getLobby(statusData.game_session.id);
@@ -158,15 +159,8 @@ export function TabletLobby() {
               const stageChanged = updatedSession.current_stage_number !== initialStageNumber;
               
               if (activityChanged || stageChanged) {
-                // Limpiar intervalos
-                if (activityCheckIntervalRef.current) {
-                  clearInterval(activityCheckIntervalRef.current);
-                  activityCheckIntervalRef.current = null;
-                }
-                if (intervalRef.current) {
-                  clearInterval(intervalRef.current);
-                  intervalRef.current = null;
-                }
+                // Dejar de reaccionar a más pushes/ticks -- ya vamos a redirigir
+                checkActivityRef.current = () => {};
 
                 if (stageChanged && (updatedSession.current_stage_number ?? 0) > 0) {
                   // Nueva etapa → animación warp + landing
@@ -185,7 +179,8 @@ export function TabletLobby() {
             } catch (error) {
               console.error('Error verificando actividad:', error);
             }
-          }, 3000); // Verificar cada 3 segundos
+          };
+          checkActivityRef.current = checkActivity;
         } catch (error) {
           console.error('Error obteniendo gameData inicial:', error);
           // Continuar sin la verificación de cambios si falla
@@ -201,24 +196,20 @@ export function TabletLobby() {
 
     loadInitialData();
 
-    // Auto-refresh cada 3 segundos (mantener para actualizar lobby)
-    intervalRef.current = setInterval(() => {
-      loadLobby();
-    }, 3000);
-
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
         progressIntervalRef.current = null;
       }
-      if (activityCheckIntervalRef.current) {
-        clearInterval(activityCheckIntervalRef.current);
-      }
+      checkActivityRef.current = () => {};
     };
   }, [connectionId, navigate]);
+
+  useRoomSync(() => { loadLobby(); checkActivityRef.current(); }, {
+    token: localStorage.getItem('team_session_token'),
+    roomCode: localStorage.getItem('roomCode'),
+    intervalMs: 3000,
+  });
 
   // Animación de puntos suspensivos
   useEffect(() => {
@@ -381,7 +372,7 @@ export function TabletLobby() {
     return '';
   };
 
-  const determineAndRedirectToActivity = async (gameSessionId: number) => {
+  const determineAndRedirectToActivity = async (gameSessionId: string) => {
     try {
       const lobbyData = await sessionsAPI.getLobby(gameSessionId);
       const gameData = lobbyData.game_session;

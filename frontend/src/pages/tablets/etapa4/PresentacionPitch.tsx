@@ -11,6 +11,7 @@ import {
   teamPersonalizationsAPI,
 } from '@/services';
 import { toast } from 'sonner';
+import { useRoomSync } from '@/hooks/useRoomSync';
 
 const GALACTIC_CSS = `
 @keyframes micPulse{0%,100%{opacity:.5;transform:scale(.94)}50%{opacity:.95;transform:scale(1.05)}}
@@ -21,7 +22,7 @@ const GALACTIC_CSS = `
 `;
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
   tokens?: number;
@@ -29,11 +30,11 @@ interface Team {
 }
 
 interface PresentationStatus {
-  presentation_order: number[];
-  current_presentation_team_id: number | null;
+  presentation_order: string[];
+  current_presentation_team_id: string | null;
   teams: Team[];
   order_confirmed: boolean;
-  completed_team_ids: number[];
+  completed_team_ids: string[];
   presentation_state: string;
   current_team_prototype: string | null;
   current_team_pitch: {
@@ -46,7 +47,7 @@ interface PresentationStatus {
 }
 
 interface GameSession {
-  id: number;
+  id: string;
   current_stage_number?: number;
   status?: string;
   current_activity_name?: string | null;
@@ -58,7 +59,7 @@ export function TabletPresentacionPitch() {
   const navigate = useNavigate();
   const [team, setTeam] = useState<Team | null>(null);
   const [personalization, setPersonalization] = useState<{ team_name?: string } | null>(null);
-  const [gameSessionId, setGameSessionId] = useState<number | null>(null);
+  const [gameSessionId, setGameSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [showUBotModal, setShowUBotModal] = useState(false);
@@ -79,16 +80,15 @@ export function TabletPresentacionPitch() {
     total: number;
   }>({ completed: 0, total: 0 });
 
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const previousPresentationStateRef = useRef<string | null>(null);
-  const previousPresentationTeamIdRef = useRef<number | null>(null);
+  const previousPresentationTeamIdRef = useRef<string | null>(null);
   const localTimerSecondsRef = useRef<number>(90);
   const syncCounterRef = useRef<number>(0);
-  const previousEvaluatedTeamIdRef = useRef<number | null>(null);
+  const previousEvaluatedTeamIdRef = useRef<string | null>(null);
   const evalIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const checkingEvaluationRef = useRef<boolean>(false);
-  const lastCheckedTeamIdRef = useRef<number | null>(null);
+  const lastCheckedTeamIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const connId = searchParams.get('connection_id') || localStorage.getItem('tabletConnectionId');
@@ -100,19 +100,17 @@ export function TabletPresentacionPitch() {
 
     loadGameState(connId);
 
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-    }
-    intervalRef.current = setInterval(() => {
-      loadGameState(connId);
-    }, 3000);
-
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       if (evalIntervalRef.current) clearInterval(evalIntervalRef.current);
     };
   }, [searchParams, navigate]);
+
+  useRoomSync(() => { if (connectionId) loadGameState(connectionId); }, {
+    token: localStorage.getItem('team_session_token'),
+    roomCode: localStorage.getItem('roomCode'),
+    intervalMs: 3000,
+  });
 
   // CRÍTICO: Verificar evaluación existente cuando estamos evaluando a otro equipo
   useEffect(() => {
@@ -289,7 +287,7 @@ export function TabletPresentacionPitch() {
           previousEvaluatedTeamIdRef.current = stage4.current_presentation_team_id;
         }
 
-        loadPresentationStatus(stage4.id, connId).catch(() => {});
+        loadPresentationStatus(stage4.id).catch(() => {});
       } else {
         if (currentStageNumber === 4 && (!currentActivityName || !currentActivityId)) {
           window.location.href = `/tablet/resultados/?connection_id=${connId}&stage_id=4`;
@@ -305,7 +303,7 @@ export function TabletPresentacionPitch() {
     }
   };
 
-  const loadPresentationStatus = async (stageId: number, connId?: string) => {
+  const loadPresentationStatus = async (stageId: number) => {
     try {
       const status: PresentationStatus = await sessionStagesAPI.getPresentationStatus(stageId);
 
@@ -318,17 +316,6 @@ export function TabletPresentacionPitch() {
 
       previousPresentationStateRef.current = status.presentation_state;
       previousPresentationTeamIdRef.current = status.current_presentation_team_id || null;
-
-      if (!intervalRef.current) {
-        const currentConnId = connId || connectionId;
-        if (currentConnId) {
-          const pollInterval = status.presentation_state === 'preparing' ? 2000 :
-                              status.presentation_state === 'evaluating' ? 3000 : 3000;
-          intervalRef.current = setInterval(() => {
-            loadGameState(currentConnId);
-          }, pollInterval);
-        }
-      }
 
       const evaluatedTeamChanged =
         status.presentation_state === 'evaluating' &&
@@ -393,7 +380,7 @@ export function TabletPresentacionPitch() {
     }
   };
 
-  const checkExistingEvaluation = async (evaluatedTeamId: number) => {
+  const checkExistingEvaluation = async (evaluatedTeamId: string) => {
     const currentTeam = team;
     const currentGameSessionId = gameSessionId;
 

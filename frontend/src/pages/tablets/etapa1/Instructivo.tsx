@@ -6,9 +6,10 @@ import { sessionsAPI, tabletConnectionsAPI, teamPersonalizationsAPI } from '@/se
 import { toast } from 'sonner';
 import { GalacticPage } from '@/components/GalacticPage';
 import { GlassCard } from '@/components/GlassCard';
+import { useRoomSync } from '@/hooks/useRoomSync';
 
 interface GameSession {
-  id: number;
+  id: string;
   room_code: string;
   status: string;
   current_activity_name?: string;
@@ -19,9 +20,8 @@ export function TabletInstructivo() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const activityCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  
+  const checkActivityRef = useRef<() => void>(() => {});
+
   // TODO: Reemplazar con el ID real del video de YouTube cuando esté disponible
   const videoUrl = '';
 
@@ -99,8 +99,9 @@ export function TabletInstructivo() {
 
         setLoading(false);
 
-        // Verificar actividad y etapa periódicamente (COMO EN ETAPA 2)
-        activityCheckIntervalRef.current = setInterval(async () => {
+        // Verificar actividad y etapa (llamado por useRoomSync: WS push en
+        // producción, setInterval de 2s como fallback en dev local)
+        const checkActivity = async () => {
           try {
             // Usar lobby en lugar de getById para evitar problemas de autenticación
             const updatedLobbyData = await sessionsAPI.getLobby(gameSessionId);
@@ -127,11 +128,8 @@ export function TabletInstructivo() {
                 } catch {}
               }
 
-              // Clear interval (only reached when we will redirect)
-              if (activityCheckIntervalRef.current) {
-                clearInterval(activityCheckIntervalRef.current);
-                activityCheckIntervalRef.current = null;
-              }
+              // Dejar de reaccionar a más pushes/ticks (solo se llega aquí cuando vamos a redirigir)
+              checkActivityRef.current = () => {};
 
               if (newStageNumber === 1) {
                 if (newActivityName.includes('personaliz')) {
@@ -161,7 +159,8 @@ export function TabletInstructivo() {
           } catch (error) {
             console.error('Error verificando actividad:', error);
           }
-        }, 2000); // Verificar cada 2 segundos
+        };
+        checkActivityRef.current = checkActivity;
       } catch (error) {
         console.error('Error loading game state:', error);
         setLoading(false);
@@ -171,14 +170,15 @@ export function TabletInstructivo() {
     loadInitialData();
 
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-      if (activityCheckIntervalRef.current) {
-        clearInterval(activityCheckIntervalRef.current);
-      }
+      checkActivityRef.current = () => {};
     };
   }, [searchParams, navigate]);
+
+  useRoomSync(() => checkActivityRef.current(), {
+    token: localStorage.getItem('team_session_token'),
+    roomCode: localStorage.getItem('roomCode'),
+    intervalMs: 2000,
+  });
 
   if (loading) {
     return (

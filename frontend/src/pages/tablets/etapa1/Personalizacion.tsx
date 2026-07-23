@@ -12,9 +12,10 @@ import { toast } from 'sonner';
 import { tabletConnectionsAPI, sessionsAPI, teamPersonalizationsAPI } from '@/services';
 import { advanceActivityOnTimerExpiration } from '@/utils/timerAutoAdvance';
 import { getResultsRedirectUrl } from '@/utils/tabletResultsRedirect';
+import { useRoomSync } from '@/hooks/useRoomSync';
 
 interface Team {
-  id: number;
+  id: string;
   name: string;
   color: string;
   tokens_total?: number;
@@ -38,13 +39,12 @@ export function TabletPersonalizacion() {
   const [submitted, setSubmitted] = useState(false);
   const [timerRemaining, setTimerRemaining] = useState<string>('--:--');
   const [connectionId, setConnectionId] = useState<string | null>(null);
-  const [gameSessionId, setGameSessionId] = useState<number | null>(null);
+  const [gameSessionId, setGameSessionId] = useState<string | null>(null);
   const [currentActivityId, setCurrentActivityId] = useState<number | null>(null);
   const [showUBotModal, setShowUBotModal] = useState(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const timeExpiredRef = useRef<boolean>(false);
-  const activityCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const checkActivityRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const connId = searchParams.get('connection_id') || localStorage.getItem('tabletConnectionId');
@@ -175,8 +175,9 @@ export function TabletPersonalizacion() {
           await startTimer(initialActivityId, statusData.game_session.id);
         }
 
-        // Verificar actividad y etapa periódicamente (COMO EN ETAPA 2)
-        activityCheckIntervalRef.current = setInterval(async () => {
+        // Verificar actividad y etapa (llamado por useRoomSync: WS push en
+        // producción, setInterval de 3s como fallback en dev local)
+        const checkActivity = async () => {
           try {
             // Usar lobby en lugar de getById para evitar problemas de autenticación
             const updatedLobbyData = await sessionsAPI.getLobby(statusData.game_session.id);
@@ -191,11 +192,8 @@ export function TabletPersonalizacion() {
             const stageChanged = updatedSession.current_stage_number !== initialStageNumber;
             
             if (activityChanged || stageChanged) {
-              // Limpiar intervalos
-              if (activityCheckIntervalRef.current) {
-                clearInterval(activityCheckIntervalRef.current);
-                activityCheckIntervalRef.current = null;
-              }
+              // Dejar de reaccionar a más pushes/ticks -- ya vamos a redirigir
+              checkActivityRef.current = () => {};
               if (timerIntervalRef.current) {
                 clearInterval(timerIntervalRef.current);
                 timerIntervalRef.current = null;
@@ -254,7 +252,8 @@ export function TabletPersonalizacion() {
           } catch (error) {
             console.error('Error verificando actividad:', error);
           }
-        }, 3000); // Verificar cada 3 segundos
+        };
+        checkActivityRef.current = checkActivity;
 
         setLoading(false);
       } catch (error: any) {
@@ -266,24 +265,25 @@ export function TabletPersonalizacion() {
     loadInitialData();
 
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
       if (timerIntervalRef.current) {
         clearInterval(timerIntervalRef.current);
       }
-      if (activityCheckIntervalRef.current) {
-        clearInterval(activityCheckIntervalRef.current);
-      }
+      checkActivityRef.current = () => {};
     };
   }, [searchParams, navigate]);
+
+  useRoomSync(() => checkActivityRef.current(), {
+    token: localStorage.getItem('team_session_token'),
+    roomCode: localStorage.getItem('roomCode'),
+    intervalMs: 3000,
+  });
 
   // Reset timeExpired cuando cambia la actividad
   useEffect(() => {
     timeExpiredRef.current = false;
   }, [currentActivityId]);
 
-  const startTimer = async (activityId: number, gameSessionId: number) => {
+  const startTimer = async (activityId: number, gameSessionId: string) => {
     // Si ya hay un intervalo corriendo, no iniciar otro
     if (timerIntervalRef.current) {
       return;

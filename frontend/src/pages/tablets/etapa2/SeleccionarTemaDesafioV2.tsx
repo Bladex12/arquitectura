@@ -10,10 +10,11 @@ import {
 import { getResultsRedirectUrl } from '@/utils/tabletResultsRedirect';
 import { advanceActivityOnTimerExpiration } from '@/utils/timerAutoAdvance';
 import { toast } from 'sonner';
+import { useRoomSync } from '@/hooks/useRoomSync';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Team { id: number; name: string; color: string; }
+interface Team { id: string; name: string; color: string; }
 
 interface Topic {
   id: number; name: string; icon?: string; description?: string;
@@ -26,7 +27,7 @@ interface Challenge {
 }
 
 interface GameSession {
-  id: number; status: string;
+  id: string; status: string;
   current_activity?: number; current_activity_name?: string;
   current_stage_number?: number; course?: number; faculty?: number;
 }
@@ -83,7 +84,6 @@ export function TabletSeleccionarTemaDesafioV2() {
   const [waitingForProfessor, setWaitingForProfessor] = useState(false);
   const [timerRemaining, setTimerRemaining] = useState('--:--');
 
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerSyncRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isFetchingRef = useRef(false);
@@ -96,15 +96,16 @@ export function TabletSeleccionarTemaDesafioV2() {
     if (!connId) { navigate('/tablet/join'); return; }
     setConnectionId(connId);
     loadGameState(connId, true);
-    intervalRef.current = setInterval(() => {
-      if (!isFetchingRef.current) loadGameState(connId, false);
-    }, 5000);
     return () => {
-      clearInterval(intervalRef.current!);
       clearInterval(timerIntervalRef.current!);
       clearInterval(timerSyncRef.current!);
     };
   }, []);
+
+  useRoomSync(() => { if (connectionId) loadGameState(connectionId, false); }, {
+    token: localStorage.getItem('team_session_token'),
+    roomCode: localStorage.getItem('roomCode'),
+  });
 
   const loadGameState = async (connId: string, isInitialLoad: boolean) => {
     if (isFetchingRef.current) return;
@@ -212,7 +213,7 @@ export function TabletSeleccionarTemaDesafioV2() {
     }
   };
 
-  const syncTimer = async (gsId: number, connId: string, stageId: number) => {
+  const syncTimer = async (gsId: string, connId: string, stageId: number) => {
     try {
       const timerData = await sessionsAPI.getActivityTimer(gsId);
       if (!timerData) return;
