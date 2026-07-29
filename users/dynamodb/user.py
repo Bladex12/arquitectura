@@ -187,3 +187,11 @@ def delete_user(user_id):
 
 def check_user_password(user_item, raw_password):
     return check_password(raw_password, user_item['password_hash'])
+
+
+def make_password_placeholder():
+    """Used only when the shim wraps a throwaway Django auth.User whose
+    .password happens to be empty (shouldn't normally happen -
+    create_user always hashes something) - an unusable hash, never a
+    valid password match."""
+    return '!'
