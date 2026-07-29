@@ -58,6 +58,15 @@ class CreateAndGetUserTest(DynamoDBTestCase):
     def test_get_users_by_ids_empty_list(self):
         assert user_repo.get_users_by_ids([]) == {}
 
+    def test_get_users_by_ids_excludes_reservation_items(self):
+        """Verify reservation items don't leak into get_users_by_ids()."""
+        u1 = user_repo.create_user(username='i1', email='i1@udd.cl', password='pw12345!')
+        result = user_repo.get_users_by_ids([u1['id']])
+        # Should only get the user, not the reservation
+        assert len(result) == 1
+        assert u1['id'] in result
+        assert result[u1['id']]['type'] == 'User'
+
     def test_list_users_and_count(self):
         user_repo.create_user(username='e1', email='e1@udd.cl', password='pw12345!')
         user_repo.create_user(username='e2', email='e2@udd.cl', password='pw12345!')

@@ -150,12 +150,12 @@ def update_user(user_id, fields):
 
 def delete_user(user_id):
     """Delete both the user item and its username-reservation item.
-    Must fetch the user first to retrieve the username for the reservation."""
+    Must fetch the user first to retrieve the username for the reservation.
+    Uses batch_write_item (non-atomic) rather than transact_write_items,
+    acceptable at course-project scale per same justification as Scan-based operations."""
     user_item = get_user_by_id(user_id)
     if not user_item:
         return
-
-    table = get_table()
 
     # Delete both the user item and the reservation item
     dynamodb = boto3.client('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
