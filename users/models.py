@@ -27,9 +27,29 @@ from users.dynamodb import student as student_repo
 from users.dynamodb import user as user_repo
 
 
+class _ProfessorProxy:
+    """Minimal stand-in for `request.user.professor` used by call sites
+    that only ever read `.id` off it (e.g. `professor_id =
+    request.user.professor.id`). Every User item is implicitly also a
+    Professor (the merged-item design - see users/dynamodb/user.py), so
+    this is unconditionally available off `_UserProxy`, mirroring the
+    old `hasattr(request.user, 'professor')` always being True for any
+    authenticated account."""
+
+    def __init__(self, user_id):
+        self.id = user_id
+
+
 class _UserProxy:
     """Stands in for the old `professor.user` / `administrator.user`
-    OneToOneField accessor."""
+    OneToOneField accessor. Also stands in for `request.user` itself in
+    code paths that reach it directly rather than through
+    DynamoJWTAuthentication - notably DRF's `force_authenticate(user=
+    professor.user)` in tests, which bypasses the auth class entirely -
+    so `.professor` / `.administrator` duck-typing (and the
+    `Professor.DoesNotExist` / `Administrator.DoesNotExist` exceptions
+    call sites catch) needs to work here too, not just on Task 8's
+    DynamoUser."""
 
     def __init__(self, item):
         self.id = item['id']
@@ -38,10 +58,22 @@ class _UserProxy:
         self.first_name = item.get('first_name', '')
         self.last_name = item.get('last_name', '')
         self.is_active = item.get('is_active', True)
+        self.is_administrator = item.get('is_administrator', False)
 
     def get_full_name(self):
         full = f'{self.first_name} {self.last_name}'.strip()
         return full or self.username
+
+    @property
+    def professor(self):
+        return _ProfessorProxy(self.id)
+
+    @property
+    def administrator(self):
+        if not self.is_administrator:
+            raise Administrator.DoesNotExist(f'User {self.id} is not an administrator')
+        item = user_repo.get_user_by_id(self.id)
+        return Administrator(item)
 
 
 class _ListResult(list):
@@ -93,9 +125,11 @@ class Professor:
         def create(self, *, user=None, username=None, email=None, password=None,
                     first_name='', last_name='', access_code=None):
             if user is not None:
-                # Test-fixture convenience: `user` is a throwaway
-                # django.contrib.auth.models.User (or a _UserProxy from
-                # an already-created Professor/Administrator).
+                # Test-fixture convenience: `user` is always a throwaway
+                # django.contrib.auth.models.User here (unlike
+                # Administrator.objects.create(), this is never called
+                # with a _UserProxy in practice - every real call site
+                # passes a freshly-created Django auth.User).
                 item = user_repo.create_user(
                     username=user.username,
                     email=user.email or f'{user.username}@example.udd.cl',
@@ -235,12 +269,18 @@ class ProfessorAccessCode:
                 item = access_code_repo.get_access_code(access_code)
                 items = [item] if item else []
             elif target_email is not None:
+                if is_used is True:
+                    # get_pending_access_code_by_email only ever indexes
+                    # unused codes by email - there's no repository
+                    # lookup for "used codes by email", so silently
+                    # returning [] here would be a wrong answer, not an
+                    # empty-but-correct one. Fail loudly instead.
+                    raise NotImplementedError(
+                        'ProfessorAccessCode filtering by email for used codes is not '
+                        'supported - the repository layer only indexes pending codes by email'
+                    )
                 pending = access_code_repo.get_pending_access_code_by_email(target_email)
                 items = [pending] if pending else []
-                if is_used is False:
-                    pass  # get_pending_access_code_by_email already filters to unused
-                elif pending is not None and is_used is not None and pending['is_used'] != is_used:
-                    items = []
             else:
                 items = access_code_repo.list_access_codes()
 

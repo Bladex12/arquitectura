@@ -156,3 +156,53 @@ class ProfessorAccessCodeShimTest(DynamoDBTestCase, TestCase):
         ProfessorAccessCode.objects.create(email='u@udd.cl', access_code='444444')
         codes = list(ProfessorAccessCode.objects.all())
         assert [c.access_code for c in codes] == ['444444', '555555']
+
+    def test_filter_by_email_and_is_used_true_raises_not_implemented(self):
+        """The repository layer only indexes *pending* codes by email
+        (get_pending_access_code_by_email) - there's no lookup path for
+        used codes by email, so this must fail loudly rather than
+        silently returning an empty (wrong) result."""
+        ProfessorAccessCode.objects.create(email='v@udd.cl', access_code='333333')
+        try:
+            ProfessorAccessCode.objects.filter(email='v@udd.cl', is_used=True)
+            assert False, 'expected NotImplementedError'
+        except NotImplementedError:
+            pass
+
+
+class UserProxyDuckTypingTest(DynamoDBTestCase, TestCase):
+    """Covers `request.user.professor` / `request.user.administrator` /
+    `hasattr(request.user, ...)` duck typing on `_UserProxy`. This
+    matters beyond the `professor.user` / `administrator.user` nested
+    accessor: DRF's `force_authenticate(user=professor.user)` (used
+    throughout game_sessions/test_*.py) sets `request.user` to exactly
+    this `_UserProxy` instance, bypassing the auth class entirely - so
+    call sites like `hasattr(request.user, 'professor')` and
+    `except Administrator.DoesNotExist` must work against it directly."""
+
+    def test_does_not_exist_exceptions_are_attribute_errors(self):
+        """Required for hasattr(...) to correctly report False instead
+        of propagating - hasattr() only swallows AttributeError."""
+        assert issubclass(Professor.DoesNotExist, AttributeError)
+        assert issubclass(Administrator.DoesNotExist, AttributeError)
+
+    def test_plain_user_has_professor_proxy(self):
+        """Every User item is implicitly also a Professor (merged-item
+        design), so `.professor` is unconditionally available."""
+        django_user = DjangoUser.objects.create_user(username='duckprof', password='pass')
+        professor = Professor.objects.create(user=django_user)
+        assert hasattr(professor.user, 'professor') is True
+        assert professor.user.professor.id == professor.id
+
+    def test_plain_professor_user_has_no_administrator(self):
+        django_user = DjangoUser.objects.create_user(username='duckplain', password='pass')
+        professor = Professor.objects.create(user=django_user)
+        fetched = Professor.objects.get(id=professor.id)
+        assert hasattr(fetched.user, 'administrator') is False
+
+    def test_administrator_user_has_administrator_proxy(self):
+        django_user = DjangoUser.objects.create_user(username='duckadmin', password='pass')
+        admin = Administrator.objects.create(user=django_user)
+        as_professor = Professor.objects.get(id=admin.id)
+        assert hasattr(as_professor.user, 'administrator') is True
+        assert as_professor.user.administrator.id == admin.id
