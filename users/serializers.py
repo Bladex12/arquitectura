@@ -43,6 +43,10 @@ def serialize_administrator(administrator):
 
 def serialize_access_code(code):
     return {
+        # ProfessorAccessCode has no separate numeric id in the new schema -
+        # access_code IS the natural unique key (used as the DynamoDB PK).
+        # Frontend (ManageProfessors.tsx) uses this as a React list key.
+        'id': code.access_code,
         'email': code.email,
         'access_code': code.access_code,
         'is_used': code.is_used,
@@ -53,11 +57,11 @@ def serialize_access_code(code):
 
 class ProfessorCreateSerializer(serializers.Serializer):
     """Serializer para crear un Profesor con User - Requiere código de acceso"""
-    username = serializers.CharField()
-    email = serializers.EmailField()
-    password = serializers.CharField(validators=[validate_password])
-    first_name = serializers.CharField(required=False, allow_blank=True, default='')
-    last_name = serializers.CharField(required=False, allow_blank=True, default='')
+    username = serializers.CharField(write_only=True)
+    email = serializers.EmailField(write_only=True)
+    password = serializers.CharField(write_only=True, validators=[validate_password])
+    first_name = serializers.CharField(write_only=True, required=False, allow_blank=True, default='')
+    last_name = serializers.CharField(write_only=True, required=False, allow_blank=True, default='')
     access_code = serializers.CharField(required=True, allow_blank=False, allow_null=False)
 
     def validate_access_code(self, value):
@@ -94,24 +98,37 @@ class ProfessorCreateSerializer(serializers.Serializer):
         return email_lower
 
     def create(self, validated_data):
-        from django.utils import timezone
-
         from .models import Professor
 
         access_code = validated_data.pop('access_code')
         professor = Professor.objects.create(**validated_data, access_code=access_code)
 
+        # Re-check for a TOCTOU race: the code could have been consumed by
+        # a concurrent request between validate_access_code() and here. If
+        # so, the professor account above is already created (unavoidable
+        # without a transactional create+consume) but the code itself must
+        # not be silently left inconsistent - surface the error instead of
+        # raising an unhandled AttributeError on `None`.
         code_obj = ProfessorAccessCode.objects.filter(
             access_code=access_code, is_used=False, email__iexact=professor.user.email,
         ).first()
-        code_obj.is_used = True
-        code_obj.save(update_fields=['is_used', 'used_at'])
+        if code_obj:
+            code_obj.is_used = True
+            code_obj.save(update_fields=['is_used', 'used_at'])
+        else:
+            raise serializers.ValidationError('El código de acceso ya no está disponible')
 
         return professor
 
 
 class StudentSerializer(serializers.Serializer):
-    """Serializer para Estudiante"""
+    """Serializer para Estudiante. Also used as the (many=True) input shape
+    for StudentBulkCreateSerializer - `id` is read_only so it's still
+    included in output representations (e.g.
+    game_sessions/serializers.py's TeamSerializer.students, which the
+    frontend needs `.id` from for drag-and-drop roster edits and React
+    keys) without being required on the create-from-Excel input path."""
+    id = serializers.CharField(read_only=True)
     full_name = serializers.CharField()
     email = serializers.EmailField()
     rut = serializers.CharField()

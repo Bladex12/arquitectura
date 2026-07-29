@@ -37,6 +37,20 @@ class RegistrationTest(DynamoDBTestCase, TestCase):
         })
         assert response.status_code == 400
 
+    def test_register_ignores_stale_authorization_header(self):
+        # Registration must stay public even if the browser happens to send
+        # a stale/garbage/expired Bearer token alongside it (get_authenticators()
+        # must actually skip auth for `create`, not just happen to work
+        # because no header was sent - regression test for a dead-code bug
+        # where the override checked self.action, which isn't set yet at
+        # that point in the ViewSet request lifecycle).
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer not-a-real-token')
+        response = self.client.post('/api/auth/professors/', {
+            'username': 'newprof4', 'email': 'newprof@udd.cl', 'password': 'pw12345!x',
+            'access_code': '123456',
+        })
+        assert response.status_code == 201, response.data
+
 
 class LoginAndMeTest(DynamoDBTestCase, TestCase):
     def setUp(self):

@@ -44,9 +44,23 @@ class ProfessorViewSet(viewsets.ViewSet):
 
     def get_authenticators(self):
         # Registration (create) is public - no Authorization header
-        # expected, so don't even try to parse one.
-        if getattr(self, 'action', None) == 'create':
-            return []
+        # expected, so don't even try to parse one (a stale/expired Bearer
+        # token, or an unrelated admin-site session cookie, must not be
+        # able to reject an otherwise-valid registration).
+        #
+        # Can't key this off `self.action` - DRF's ViewSetMixin only sets
+        # that attribute *inside* initialize_request(), a few lines after
+        # it calls super().initialize_request(), which is what calls
+        # get_authenticators() in the first place. `self.action` is always
+        # still None here. `self.action_map` (and the raw pre-DRF-wrapped
+        # `self.request`) ARE already set by this point though - both get
+        # assigned in ViewSetMixin.as_view()'s view() closure, before
+        # .dispatch() (and therefore .initialize_request()) ever runs.
+        request = getattr(self, 'request', None)
+        action_map = getattr(self, 'action_map', None)
+        if request is not None and action_map is not None:
+            if action_map.get(request.method.lower()) == 'create':
+                return []
         return super().get_authenticators()
 
     def create(self, request):
