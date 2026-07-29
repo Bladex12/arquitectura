@@ -76,3 +76,25 @@ class CreateAndGetUserTest(DynamoDBTestCase):
         created = user_repo.create_user(username='g1', email='g1@udd.cl', password='pw12345!')
         user_repo.delete_user(created['id'])
         assert user_repo.get_user_by_id(created['id']) is None
+
+    def test_list_users_excludes_reservation_items(self):
+        """Verify reservation items don't leak into list_users()."""
+        user_repo.create_user(username='h1', email='h1@udd.cl', password='pw12345!')
+        user_repo.create_user(username='h2', email='h2@udd.cl', password='pw12345!')
+        users = user_repo.list_users()
+        # Should only see User items, not UsernameReservation items
+        assert all(u['type'] == 'User' for u in users)
+        assert len(users) == 2
+
+    def test_reuse_username_after_deletion(self):
+        """Verify a username can be reused after the original user is deleted."""
+        # Create and delete a user with username 'reusable'
+        created1 = user_repo.create_user(username='reusable', email='first@udd.cl', password='pw12345!')
+        user_repo.delete_user(created1['id'])
+
+        # Now create a new user with the same username
+        created2 = user_repo.create_user(username='reusable', email='second@udd.cl', password='pw12345!')
+
+        # Verify the new user exists and has a different ID
+        assert created2['id'] != created1['id']
+        assert user_repo.get_user_by_username('reusable')['id'] == created2['id']

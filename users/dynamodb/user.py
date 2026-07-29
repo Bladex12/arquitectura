@@ -1,9 +1,12 @@
 """Repository functions for the User item (merged Professor +
 Administrator - see the design spec). No Django ORM dependency."""
+import os
 import uuid
 
 import boto3
+from botocore.exceptions import ClientError
 from boto3.dynamodb.conditions import Attr, Key
+from boto3.dynamodb.types import TypeSerializer
 from django.contrib.auth.hashers import check_password, make_password
 
 from .client import build_update_expression, get_table, now_iso
@@ -20,10 +23,6 @@ def create_user(*, username, email, password=None, password_hash=None,
     username is already taken."""
     if password_hash is None:
         password_hash = make_password(password)
-
-    # Check if username already exists
-    if get_user_by_username(username) is not None:
-        raise ValueError(f'username "{username}" already exists')
 
     table = get_table()
     user_id = str(uuid.uuid4())
@@ -49,7 +48,43 @@ def create_user(*, username, email, password=None, password_hash=None,
         'created_at': now,
         'updated_at': now,
     }
-    table.put_item(Item=item)
+
+    # Create a username-reservation item to ensure uniqueness transactionally
+    reservation_item = {
+        'PK': username_gsi1pk(username),
+        'SK': 'RESERVATION',
+        'type': 'UsernameReservation',
+        'user_id': user_id,
+    }
+
+    # Write both items transactionally using low-level client API
+    dynamodb = boto3.client('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
+    table_name = os.environ['USERS_TABLE']
+    serializer = TypeSerializer()
+
+    try:
+        dynamodb.transact_write_items(
+            TransactItems=[
+                {
+                    'Put': {
+                        'TableName': table_name,
+                        'Item': {k: serializer.serialize(v) for k, v in reservation_item.items()},
+                        'ConditionExpression': 'attribute_not_exists(PK)',
+                    }
+                },
+                {
+                    'Put': {
+                        'TableName': table_name,
+                        'Item': {k: serializer.serialize(v) for k, v in item.items()},
+                    }
+                },
+            ]
+        )
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'TransactionCanceledException':
+            raise ValueError(f'username "{username}" already exists')
+        raise
+
     return item
 
 
@@ -114,7 +149,40 @@ def update_user(user_id, fields):
 
 
 def delete_user(user_id):
-    get_table().delete_item(Key={'PK': user_pk(user_id), 'SK': metadata_sk()})
+    """Delete both the user item and its username-reservation item.
+    Must fetch the user first to retrieve the username for the reservation."""
+    user_item = get_user_by_id(user_id)
+    if not user_item:
+        return
+
+    table = get_table()
+
+    # Delete both the user item and the reservation item
+    dynamodb = boto3.client('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
+    table_name = os.environ['USERS_TABLE']
+
+    dynamodb.batch_write_item(
+        RequestItems={
+            table_name: [
+                {
+                    'DeleteRequest': {
+                        'Key': {
+                            'PK': {'S': user_pk(user_id)},
+                            'SK': {'S': metadata_sk()},
+                        }
+                    }
+                },
+                {
+                    'DeleteRequest': {
+                        'Key': {
+                            'PK': {'S': username_gsi1pk(user_item['username'])},
+                            'SK': {'S': 'RESERVATION'},
+                        }
+                    }
+                },
+            ]
+        }
+    )
 
 
 def check_user_password(user_item, raw_password):
