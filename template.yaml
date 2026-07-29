@@ -189,6 +189,7 @@ Resources:
           ALLOWED_HOSTS: !Sub "127.0.0.1,localhost,.execute-api.${AWS::Region}.amazonaws.com"
           STATIC_MEDIA_BUCKET: !Ref StaticMediaBucket
           GAME_SESSIONS_TABLE: !Ref GameSessionTable
+          USERS_TABLE: !Ref UsersTable
           # game_sessions/broadcast.py async-invokes this (not in the VPC)
           # rather than calling ConnectionsTable/apigatewaymanagementapi
           # directly -- see BroadcastFunction and the LambdaVpcEndpoint
@@ -270,6 +271,56 @@ Resources:
             ProjectionType: ALL
       StreamSpecification:
         StreamViewType: NEW_AND_OLD_IMAGES
+
+  # ==========================================================
+  # DynamoDB: users (professors/administrators/students/access codes)
+  # ==========================================================
+  # See docs/superpowers/specs/2026-07-29-users-dynamodb-migration-design.md.
+  # Separate from GameSessionTable - a different bounded context (auth)
+  # with its own access patterns (login by username/email), not the
+  # game-runtime hot path.
+
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI2
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
 
   # ==========================================================
   # DynamoDB: WebSocket connection tracking
@@ -511,6 +562,8 @@ Outputs:
     Value: !GetAtt RDSInstance.Endpoint.Address
   GameSessionTableName:
     Value: !Ref GameSessionTable
+  UsersTableName:
+    Value: !Ref UsersTable
   ConnectionsTableName:
     Value: !Ref ConnectionsTable
   StaticMediaBucketName:
