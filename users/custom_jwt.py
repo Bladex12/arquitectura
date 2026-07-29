@@ -1,68 +1,49 @@
+"""Vista personalizada para JWT que permite autenticación por email o
+username - ahora contra DynamoDB en lugar del ORM. Ver
+docs/superpowers/specs/2026-07-29-users-dynamodb-migration-design.md.
 """
-Vista personalizada para JWT que permite autenticación por email o username
-"""
-from rest_framework_simplejwt.views import TokenObtainPairView
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from django.contrib.auth import get_user_model
 from rest_framework import serializers
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.views import TokenObtainPairView
 
-User = get_user_model()
+from users.auth import DynamoUser
+from users.dynamodb import user as user_repo
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    """
-    Serializer personalizado que permite autenticación por username o email
-    """
+    """Serializer personalizado que permite autenticación por username o email"""
+
     def validate(self, attrs):
         username = attrs.get('username')
         password = attrs.get('password')
-        
+
         if not username or not password:
             raise serializers.ValidationError(
                 {'non_field_errors': ['Debe incluir "username" y "password".']}
             )
-        
-        # Intentar encontrar el usuario por username primero
-        user = None
-        try:
-            user = User.objects.get(username=username)
-        except User.DoesNotExist:
-            # Si no existe por username, intentar por email
-            try:
-                user = User.objects.get(email=username)
-            except User.DoesNotExist:
-                pass
-        
-        # Si no se encontró el usuario, retornar error
-        if not user:
+
+        item = user_repo.get_user_by_username(username) or user_repo.get_user_by_email(username)
+
+        if not item:
             raise serializers.ValidationError(
                 {'non_field_errors': ['No se encontró una cuenta de usuario activa para las credenciales provistas']}
             )
-        
-        # Verificar que el usuario esté activo
-        if not user.is_active:
+
+        if not item.get('is_active', True):
             raise serializers.ValidationError(
                 {'non_field_errors': ['Esta cuenta de usuario está desactivada']}
             )
-        
-        # Verificar la contraseña
-        if not user.check_password(password):
+
+        if not user_repo.check_user_password(item, password):
             raise serializers.ValidationError(
                 {'non_field_errors': ['No se encontró una cuenta de usuario activa para las credenciales provistas']}
             )
-        
-        # Si todo está bien, generar los tokens
+
+        user = DynamoUser(item)
         refresh = self.get_token(user)
-        data = {}
-        data['refresh'] = str(refresh)
-        data['access'] = str(refresh.access_token)
-        
-        return data
+        return {'refresh': str(refresh), 'access': str(refresh.access_token)}
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
-    """
-    Vista personalizada para obtener tokens JWT con autenticación por email o username
-    """
+    """Vista personalizada para obtener tokens JWT con autenticación por email o username"""
     serializer_class = CustomTokenObtainPairSerializer
-
