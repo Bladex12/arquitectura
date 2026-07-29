@@ -164,3 +164,51 @@ No TTL — accounts and access codes persist indefinitely, same as
   it needs) should be finalized against a full audit of
   `request.user.*` usage across `game_sessions/views.py` and
   `admin_dashboard/views.py` during implementation, not guessed upfront.
+
+## Revision — 2026-07-29 (during plan-writing)
+
+Auditing real call sites (writing the implementation plan surfaced this;
+noting it here rather than burying a schema change silently) found more
+than login/registration depends on `users`:
+
+- `users/views.py`'s `ProfessorViewSet`/`AdministratorViewSet`/
+  `StudentViewSet`/`UserViewSet` are `ModelViewSet`s exposing
+  list/retrieve/update/delete, not just `create`/`me`. Frontend actually
+  calls `GET /auth/professors/`, `GET /auth/professors/access_codes/`,
+  and `POST /auth/professors/create_with_code/` (`ManageProfessors.tsx`)
+  in addition to the login/registration/`me`/`stats` paths already
+  covered. `StudentViewSet.bulk_create`/`upload_excel` and `UserViewSet`
+  have no frontend caller (dead endpoints, kept working but not a design
+  priority).
+- `game_sessions/serializers.py` and `game_sessions/views.py` call
+  `Professor.objects.get(id=...)`, `.select_related('user').filter(id__in=...)`,
+  and `Student.objects.get_or_create(...)` / `.filter(id__in=...)` /
+  `.filter(id=...).exists()` directly — real id-based and batch lookups,
+  not covered by the original access-pattern table.
+
+This means the original username-keyed `PK=USER#<username>` doesn't
+support the dominant real access pattern (fetch by `id`). **Revised key
+scheme:**
+
+| Entity | PK | SK | GSI1PK / GSI1SK | GSI2PK / GSI2SK |
+|---|---|---|---|---|
+| User | `USER#<uuid>` | `METADATA` | `USERNAME#<username>` / `METADATA` | `EMAIL#<email>` / `METADATA` |
+| ProfessorAccessCode | `ACCESSCODE#<code>` | `METADATA` | — | `ACCESSCODEEMAIL#<email>` / `METADATA` |
+| Student | `STUDENT#<uuid>` | `METADATA` | — | `STUDENTEMAIL#<email>` / `METADATA` |
+
+`GSI1` serves username-login; `GSI2` serves every other by-email lookup
+(user login by email, pending-access-code-by-email check,
+student-get-or-create-by-email) — one shared index, discriminated by
+prefix, same convention `GameSessionTable`'s `GSI1` already uses for
+`PROFESSOR#`/`type`-based disambiguation. Batch fetch (`id__in=[...]`)
+maps to `BatchGetItem`. List-all (`ProfessorViewSet.list`,
+`access_codes`) maps to a filtered `Scan` — acceptable at course-project
+scale, same justification as `cancel_expired_sessions` in the
+`game_sessions` spec.
+
+`ModelViewSet` doesn't work against non-ORM data (it needs `.queryset`
+for pagination/filtering machinery) — the four viewsets become plain
+`viewsets.ViewSet` subclasses with explicit `list`/`retrieve`/`create`/
+`update`/`destroy` methods. List responses stay plain arrays (not DRF's
+paginated envelope) — confirmed safe because the frontend already reads
+`response.data.results || response.data`.
