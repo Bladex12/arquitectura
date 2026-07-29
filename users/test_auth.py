@@ -46,6 +46,35 @@ class DynamoUserTest(DynamoDBTestCase, TestCase):
         except Administrator.DoesNotExist:
             pass
 
+    def test_administrator_re_fetches_fresh_rather_than_stale_snapshot(self):
+        item = user_repo.create_user(username='jdoe6', email='jdoe6@udd.cl', password='pw12345!',
+                                       is_administrator=True)
+        du = DynamoUser(item)
+        # Mutate the underlying DynamoDB item *after* DynamoUser was
+        # constructed. If .administrator ever regresses to building
+        # Administrator(self._item) instead of re-fetching, this field
+        # would still read False.
+        user_repo.update_user(item['id'], {'is_super_admin': True})
+        assert du.administrator.is_super_admin is True
+
+    def test_administrator_raises_does_not_exist_when_item_deleted(self):
+        item = user_repo.create_user(username='jdoe7', email='jdoe7@udd.cl', password='pw12345!',
+                                       is_administrator=True)
+        du = DynamoUser(item)
+        user_repo.delete_user(item['id'])
+        assert hasattr(du, 'administrator') is False
+        try:
+            du.administrator
+            assert False, 'expected Administrator.DoesNotExist'
+        except Administrator.DoesNotExist:
+            pass
+
+    def test_check_password(self):
+        item = user_repo.create_user(username='jdoe8', email='jdoe8@udd.cl', password='some-password')
+        du = DynamoUser(item)
+        assert du.check_password('some-password') is True
+        assert du.check_password('wrong') is False
+
 
 class DynamoJWTAuthenticationTest(DynamoDBTestCase, TestCase):
     def test_get_user_returns_dynamo_user(self):
@@ -69,6 +98,14 @@ class DynamoJWTAuthenticationTest(DynamoDBTestCase, TestCase):
         auth = DynamoJWTAuthentication()
         try:
             auth.get_user({'user_id': item['id']})
+            assert False, 'expected AuthenticationFailed'
+        except AuthenticationFailed:
+            pass
+
+    def test_get_user_missing_user_id_claim_raises_authentication_failed(self):
+        auth = DynamoJWTAuthentication()
+        try:
+            auth.get_user({})
             assert False, 'expected AuthenticationFailed'
         except AuthenticationFailed:
             pass

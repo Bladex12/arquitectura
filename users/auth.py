@@ -7,18 +7,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import AuthenticationFailed
 
 from users.dynamodb import user as user_repo
-from users.models import Administrator
-
-
-class _ProfessorProxy:
-    """Minimal stand-in for `request.user.professor` used by call sites
-    that only ever read `.id` off it (e.g. `professor_id =
-    request.user.professor.id`). Every User item is implicitly also a
-    Professor (the merged-item design - see users/dynamodb/user.py), so
-    this is unconditionally available."""
-
-    def __init__(self, user_id):
-        self.id = user_id
+from users.models import Administrator, _ProfessorProxy
 
 
 class DynamoUser:
