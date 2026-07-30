@@ -89,7 +89,6 @@ ipython==8.27.0  # Versión estable de IPython 8.x (evita 9.x que requiere Pytho
 # SEGURIDAD ADICIONAL
 # ============================================
 django-ratelimit==4.1.0  # Versión estable
-django-axes==6.5.2  # Compatible con Django 5.0.x (8.0.0 requiere Django 5.2+)
 
 # ============================================
 # UTILIDADES DE FECHA Y TIEMPO

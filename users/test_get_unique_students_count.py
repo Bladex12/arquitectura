@@ -10,6 +10,7 @@ from game_sessions.dynamodb.game_session import create_session, update_session_s
 from game_sessions.dynamodb.team import create_team, set_roster
 from game_sessions.dynamodb.testing import create_test_table
 from moto import mock_aws
+from users.dynamodb.testing import create_test_table as create_users_test_table
 from users.models import Professor
 
 
@@ -17,15 +18,22 @@ class GetUniqueStudentsCountTest(TestCase):
     """Django TestCase (real MySQL-backed User/Professor) composed with a
     manually-managed moto mock (DynamoDB session/team data), since
     DynamoDBTestCase is a plain unittest.TestCase and multiple inheritance
-    with Django's TestCase is more trouble than it's worth."""
+    with Django's TestCase is more trouble than it's worth.
+
+    Also provisions the users DynamoDB table (Task 7): Professor is now
+    itself DynamoDB-backed (users/models.py), so
+    `Professor.objects.create(user=user)` below needs USERS_TABLE to
+    exist, in addition to GAME_SESSIONS_TABLE."""
 
     def setUp(self):
         self.mock = mock_aws()
         self.mock.start()
         import os
         os.environ['GAME_SESSIONS_TABLE'] = 'test-game-sessions'
+        os.environ['USERS_TABLE'] = 'test-users'
         os.environ['AWS_REGION'] = 'us-east-1'
         create_test_table('test-game-sessions')
+        create_users_test_table('test-users')
 
         user = User.objects.create_user(username=f'prof_{uuid.uuid4().hex[:6]}', password='pass')
         self.professor = Professor.objects.create(user=user)
