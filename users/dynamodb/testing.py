@@ -11,8 +11,18 @@ from moto import mock_aws
 
 def create_test_table(table_name='test-users', region_name='us-east-1'):
     """Creates the UsersTable schema (PK/SK + GSI1 + GSI2) against the
-    active moto mock. Must be called inside an active @mock_aws context."""
+    active moto mock. Must be called inside an active @mock_aws context.
+
+    Idempotent: drops a pre-existing table of the same name first. The
+    root conftest.py provisions this table for the whole suite (the users
+    app is DynamoDB-backed now, so any test building a Professor/Student
+    fixture needs it), which means callers here are often nested inside
+    that outer mock and moto will not have reset the backend for them."""
     dynamodb = boto3.resource('dynamodb', region_name=region_name)
+    try:
+        dynamodb.Table(table_name).delete()
+    except dynamodb.meta.client.exceptions.ResourceNotFoundException:
+        pass
     table = dynamodb.create_table(
         TableName=table_name,
         KeySchema=[

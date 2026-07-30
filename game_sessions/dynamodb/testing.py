@@ -14,8 +14,20 @@ from moto import mock_aws
 def create_test_table(table_name='test-game-sessions', region_name='us-east-1'):
     """Creates the GameSessionTable schema against the active moto mock.
     Must be called inside an active @mock_aws context/decorator.
+
+    Idempotent: drops a pre-existing table of the same name first. The
+    root conftest.py holds a class-scoped moto mock open for the whole
+    suite (so the DynamoDB-backed users app has a table during
+    setUpTestData), which makes every per-test `mock_aws()` here a NESTED
+    mock - and moto only resets its backends when the OUTERMOST mock
+    stops. Dropping first restores the per-test clean slate these callers
+    assume.
     """
     dynamodb = boto3.resource('dynamodb', region_name=region_name)
+    try:
+        dynamodb.Table(table_name).delete()
+    except dynamodb.meta.client.exceptions.ResourceNotFoundException:
+        pass
     table = dynamodb.create_table(
         TableName=table_name,
         KeySchema=[
