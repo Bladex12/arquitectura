@@ -97,11 +97,24 @@ class ProfessorCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError('Ya existe un usuario registrado con este correo electrónico')
         return email_lower
 
+    def validate_username(self, value):
+        from users.dynamodb import user as user_repo
+        if user_repo.get_user_by_username(value) is not None:
+            raise serializers.ValidationError('Ya existe un usuario registrado con este nombre de usuario')
+        return value
+
     def create(self, validated_data):
         from .models import Professor
 
         access_code = validated_data.pop('access_code')
-        professor = Professor.objects.create(**validated_data, access_code=access_code)
+        try:
+            professor = Professor.objects.create(**validated_data, access_code=access_code)
+        except ValueError as e:
+            # TOCTOU race: username passed validate_username() above but was
+            # taken by a concurrent registration before this write landed.
+            # create_user() raises a bare ValueError for that case - degrade
+            # to a clean 400 instead of an unhandled 500 (final review Finding 3).
+            raise serializers.ValidationError({'username': [str(e)]})
 
         # Re-check for a TOCTOU race: the code could have been consumed by
         # a concurrent request between validate_access_code() and here. If

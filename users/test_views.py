@@ -37,6 +37,25 @@ class RegistrationTest(DynamoDBTestCase, TestCase):
         })
         assert response.status_code == 400
 
+    def test_register_with_duplicate_username_returns_400(self):
+        # First registration succeeds.
+        response = self.client.post('/api/auth/professors/', {
+            'username': 'dupuser', 'email': 'newprof@udd.cl', 'password': 'pw12345!x',
+            'first_name': 'New', 'last_name': 'Prof', 'access_code': '123456',
+        })
+        assert response.status_code == 201, response.data
+
+        # Second registration with the SAME username but a different,
+        # unused email + access code must degrade to a clean 400, not an
+        # unhandled 500 (final review Finding 3).
+        access_code_repo.create_access_code('another@udd.cl', '654321')
+        response2 = self.client.post('/api/auth/professors/', {
+            'username': 'dupuser', 'email': 'another@udd.cl', 'password': 'pw12345!x',
+            'first_name': 'Another', 'last_name': 'Prof', 'access_code': '654321',
+        })
+        assert response2.status_code == 400, response2.data
+        assert 'username' in response2.data
+
     def test_register_ignores_stale_authorization_header(self):
         # Registration must stay public even if the browser happens to send
         # a stale/garbage/expired Bearer token alongside it (get_authenticators()
