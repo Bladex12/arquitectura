@@ -187,8 +187,10 @@ class UserProxyDuckTypingTest(DynamoDBTestCase, TestCase):
         assert issubclass(Administrator.DoesNotExist, AttributeError)
 
     def test_plain_user_has_professor_proxy(self):
-        """Every User item is implicitly also a Professor (merged-item
-        design), so `.professor` is unconditionally available."""
+        """A registered account is a professor (`is_professor` defaults
+        True on the merged item), so `.professor` resolves. The one
+        exception is an administrator-only account - see
+        Administrator.objects.create() - which is not covered here."""
         django_user = DjangoUser.objects.create_user(username='duckprof', password='pass')
         professor = Professor.objects.create(user=django_user)
         assert hasattr(professor.user, 'professor') is True

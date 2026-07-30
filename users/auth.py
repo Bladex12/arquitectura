@@ -99,6 +99,19 @@ class DynamoJWTAuthentication(JWTAuthentication):
         token for a deleted/unknown DynamoDB account can never fall
         through to here - it still raises AuthenticationFailed (401), and
         the frontend's "401 means log out" handling stays intact.
+
+        The row comes back with its staff/superuser rights stripped in
+        memory (it is never saved). Saying "no professor/administrator
+        role" is not enough on its own: DRF's IsAdminUser - which gates
+        ProfessorViewSet.create_with_code and ProfessorViewSet.access_codes
+        - reads `request.user.is_staff` directly and never consults
+        `.administrator`. Returning the row as-is would therefore let a
+        staff auth.User holding a still-valid pre-migration token (same
+        SECRET_KEY, not yet expired) into admin-only endpoints that
+        rejected it before this fallback existed. Post-migration,
+        administrator rights live on the UsersTable item's
+        is_administrator flag, so an auth.User row holds none here by
+        construction.
         """
         try:
             pk = int(user_id)
@@ -106,4 +119,16 @@ class DynamoJWTAuthentication(JWTAuthentication):
             return None
         from django.contrib.auth.models import User as DjangoUser
 
-        return DjangoUser.objects.filter(pk=pk, is_active=True).first()
+        user = DjangoUser.objects.filter(pk=pk, is_active=True).first()
+        if user is None:
+            return None
+        # In-memory only - this instance must never be saved (nothing in
+        # the codebase saves request.user).
+        user.is_staff = False
+        user.is_superuser = False
+        # Defence in depth: clearing is_superuser alone still leaves
+        # has_perm() consulting the row's group/user permission records.
+        user.has_perm = lambda *args, **kwargs: False
+        user.has_perms = lambda *args, **kwargs: False
+        user.has_module_perms = lambda *args, **kwargs: False
+        return user

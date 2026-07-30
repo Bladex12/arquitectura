@@ -1,6 +1,9 @@
 # users/test_auth.py
+from django.contrib.auth.models import User as DjangoUser
 from django.test import TestCase
+from rest_framework.test import APIClient
 from rest_framework_simplejwt.exceptions import AuthenticationFailed
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from users.auth import DynamoJWTAuthentication, DynamoUser
 from users.dynamodb import user as user_repo
@@ -109,3 +112,65 @@ class DynamoJWTAuthenticationTest(DynamoDBTestCase, TestCase):
             assert False, 'expected AuthenticationFailed'
         except AuthenticationFailed:
             pass
+
+
+class LegacyDjangoUserTokenTest(DynamoDBTestCase, TestCase):
+    """A JWT whose subject is a django.contrib.auth row with no matching
+    UsersTable item still authenticates (see
+    DynamoJWTAuthentication._get_legacy_django_user - those rows still back
+    the /admin/ site), but must not inherit that row's staff/superuser
+    rights: DRF's IsAdminUser reads `request.user.is_staff` directly and
+    never consults `.administrator`, so a staff row holding a still-valid
+    pre-migration token would otherwise reach admin-only endpoints."""
+
+    def _client_for(self, django_user):
+        refresh = RefreshToken.for_user(django_user)
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f'Bearer {str(refresh.access_token)}')
+        return client
+
+    def test_authenticates_but_holds_no_role_or_staff_rights(self):
+        django_user = DjangoUser.objects.create_user(
+            username='legacyplain', password='pw12345!', is_staff=True, is_superuser=True,
+        )
+        resolved = DynamoJWTAuthentication().get_user({'user_id': django_user.pk})
+
+        assert resolved is not None
+        assert resolved.is_authenticated is True
+        assert resolved.is_staff is False
+        assert resolved.is_superuser is False
+        assert resolved.has_perm('anything') is False
+        assert hasattr(resolved, 'professor') is False
+        assert hasattr(resolved, 'administrator') is False
+
+    def test_staff_row_cannot_reach_is_admin_user_gated_access_codes(self):
+        staff = DjangoUser.objects.create_user(
+            username='legacystaff', password='pw12345!', is_staff=True, is_superuser=True,
+        )
+        assert staff.is_staff is True  # the real row really is staff
+
+        response = self._client_for(staff).get('/api/auth/professors/access_codes/')
+
+        assert response.status_code == 403, response.status_code
+
+    def test_staff_row_cannot_reach_is_admin_user_gated_create_with_code(self):
+        staff = DjangoUser.objects.create_user(
+            username='legacystaff2', password='pw12345!', is_staff=True,
+        )
+
+        response = self._client_for(staff).post(
+            '/api/auth/professors/create_with_code/', {'email': 'nuevo@udd.cl'}, format='json',
+        )
+
+        assert response.status_code == 403, response.status_code
+
+    def test_role_stripping_is_never_persisted(self):
+        staff = DjangoUser.objects.create_user(
+            username='legacystaff3', password='pw12345!', is_staff=True, is_superuser=True,
+        )
+
+        DynamoJWTAuthentication()._get_legacy_django_user(staff.pk)
+
+        reloaded = DjangoUser.objects.get(pk=staff.pk)
+        assert reloaded.is_staff is True
+        assert reloaded.is_superuser is True

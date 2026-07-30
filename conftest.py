@@ -70,10 +70,15 @@ def users_dynamodb_table():
 
     mock = mock_aws()
     mock.start()
-    os.environ['USERS_TABLE'] = USERS_TEST_TABLE
-    os.environ['AWS_REGION'] = TEST_REGION
-    create_test_table(USERS_TEST_TABLE, region_name=TEST_REGION)
+    # Provisioning must be inside the guard too: if create_test_table()
+    # raises (schema drift, a moto upgrade, a credentials problem) after
+    # start() but before the yield, an un-stopped mock leaves botocore
+    # patched for the REST OF THE PYTEST PROCESS - every downstream test
+    # then fails for reasons that have nothing to do with it.
     try:
+        os.environ['USERS_TABLE'] = USERS_TEST_TABLE
+        os.environ['AWS_REGION'] = TEST_REGION
+        create_test_table(USERS_TEST_TABLE, region_name=TEST_REGION)
         yield {}
     finally:
         mock.stop()
