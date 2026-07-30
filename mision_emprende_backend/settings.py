@@ -52,7 +52,6 @@ INSTALLED_APPS = [
     'django_filters',
     
     # Third Party - Security
-    'axes',
     'django_ratelimit',
     'django_permissions_policy',
     
@@ -85,7 +84,6 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'django_permissions_policy.PermissionsPolicyMiddleware',
-    'axes.middleware.AxesMiddleware',  # Django Axes debe ir después de AuthenticationMiddleware
 ]
 
 # Debug Toolbar (solo en desarrollo)
@@ -160,7 +158,6 @@ CACHES = {
 # ============================================
 
 AUTHENTICATION_BACKENDS = [
-    'axes.backends.AxesStandaloneBackend',  # Django Axes backend
     'django.contrib.auth.backends.ModelBackend',  # Django default backend
 ]
 
@@ -257,8 +254,8 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
-        'rest_framework.authentication.SessionAuthentication',  # Para admin
+        'users.auth.DynamoJWTAuthentication',
+        'rest_framework.authentication.SessionAuthentication',  # Para /admin/ (academic/challenges)
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
@@ -347,19 +344,6 @@ SPECTACULAR_SETTINGS = {
     'SERVE_INCLUDE_SCHEMA': False,
     'COMPONENT_SPLIT_REQUEST': True,
 }
-
-
-# ============================================
-# DJANGO AXES (Brute Force Protection)
-# ============================================
-
-AXES_FAILURE_LIMIT = 5
-AXES_COOLOFF_TIME = 1  # 1 hora (en horas)
-# AXES_LOCKOUT_CALLABLE - Se usa el método por defecto de axes
-AXES_ENABLE_ADMIN = True
-AXES_RESET_ON_SUCCESS = True  # Resetear intentos en login exitoso
-AXES_LOCKOUT_PARAMETERS = ['username']  # Bloquear por username
-AXES_LOCKOUT_BY_COMBINATION_USER_AND_IP = True  # Bloquear por combinación username + IP
 
 
 # ============================================
