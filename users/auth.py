@@ -7,7 +7,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import AuthenticationFailed
 
 from users.dynamodb import user as user_repo
-from users.models import Administrator, _ProfessorProxy
+from users.models import Administrator, Professor, _ProfessorProxy
 
 
 class DynamoUser:
@@ -27,6 +27,9 @@ class DynamoUser:
         self.first_name = item.get('first_name', '')
         self.last_name = item.get('last_name', '')
         self.is_active = item.get('is_active', True)
+        # Default True: items written before `is_professor` existed were
+        # all professor accounts (see users/dynamodb/user.py).
+        self.is_professor = item.get('is_professor', True)
         self.is_administrator = item.get('is_administrator', False)
         self.is_super_admin = item.get('is_super_admin', False)
         self.is_staff = self.is_administrator
@@ -42,6 +45,8 @@ class DynamoUser:
 
     @property
     def professor(self):
+        if not self.is_professor:
+            raise Professor.DoesNotExist(f'User {self.id} is not a professor')
         return _ProfessorProxy(self.id)
 
     @property
@@ -69,7 +74,36 @@ class DynamoJWTAuthentication(JWTAuthentication):
             raise AuthenticationFailed('Token contained no recognizable user identification')
         item = user_repo.get_user_by_id(str(user_id))
         if item is None:
+            legacy = self._get_legacy_django_user(user_id)
+            if legacy is not None:
+                return legacy
             raise AuthenticationFailed('User not found', code='user_not_found')
         if not item.get('is_active', True):
             raise AuthenticationFailed('User is inactive', code='user_inactive')
         return DynamoUser(item)
+
+    @staticmethod
+    def _get_legacy_django_user(user_id):
+        """Resolves a token whose subject is a django.contrib.auth row
+        rather than a UsersTable item, or None if there is no such row.
+
+        Django's auth.User table survived the migration (it still backs
+        the /admin/ site, and SessionAuthentication is still configured
+        for it), so those rows are still principals. They hold no
+        professor/administrator role - users/models.py installs the
+        accessors that say so - which reproduces the pre-migration
+        contract exactly: such an account authenticates, then gets a 403
+        from every role-scoped endpoint.
+
+        Only integer ids are looked up. UsersTable ids are UUID4s, so a
+        token for a deleted/unknown DynamoDB account can never fall
+        through to here - it still raises AuthenticationFailed (401), and
+        the frontend's "401 means log out" handling stays intact.
+        """
+        try:
+            pk = int(user_id)
+        except (TypeError, ValueError):
+            return None
+        from django.contrib.auth.models import User as DjangoUser
+
+        return DjangoUser.objects.filter(pk=pk, is_active=True).first()

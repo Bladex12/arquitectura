@@ -30,11 +30,12 @@ from users.dynamodb import user as user_repo
 class _ProfessorProxy:
     """Minimal stand-in for `request.user.professor` used by call sites
     that only ever read `.id` off it (e.g. `professor_id =
-    request.user.professor.id`). Every User item is implicitly also a
-    Professor (the merged-item design - see users/dynamodb/user.py), so
-    this is unconditionally available off `_UserProxy`, mirroring the
-    old `hasattr(request.user, 'professor')` always being True for any
-    authenticated account."""
+    request.user.professor.id`). Available off any account whose item has
+    `is_professor` set - i.e. everything except the administrator-only
+    accounts `Administrator.objects.create()` builds from an identity
+    with no professor profile, which is how the old ORM's "an
+    administrators row with no professors row" survives the merge into
+    one item."""
 
     def __init__(self, user_id):
         self.id = user_id
@@ -53,12 +54,27 @@ class _UserProxy:
 
     def __init__(self, item):
         self.id = item['id']
+        self.pk = item['id']
         self.username = item['username']
         self.email = item['email']
         self.first_name = item.get('first_name', '')
         self.last_name = item.get('last_name', '')
         self.is_active = item.get('is_active', True)
+        # Default True: items written before `is_professor` existed were
+        # all professor accounts.
+        self.is_professor = item.get('is_professor', True)
         self.is_administrator = item.get('is_administrator', False)
+        self.is_super_admin = item.get('is_super_admin', False)
+        # Mirrors users/auth.py's DynamoUser: DRF's IsAuthenticated (and
+        # anything else that treats this as request.user, e.g. tests doing
+        # force_authenticate(user=professor.user)) reads these off the
+        # user object directly.
+        self.is_staff = self.is_administrator
+        self.is_authenticated = True
+        self.is_anonymous = False
+
+    def __str__(self):
+        return self.username
 
     def get_full_name(self):
         full = f'{self.first_name} {self.last_name}'.strip()
@@ -66,6 +82,8 @@ class _UserProxy:
 
     @property
     def professor(self):
+        if not self.is_professor:
+            raise Professor.DoesNotExist(f'User {self.id} is not a professor')
         return _ProfessorProxy(self.id)
 
     @property
@@ -112,10 +130,17 @@ class Professor:
             return Professor(item)
 
         def filter(self, id__in=None):
+            # Lookup-by-id is a plain account fetch (call sites resolve a
+            # professor_id that already came off a session/transaction into
+            # a display name), so it does NOT filter on is_professor -
+            # unlike the no-argument enumerate-all-professors form below.
             if id__in is not None:
                 items = user_repo.get_users_by_ids(id__in)
                 return _ListResult(Professor(item) for item in items.values())
-            return _ListResult(Professor(item) for item in user_repo.list_users())
+            return _ListResult(
+                Professor(item) for item in user_repo.list_users()
+                if item.get('is_professor', True)
+            )
 
         def select_related(self, *_args, **_kwargs):
             # No-op: the DynamoDB item already carries every field a SQL
@@ -130,6 +155,16 @@ class Professor:
                 # Administrator.objects.create(), this is never called
                 # with a _UserProxy in practice - every real call site
                 # passes a freshly-created Django auth.User).
+                #
+                # The new item ADOPTS that Django row's pk as its own id
+                # rather than minting a fresh UUID4. Call sites routinely
+                # mint a JWT straight off the Django object
+                # (`RefreshToken.for_user(user)`, which embeds `user.id`
+                # as the `user_id` claim) and expect it to authenticate
+                # as this account; with an unrelated UUID4 the token
+                # would resolve to nothing. Only this convenience path
+                # does that - the explicit-fields path below still
+                # generates a true UUID4.
                 item = user_repo.create_user(
                     username=user.username,
                     email=user.email or f'{user.username}@example.udd.cl',
@@ -137,6 +172,7 @@ class Professor:
                     first_name=getattr(user, 'first_name', ''),
                     last_name=getattr(user, 'last_name', ''),
                     professor_access_code=access_code,
+                    user_id=user.id,
                 )
             else:
                 item = user_repo.create_user(
@@ -147,7 +183,10 @@ class Professor:
             return Professor(item)
 
         def count(self):
-            return user_repo.count_users()
+            # Counts professor accounts only, matching the old
+            # `Professor.objects.count()` over the professors table
+            # (administrator-only accounts had no row there).
+            return len(self.filter())
 
     objects = _Manager()
 
@@ -191,6 +230,10 @@ class Administrator:
                 })
                 item = user_repo.get_user_by_id(existing['id'])
             else:
+                # Same id-adoption rationale as Professor.objects.create()
+                # above: an account built from a throwaway Django auth.User
+                # keeps that row's pk so a JWT minted off the Django object
+                # resolves back to this item.
                 item = user_repo.create_user(
                     username=user.username,
                     email=user.email or f'{user.username}@example.udd.cl',
@@ -199,6 +242,13 @@ class Administrator:
                     last_name=getattr(user, 'last_name', ''),
                     is_administrator=True,
                     is_super_admin=is_super_admin,
+                    user_id=getattr(user, 'id', None),
+                    # Administrator-only account: the identity had no
+                    # professor profile before this call, and creating an
+                    # administrator never created one (the old ORM would
+                    # have inserted an administrators row and no
+                    # professors row).
+                    is_professor=False,
                 )
             return Administrator(item)
 
@@ -307,3 +357,40 @@ class ProfessorAccessCode:
     def save(self, update_fields=None):
         if self.is_used:
             access_code_repo.mark_access_code_used(self._code)
+
+
+# ---------------------------------------------------------------------------
+# Role accessors on django.contrib.auth.models.User
+# ---------------------------------------------------------------------------
+# Before the migration, Professor/Administrator were ORM models with a
+# OneToOneField to auth.User, so every auth.User carried `.professor` /
+# `.administrator` reverse descriptors that raised
+# Professor.DoesNotExist / Administrator.DoesNotExist when no matching row
+# existed. Django's auth.User table is still around and its rows are still
+# real principals - SessionAuthentication is still wired up for them (see
+# settings.REST_FRAMEWORK['DEFAULT_AUTHENTICATION_CLASSES']) so the /admin/
+# site's maintainers can reach DRF endpoints - and call sites such as
+# admin_dashboard/views.py's _check_admin() and game_sessions/views.py's
+# active_session() still rely on those exceptions to answer "does this
+# principal hold the role?" with a 403. Dropping the models turned that into
+# a bare AttributeError, i.e. an uncaught 500 for exactly those accounts.
+#
+# Nothing links an auth.User row to a UsersTable item, so the honest answer
+# for one of these accounts is always "no role": authenticated, but not a
+# professor and not an administrator.
+def _django_user_professor(self):
+    raise Professor.DoesNotExist(f'auth.User {self.pk} has no professor profile')
+
+
+def _django_user_administrator(self):
+    raise Administrator.DoesNotExist(f'auth.User {self.pk} has no administrator profile')
+
+
+def _install_role_accessors():
+    from django.contrib.auth.models import User as DjangoUser
+
+    DjangoUser.professor = property(_django_user_professor)
+    DjangoUser.administrator = property(_django_user_administrator)
+
+
+_install_role_accessors()

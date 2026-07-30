@@ -15,17 +15,25 @@ from .keys import email_gsi2pk, metadata_sk, user_pk, username_gsi1pk
 
 def create_user(*, username, email, password=None, password_hash=None,
                  first_name='', last_name='', is_administrator=False,
-                 is_super_admin=False, professor_access_code=None):
+                 is_super_admin=False, professor_access_code=None,
+                 user_id=None, is_professor=True):
     """Creates a User item. Pass `password` to hash it here, or
     `password_hash` to store an already-hashed value directly (used by
     the users/models.py compatibility shim when wrapping a throwaway
     django.contrib.auth.models.User in tests). Raises ValueError if the
-    username is already taken."""
+    username is already taken.
+
+    `user_id` overrides the generated identifier. This exists solely for
+    the shim's test-fixture-convenience path (`Professor.objects.create(
+    user=<django auth.User>)`), which must adopt the Django row's pk so
+    that a JWT minted with `RefreshToken.for_user(<that django user>)`
+    resolves back to this item. Real registration never passes it - it
+    keeps getting a true UUID4."""
     if password_hash is None:
         password_hash = make_password(password)
 
     table = get_table()
-    user_id = str(uuid.uuid4())
+    user_id = str(user_id) if user_id is not None else str(uuid.uuid4())
     now = now_iso()
     item = {
         'PK': user_pk(user_id),
@@ -42,6 +50,14 @@ def create_user(*, username, email, password=None, password_hash=None,
         'first_name': first_name,
         'last_name': last_name,
         'is_active': True,
+        # Roles are flags on the one merged item. `is_professor` defaults
+        # True (registration always creates a professor) but is False for
+        # the administrator-only accounts `Administrator.objects.create()`
+        # builds from an identity that has no professor profile - the old
+        # ORM expressed that as "an administrators row with no professors
+        # row", and call sites still branch on it via `.professor` /
+        # `hasattr(user, 'professor')`.
+        'is_professor': is_professor,
         'is_administrator': is_administrator,
         'is_super_admin': is_super_admin,
         'professor_access_code': professor_access_code,
