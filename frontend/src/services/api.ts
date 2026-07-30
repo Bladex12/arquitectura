@@ -48,7 +48,10 @@ api.interceptors.request.use(
     const isPublicEndpoint = url.includes('/auth/token/') ||  // Login
                              url.includes('/auth/token/refresh/') ||  // Refresh token
                              url.includes('/auth/token/verify/') ||  // Verify token
-                             (url.includes('/auth/professors/') && config.method === 'post');  // Registro de profesor
+                             // Registro de profesor: exact match only, so this doesn't also
+                             // swallow admin-only POSTs like /auth/professors/create_with_code/
+                             // (which need the Authorization header - see final review Finding 1).
+                             (url.endsWith('/auth/professors/') && config.method === 'post');
     
     // Si estamos en una ruta de tablet o haciendo petición a endpoint de tablet o endpoint público, 
     // asegurarnos de que no se envíe el token (y limpiarlo si está presente en headers)
