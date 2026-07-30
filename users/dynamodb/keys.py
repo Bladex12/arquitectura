@@ -13,7 +13,7 @@ def metadata_sk():
 
 
 def username_gsi1pk(username):
-    return f'USERNAME#{username}'
+    return f'USERNAME#{username.lower()}'
 
 
 def email_gsi2pk(email):

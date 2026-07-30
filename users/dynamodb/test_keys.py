@@ -13,6 +13,13 @@ def test_username_gsi1pk():
     assert keys.username_gsi1pk('jdoe') == 'USERNAME#jdoe'
 
 
+def test_username_gsi1pk_lowercases():
+    # Case-insensitive lookup key, matching MySQL's old default collation
+    # (see final review Finding 2) - the stored `username` display field
+    # itself is untouched, only this key-building function lowercases.
+    assert keys.username_gsi1pk('Juan.Perez') == 'USERNAME#juan.perez'
+
+
 def test_email_gsi2pk_lowercases():
     assert keys.email_gsi2pk('Jdoe@UDD.cl') == 'EMAIL#jdoe@udd.cl'
 

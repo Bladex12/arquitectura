@@ -95,6 +95,25 @@ class CreateAndGetUserTest(DynamoDBTestCase):
         assert all(u['type'] == 'User' for u in users)
         assert len(users) == 2
 
+    def test_get_by_username_case_insensitive(self):
+        """Username lookups must be case-insensitive, matching the old
+        MySQL default collation (final review Finding 2). The stored
+        `username` field keeps its original casing for display."""
+        user_repo.create_user(username='Juan.Perez', email='juanperez@udd.cl', password='pw12345!')
+        found = user_repo.get_user_by_username('juan.perez')
+        assert found is not None
+        assert found['username'] == 'Juan.Perez'  # display casing preserved
+
+    def test_duplicate_username_case_insensitive_raises(self):
+        """A username differing only in case from an existing one must be
+        rejected as a duplicate, matching old MySQL collation behavior."""
+        user_repo.create_user(username='Juan.Perez', email='a2@udd.cl', password='pw12345!')
+        try:
+            user_repo.create_user(username='juan.perez', email='b2@udd.cl', password='pw12345!')
+            assert False, 'expected ValueError'
+        except ValueError:
+            pass
+
     def test_reuse_username_after_deletion(self):
         """Verify a username can be reused after the original user is deleted."""
         # Create and delete a user with username 'reusable'
