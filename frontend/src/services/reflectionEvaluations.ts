@@ -1,4 +1,4 @@
-import { api, unwrapResults } from './api';
+import { api } from './api';
 
 export const reflectionEvaluationsAPI = {
   byRoom: async (roomCode: string) => {

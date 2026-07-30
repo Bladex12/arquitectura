@@ -154,7 +154,7 @@ Tu Misión Prioritaria: Escanea el perímetro visualmente, localiza a los otros 
                   className="flex justify-center mb-4 flex-shrink-0"
                 >
                   <img
-                    src={isTyping ? "/images/mascot_animated_transparent_1764633508845.svg" : "/images/mascotaprueba.svg"}
+                    src={isTyping ? `${import.meta.env.BASE_URL}images/mascot_animated_transparent_1764633508845.svg` : `${import.meta.env.BASE_URL}images/mascotaprueba.svg`}
                     alt="U-Bot"
                     className="w-32 h-32 sm:w-40 sm:h-40"
                     style={{

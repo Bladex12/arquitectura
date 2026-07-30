@@ -53,7 +53,7 @@ export function fixTextEncoding(text: string | null | undefined): string {
       [new RegExp(String.fromCharCode(0xC3, 0xB3), 'g'), 'ó'],
       [new RegExp(String.fromCharCode(0xC3, 0xBA), 'g'), 'ú'],
       [new RegExp(String.fromCharCode(0xC3, 0xB1), 'g'), 'ñ'],
-    ] : []),
+    ] as [RegExp, string][] : []),
   ];
   
   // Aplicar todas las correcciones

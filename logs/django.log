@@ -34151,3 +34151,503 @@ WARNING 2026-05-12 09:40:40,331 log 1 134138740864704 Not Found: /api/health/
 WARNING 2026-05-12 09:41:10,447 log 1 134138740864704 Not Found: /api/health/
 WARNING 2026-05-12 09:41:40,560 log 1 134138740864704 Not Found: /api/health/
 WARNING 2026-05-12 09:42:10,669 log 1 134138740864704 Not Found: /api/health/
+WARNING 2026-07-22 10:36:23,744 log 3128 29120 Not Found: /api/admin/dashboard/999999/faculty_careers_games/
+WARNING 2026-07-22 10:36:25,890 log 3128 29120 Forbidden: /api/admin/dashboard/metrics/
+WARNING 2026-07-22 10:36:27,464 log 3128 29120 Not Found: /api/admin/dashboard/999999/stage_activities_duration/
+WARNING 2026-07-22 10:36:32,890 log 3128 29120 Bad Request: /api/sessions/game-sessions/
+WARNING 2026-07-22 10:36:34,381 log 3128 29120 Bad Request: /api/sessions/game-sessions/create_with_excel/
+WARNING 2026-07-22 10:36:38,734 log 3128 29120 Not Found: /api/sessions/game-sessions/UNKNOWN/
+WARNING 2026-07-22 10:36:45,405 log 3128 29120 Not Found: /api/sessions/game-sessions/UNKNOWN/
+WARNING 2026-07-22 10:36:47,765 log 3128 29120 Not Found: /api/sessions/game-sessions/UNKNOWN/
+WARNING 2026-07-22 10:36:49,651 log 3128 29120 Bad Request: /api/sessions/game-sessions/ROOMC2/complete_stage/
+WARNING 2026-07-22 10:36:50,973 log 3128 29120 Bad Request: /api/sessions/game-sessions/ROOMN1/next_activity/
+WARNING 2026-07-22 10:36:52,506 log 3128 29120 Bad Request: /api/sessions/game-sessions/ROOMV2/set_video_institucional_activity/
+WARNING 2026-07-22 10:36:53,929 log 3128 29120 Bad Request: /api/sessions/game-sessions/ROOMS3/start/
+WARNING 2026-07-22 10:36:54,427 log 3128 29120 Bad Request: /api/sessions/game-sessions/ROOMS2/start/
+WARNING 2026-07-22 10:36:54,910 log 3128 29120 Bad Request: /api/sessions/game-sessions/ROOMS1/start/
+WARNING 2026-07-22 10:36:56,764 log 3128 29120 Not Found: /api/sessions/game-sessions/UNKNOWN/start/
+WARNING 2026-07-22 10:36:58,164 log 3128 29120 Bad Request: /api/sessions/game-sessions/ROOMT1/sync_teams/
+WARNING 2026-07-22 10:36:59,146 log 3128 29120 Bad Request: /api/sessions/game-sessions/ROOMT2/sync_teams/
+WARNING 2026-07-22 10:37:01,456 log 3128 29120 Forbidden: /api/sessions/game-sessions/active_session/
+WARNING 2026-07-22 10:37:03,283 log 3128 29120 Bad Request: /api/sessions/game-sessions/ROOMAT1/activity_timer/
+WARNING 2026-07-22 10:37:04,009 log 3128 29120 Not Found: /api/sessions/game-sessions/UNKNOWN/activity_timer/
+WARNING 2026-07-22 10:37:05,901 log 3128 29120 Bad Request: /api/sessions/game-sessions/ROOME1/end/
+WARNING 2026-07-22 10:37:06,363 log 3128 29120 Not Found: /api/sessions/game-sessions/UNKNOWN/end/
+WARNING 2026-07-22 10:37:06,843 log 3128 29120 Unauthorized: /api/sessions/game-sessions/ROOMET3/etapa/33/
+WARNING 2026-07-22 10:37:07,776 log 3128 29120 Not Found: /api/sessions/game-sessions/UNKNOWN/etapa/35/
+WARNING 2026-07-22 10:37:08,696 log 3128 29120 Not Found: /api/sessions/game-sessions/ROOMET1/etapa/999999/
+WARNING 2026-07-22 10:37:09,683 log 3128 29120 Forbidden: /api/sessions/game-sessions/ROOMLB1/lobby/
+WARNING 2026-07-22 10:37:10,375 log 3128 29120 Not Found: /api/sessions/game-sessions/UNKNOWN/lobby/
+WARNING 2026-07-22 10:37:12,242 log 3128 29120 Bad Request: /api/sessions/game-sessions/ROOMNS2/next_stage/
+WARNING 2026-07-22 10:37:12,708 log 3128 29120 Bad Request: /api/sessions/game-sessions/ROOMNS1/next_stage/
+WARNING 2026-07-22 10:37:14,318 log 3128 29120 Not Found: /api/sessions/game-sessions/UNKNOWN/reflection_qr/
+WARNING 2026-07-22 10:37:14,789 log 3128 29120 Bad Request: /api/sessions/game-sessions/ROOMSHR2/show_results/
+WARNING 2026-07-22 10:37:15,248 log 3128 29120 Unauthorized: /api/sessions/game-sessions/ROOMSHR3/show_results/
+WARNING 2026-07-22 10:37:16,652 log 3128 29120 Not Found: /api/sessions/game-sessions/UNKNOWN/show_results/
+WARNING 2026-07-22 10:37:17,143 log 3128 29120 Not Found: /api/sessions/game-sessions/ROOMSR2/stage_results/
+WARNING 2026-07-22 10:37:17,622 log 3128 29120 Bad Request: /api/sessions/game-sessions/ROOMSR1/stage_results/
+WARNING 2026-07-22 10:37:18,365 log 3128 29120 Not Found: /api/sessions/game-sessions/UNKNOWN/stage_results/
+WARNING 2026-07-22 10:37:19,852 log 3128 29120 Not Found: /api/sessions/game-sessions/ROOMSTR2/start_reflection/
+WARNING 2026-07-22 10:37:20,320 log 3128 29120 Not Found: /api/sessions/game-sessions/ROOMSTR1/start_reflection/
+WARNING 2026-07-22 10:37:21,303 log 3128 29120 Not Found: /api/sessions/game-sessions/UNKNOWN/teams/
+WARNING 2026-07-22 10:37:21,789 log 3128 29120 Bad Request: /api/sessions/game-sessions/STG1A/start_stage_1/
+WARNING 2026-07-22 10:37:22,626 log 3128 29120 Not Found: /api/sessions/game-sessions/UNKNOWN/start_stage_1/
+WARNING 2026-07-22 10:37:27,709 log 3128 29120 Bad Request: /api/sessions/peer-evaluations/
+WARNING 2026-07-22 10:37:28,473 log 3128 29120 Bad Request: /api/sessions/peer-evaluations/
+WARNING 2026-07-22 10:37:28,970 log 3128 29120 Not Found: /api/sessions/peer-evaluations/
+WARNING 2026-07-22 10:37:29,452 log 3128 29120 Not Found: /api/sessions/peer-evaluations/
+WARNING 2026-07-22 10:37:29,944 log 3128 29120 Not Found: /api/sessions/peer-evaluations/
+WARNING 2026-07-22 10:37:30,132 log 3128 29120 Bad Request: /api/sessions/peer-evaluations/for_professor/
+WARNING 2026-07-22 10:37:31,354 log 3128 29120 Not Found: /api/sessions/peer-evaluations/for_professor/
+WARNING 2026-07-22 10:37:31,579 log 3128 29120 Bad Request: /api/sessions/peer-evaluations/for_team/
+WARNING 2026-07-22 10:37:33,037 log 3128 29120 Not Found: /api/sessions/peer-evaluations/for_team/
+WARNING 2026-07-22 10:37:36,783 log 3128 29120 Not Found: /api/sessions/peer-evaluations/not-a-composite-id/
+WARNING 2026-07-22 10:37:37,256 log 3128 29120 Not Found: /api/sessions/peer-evaluations/114900a0-8036-4023-ad55-0ac02a9bda51:4ef15f14-a0de-48d9-887a-819081de03d7/
+WARNING 2026-07-22 10:37:42,301 log 3128 29120 Bad Request: /api/sessions/reflection-evaluations/by_room/
+WARNING 2026-07-22 10:37:42,498 log 3128 29120 Not Found: /api/sessions/reflection-evaluations/by_room/
+WARNING 2026-07-22 10:37:45,609 log 3128 29120 Bad Request: /api/sessions/reflection-evaluations/
+WARNING 2026-07-22 10:37:46,075 log 3128 29120 Bad Request: /api/sessions/reflection-evaluations/
+WARNING 2026-07-22 10:37:46,265 log 3128 29120 Not Found: /api/sessions/reflection-evaluations/
+WARNING 2026-07-22 10:37:49,723 log 3128 29120 Not Found: /api/sessions/reflection-evaluations/not-a-real-id/
+WARNING 2026-07-22 10:37:51,116 log 3128 29120 Not Found: /api/sessions/roulette-assignments/e15fcb11-ea2e-4fb8-bd19-67f6852401ab:999/accept/
+WARNING 2026-07-22 10:37:51,679 log 3128 29120 Bad Request: /api/sessions/roulette-assignments/1d3ef200-80c8-4dee-bd80-5da425696f22:72/accept/
+WARNING 2026-07-22 10:37:53,525 log 3128 29120 Bad Request: /api/sessions/roulette-assignments/
+WARNING 2026-07-22 10:37:54,009 log 3128 29120 Unauthorized: /api/sessions/roulette-assignments/
+WARNING 2026-07-22 10:37:54,483 log 3128 29120 Not Found: /api/sessions/roulette-assignments/
+WARNING 2026-07-22 10:37:54,992 log 3128 29120 Not Found: /api/sessions/roulette-assignments/
+WARNING 2026-07-22 10:37:55,865 log 3128 29120 Not Found: /api/sessions/roulette-assignments/
+WARNING 2026-07-22 10:37:58,215 log 3128 29120 Not Found: /api/sessions/roulette-assignments/161275f0-344a-4736-8b62-2d4951901c57:999/
+WARNING 2026-07-22 10:38:00,762 log 3128 29120 Bad Request: /api/sessions/roulette-assignments/649cdf3b-5bf2-4390-9a10-5f6d350acdf8:87/validate/
+WARNING 2026-07-22 10:38:03,683 log 3128 29120 Not Found: /api/sessions/token-transactions/some-id/
+WARNING 2026-07-22 10:38:06,168 log 3128 29120 Bad Request: /api/sessions/session-stages/100/generate_presentation_order/
+WARNING 2026-07-22 10:38:07,477 log 3128 29120 Bad Request: /api/sessions/session-stages/103/generate_presentation_order/
+WARNING 2026-07-22 10:38:07,969 log 3128 29120 Bad Request: /api/sessions/session-stages/105/generate_presentation_order/
+WARNING 2026-07-22 10:38:09,984 log 3128 29120 Bad Request: /api/sessions/session-stages/111/mark_presentation_done/
+WARNING 2026-07-22 10:38:10,981 log 3128 29120 Bad Request: /api/sessions/session-stages/115/presentation_evaluation_progress/
+WARNING 2026-07-22 10:38:13,385 log 3128 29120 Bad Request: /api/sessions/session-stages/123/presentation_timer/
+WARNING 2026-07-22 10:38:13,872 log 3128 29120 Bad Request: /api/sessions/session-stages/125/presentation_timer/
+WARNING 2026-07-22 10:38:19,014 log 3128 29120 Not Found: /api/sessions/session-stages/140/
+WARNING 2026-07-22 10:38:19,972 log 3128 29120 Bad Request: /api/sessions/session-stages/145/
+WARNING 2026-07-22 10:38:21,909 log 3128 29120 Bad Request: /api/sessions/session-stages/151/start_presentation/
+WARNING 2026-07-22 10:38:23,846 log 3128 29120 Bad Request: /api/sessions/session-stages/157/finish_team_presentation/
+WARNING 2026-07-22 10:38:24,841 log 3128 29120 Bad Request: /api/sessions/session-stages/161/start_team_pitch/
+WARNING 2026-07-22 10:38:25,338 log 3128 29120 Bad Request: /api/sessions/session-stages/163/update_presentation_order/
+WARNING 2026-07-22 10:38:27,278 log 3128 29120 Bad Request: /api/sessions/tablet-connections/by_team/
+WARNING 2026-07-22 10:38:27,995 log 3128 29120 Not Found: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-22 10:38:28,166 log 3128 29120 Bad Request: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-22 10:38:28,634 log 3128 29120 Bad Request: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-22 10:38:29,555 log 3128 29120 Bad Request: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-22 10:38:30,051 log 3128 29120 Forbidden: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-22 10:38:30,640 log 3128 29120 Bad Request: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-22 10:38:32,203 log 3128 29120 Bad Request: /api/sessions/tablet-connections/a6cb457f-3d6a-4165-8f7f-e6f094ccfb4a/disconnect/
+WARNING 2026-07-22 10:38:34,142 log 3128 29120 Unauthorized: /api/sessions/tablet-connections/d8a65fe7-89bd-43f8-a82f-aa5c8decbf8d/disconnect/
+WARNING 2026-07-22 10:38:34,451 log 3128 29120 Not Found: /api/sessions/tablet-connections/reconnect/
+WARNING 2026-07-22 10:38:34,717 log 3128 29120 Bad Request: /api/sessions/tablet-connections/reconnect/
+WARNING 2026-07-22 10:38:36,040 log 3128 29120 Forbidden: /api/sessions/tablet-connections/reconnect/
+WARNING 2026-07-22 10:38:36,744 log 3128 29120 Not Found: /api/sessions/tablet-connections/status/
+WARNING 2026-07-22 10:38:37,422 log 3128 29120 Bad Request: /api/sessions/tablet-connections/status/
+WARNING 2026-07-22 10:38:39,221 log 3128 29120 Bad Request: /api/sessions/tablets/
+WARNING 2026-07-22 10:38:39,704 log 3128 29120 Not Found: /api/sessions/tablets/TAB-050/
+WARNING 2026-07-22 10:38:41,824 log 3128 29120 Unauthorized: /api/sessions/tablets/
+WARNING 2026-07-22 10:38:42,746 log 3128 29120 Not Found: /api/sessions/tablets/NOPE/
+WARNING 2026-07-22 10:38:42,956 log 3128 29120 Not Found: /api/sessions/tablet-connections/nonexistent-token/update_screen/
+WARNING 2026-07-22 10:38:47,830 log 3128 29120 Bad Request: /api/sessions/team-activity-progress/
+WARNING 2026-07-22 10:38:48,303 log 3128 29120 Not Found: /api/sessions/team-activity-progress/
+WARNING 2026-07-22 10:38:48,805 log 3128 29120 Not Found: /api/sessions/team-activity-progress/
+WARNING 2026-07-22 10:38:49,309 log 3128 29120 Not Found: /api/sessions/team-activity-progress/
+WARNING 2026-07-22 10:38:53,181 log 3128 29120 Forbidden: /api/sessions/team-activity-progress/4ea6282d-26e5-4c29-b3d0-e551937abbb3:213/
+WARNING 2026-07-22 10:38:57,008 log 3128 29120 Not Found: /api/sessions/team-activity-progress/not-a-valid-pk/
+WARNING 2026-07-22 10:38:57,193 log 3128 29120 Not Found: /api/sessions/team-activity-progress/nope:1/
+WARNING 2026-07-22 10:38:59,920 log 3128 29120 Bad Request: /api/sessions/team-activity-progress/submit_anagram/
+WARNING 2026-07-22 10:39:01,917 log 3128 29120 Not Found: /api/sessions/team-activity-progress/submit_anagram/
+WARNING 2026-07-22 10:39:03,847 log 3128 29120 Bad Request: /api/sessions/team-activity-progress/save_pitch/
+WARNING 2026-07-22 10:39:04,689 log 3128 29120 Not Found: /api/sessions/team-activity-progress/save_pitch/
+WARNING 2026-07-22 10:39:05,995 log 3128 29120 Bad Request: /api/sessions/team-activity-progress/select_challenge/
+WARNING 2026-07-22 10:39:07,448 log 3128 29120 Not Found: /api/sessions/team-activity-progress/select_challenge/
+WARNING 2026-07-22 10:39:07,664 log 3128 29120 Bad Request: /api/sessions/team-activity-progress/select_topic/
+WARNING 2026-07-22 10:39:09,196 log 3128 29120 Not Found: /api/sessions/team-activity-progress/select_topic/
+WARNING 2026-07-22 10:39:10,132 log 3128 29120 Not Found: /api/sessions/team-activity-progress/select_topic/
+WARNING 2026-07-22 10:39:10,858 log 3128 29120 Bad Request: /api/sessions/team-activity-progress/upload_prototype/
+WARNING 2026-07-22 10:39:12,804 log 3128 29120 Not Found: /api/sessions/team-activity-progress/upload_prototype/
+WARNING 2026-07-22 10:39:16,816 log 3128 29120 Bad Request: /api/sessions/team-bubble-maps/
+WARNING 2026-07-22 10:39:17,309 log 3128 29120 Not Found: /api/sessions/team-bubble-maps/
+WARNING 2026-07-22 10:39:17,811 log 3128 29120 Not Found: /api/sessions/team-bubble-maps/
+WARNING 2026-07-22 10:39:20,262 log 3128 29120 Not Found: /api/sessions/team-bubble-maps/finalize_bubble_map/
+WARNING 2026-07-22 10:39:20,726 log 3128 29120 Bad Request: /api/sessions/team-bubble-maps/finalize_bubble_map/
+WARNING 2026-07-22 10:39:21,815 log 3128 29120 Not Found: /api/sessions/team-bubble-maps/finalize_bubble_map/
+WARNING 2026-07-22 10:39:24,907 log 3128 29120 Not Found: /api/sessions/team-bubble-maps/not-a-composite-id/
+WARNING 2026-07-22 10:39:25,387 log 3128 29120 Not Found: /api/sessions/team-bubble-maps/55228994-ad81-44bf-adad-4f2075e29b0c:227/
+WARNING 2026-07-22 10:39:27,342 log 3128 29120 Not Found: /api/sessions/team-bubble-maps/5f5e45de-9241-42ba-9198-2266e87166cb:230/
+WARNING 2026-07-22 10:39:29,228 log 3128 29120 Bad Request: /api/sessions/teams/584f9298-0426-45f4-b13c-d9af0d86ab2b/move_student/
+WARNING 2026-07-22 10:39:29,734 log 3128 29120 Bad Request: /api/sessions/teams/1ffddc5f-599f-497d-81c7-54fba7a11a47/move_student/
+WARNING 2026-07-22 10:39:30,239 log 3128 29120 Not Found: /api/sessions/teams/eda43438-17a1-4d8c-b434-8075779fc822/move_student/
+WARNING 2026-07-22 10:39:30,744 log 3128 29120 Not Found: /api/sessions/teams/80ccd912-e1fd-4b8e-af7f-0f0f91b2f6da/move_student/
+WARNING 2026-07-22 10:39:31,650 log 3128 29120 Bad Request: /api/sessions/teams/shuffle_all/
+WARNING 2026-07-22 10:39:32,142 log 3128 29120 Bad Request: /api/sessions/teams/shuffle_all/
+WARNING 2026-07-22 10:39:32,610 log 3128 29120 Bad Request: /api/sessions/teams/shuffle_all/
+WARNING 2026-07-22 10:39:34,552 log 3128 29120 Not Found: /api/sessions/teams/shuffle_all/
+WARNING 2026-07-22 10:39:35,532 log 3128 29120 Bad Request: /api/sessions/teams/
+WARNING 2026-07-22 10:39:37,413 log 3128 29120 Bad Request: /api/sessions/teams/0be4ffe9-da86-4a6f-bee7-9fbcd862a70f/
+WARNING 2026-07-22 10:39:39,381 log 3128 29120 Bad Request: /api/sessions/teams/ee722ee1-5446-4274-9923-ebc2e907ee38/
+WARNING 2026-07-22 10:39:39,860 log 3128 29120 Not Found: /api/sessions/teams/does-not-exist/
+WARNING 2026-07-22 10:39:41,461 log 3128 29120 Bad Request: /api/sessions/team-personalizations/
+WARNING 2026-07-22 10:39:41,652 log 3128 29120 Not Found: /api/sessions/team-personalizations/
+WARNING 2026-07-22 10:39:45,328 log 3128 29120 Bad Request: /api/sessions/game-sessions/TEST6D6C/show_results/
+WARNING 2026-07-22 10:39:46,194 log 3128 29120 Unauthorized: /api/sessions/game-sessions/TESTC15E/show_results/
+WARNING 2026-07-22 23:12:44,646 log 10208 36232 Bad Request: /api/sessions/game-sessions/
+WARNING 2026-07-22 23:12:45,684 log 10208 36232 Bad Request: /api/sessions/game-sessions/create_with_excel/
+WARNING 2026-07-22 23:12:50,038 log 10208 36232 Not Found: /api/sessions/game-sessions/UNKNOWN/
+WARNING 2026-07-22 23:12:54,822 log 10208 36232 Not Found: /api/sessions/game-sessions/UNKNOWN/
+WARNING 2026-07-22 23:12:56,286 log 10208 36232 Not Found: /api/sessions/game-sessions/UNKNOWN/
+WARNING 2026-07-22 23:12:57,918 log 10208 36232 Bad Request: /api/sessions/game-sessions/ROOMC2/complete_stage/
+WARNING 2026-07-22 23:12:58,917 log 10208 36232 Bad Request: /api/sessions/game-sessions/ROOMN1/next_activity/
+WARNING 2026-07-22 23:13:00,462 log 10208 36232 Bad Request: /api/sessions/game-sessions/ROOMV2/set_video_institucional_activity/
+WARNING 2026-07-22 23:13:01,728 log 10208 36232 Bad Request: /api/sessions/game-sessions/ROOMS3/start/
+WARNING 2026-07-22 23:13:02,271 log 10208 36232 Bad Request: /api/sessions/game-sessions/ROOMS2/start/
+WARNING 2026-07-22 23:13:02,712 log 10208 36232 Bad Request: /api/sessions/game-sessions/ROOMS1/start/
+WARNING 2026-07-22 23:13:04,208 log 10208 36232 Not Found: /api/sessions/game-sessions/UNKNOWN/start/
+WARNING 2026-07-22 23:13:05,299 log 10208 36232 Bad Request: /api/sessions/game-sessions/ROOMT1/sync_teams/
+WARNING 2026-07-22 23:13:06,165 log 10208 36232 Bad Request: /api/sessions/game-sessions/ROOMT2/sync_teams/
+WARNING 2026-07-22 23:13:08,078 log 10208 36232 Forbidden: /api/sessions/game-sessions/active_session/
+WARNING 2026-07-22 23:13:09,334 log 10208 36232 Bad Request: /api/sessions/game-sessions/ROOMAT1/activity_timer/
+WARNING 2026-07-22 23:13:10,152 log 10208 36232 Not Found: /api/sessions/game-sessions/UNKNOWN/activity_timer/
+WARNING 2026-07-22 23:13:11,710 log 10208 36232 Bad Request: /api/sessions/game-sessions/ROOME1/end/
+WARNING 2026-07-22 23:13:12,162 log 10208 36232 Not Found: /api/sessions/game-sessions/UNKNOWN/end/
+WARNING 2026-07-22 23:13:12,587 log 10208 36232 Unauthorized: /api/sessions/game-sessions/ROOMET3/etapa/11/
+WARNING 2026-07-22 23:13:13,381 log 10208 36232 Not Found: /api/sessions/game-sessions/UNKNOWN/etapa/13/
+WARNING 2026-07-22 23:13:13,779 log 10208 36232 Not Found: /api/sessions/game-sessions/ROOMET1/etapa/999999/
+WARNING 2026-07-22 23:13:14,842 log 10208 36232 Forbidden: /api/sessions/game-sessions/ROOMLB1/lobby/
+WARNING 2026-07-22 23:13:15,514 log 10208 36232 Not Found: /api/sessions/game-sessions/UNKNOWN/lobby/
+WARNING 2026-07-22 23:13:17,465 log 10208 36232 Bad Request: /api/sessions/game-sessions/ROOMNS2/next_stage/
+WARNING 2026-07-22 23:13:18,244 log 10208 36232 Bad Request: /api/sessions/game-sessions/ROOMNS1/next_stage/
+WARNING 2026-07-22 23:13:20,364 log 10208 36232 Not Found: /api/sessions/game-sessions/UNKNOWN/reflection_qr/
+WARNING 2026-07-22 23:13:20,951 log 10208 36232 Bad Request: /api/sessions/game-sessions/ROOMSHR2/show_results/
+WARNING 2026-07-22 23:13:21,326 log 10208 36232 Unauthorized: /api/sessions/game-sessions/ROOMSHR3/show_results/
+WARNING 2026-07-22 23:13:22,468 log 10208 36232 Not Found: /api/sessions/game-sessions/UNKNOWN/show_results/
+WARNING 2026-07-22 23:13:22,999 log 10208 36232 Not Found: /api/sessions/game-sessions/ROOMSR2/stage_results/
+WARNING 2026-07-22 23:13:23,702 log 10208 36232 Bad Request: /api/sessions/game-sessions/ROOMSR1/stage_results/
+WARNING 2026-07-22 23:13:24,380 log 10208 36232 Not Found: /api/sessions/game-sessions/UNKNOWN/stage_results/
+WARNING 2026-07-22 23:13:25,424 log 10208 36232 Not Found: /api/sessions/game-sessions/ROOMSTR2/start_reflection/
+WARNING 2026-07-22 23:13:25,836 log 10208 36232 Not Found: /api/sessions/game-sessions/ROOMSTR1/start_reflection/
+WARNING 2026-07-22 23:13:26,633 log 10208 36232 Not Found: /api/sessions/game-sessions/UNKNOWN/teams/
+WARNING 2026-07-22 23:13:27,047 log 10208 36232 Bad Request: /api/sessions/game-sessions/STG1A/start_stage_1/
+WARNING 2026-07-22 23:13:27,438 log 10208 36232 Not Found: /api/sessions/game-sessions/UNKNOWN/start_stage_1/
+WARNING 2026-07-22 23:13:32,241 log 10208 36232 Bad Request: /api/sessions/peer-evaluations/
+WARNING 2026-07-22 23:13:32,697 log 10208 36232 Bad Request: /api/sessions/peer-evaluations/
+WARNING 2026-07-22 23:13:33,171 log 10208 36232 Not Found: /api/sessions/peer-evaluations/
+WARNING 2026-07-22 23:13:33,783 log 10208 36232 Not Found: /api/sessions/peer-evaluations/
+WARNING 2026-07-22 23:13:34,218 log 10208 36232 Not Found: /api/sessions/peer-evaluations/
+WARNING 2026-07-22 23:13:34,360 log 10208 36232 Bad Request: /api/sessions/peer-evaluations/for_professor/
+WARNING 2026-07-22 23:13:35,193 log 10208 36232 Not Found: /api/sessions/peer-evaluations/for_professor/
+WARNING 2026-07-22 23:13:35,365 log 10208 36232 Bad Request: /api/sessions/peer-evaluations/for_team/
+WARNING 2026-07-22 23:13:36,540 log 10208 36232 Not Found: /api/sessions/peer-evaluations/for_team/
+WARNING 2026-07-22 23:13:39,583 log 10208 36232 Not Found: /api/sessions/peer-evaluations/not-a-composite-id/
+WARNING 2026-07-22 23:13:40,004 log 10208 36232 Not Found: /api/sessions/peer-evaluations/0f77f9af-8dea-4e4b-a598-6e639908c0f3:ebc231c4-35b3-44d8-ba13-76ef63e8e1fd/
+WARNING 2026-07-22 23:13:44,261 log 10208 36232 Bad Request: /api/sessions/reflection-evaluations/by_room/
+WARNING 2026-07-22 23:13:44,419 log 10208 36232 Not Found: /api/sessions/reflection-evaluations/by_room/
+WARNING 2026-07-22 23:13:47,101 log 10208 36232 Bad Request: /api/sessions/reflection-evaluations/
+WARNING 2026-07-22 23:13:47,498 log 10208 36232 Bad Request: /api/sessions/reflection-evaluations/
+WARNING 2026-07-22 23:13:47,659 log 10208 36232 Not Found: /api/sessions/reflection-evaluations/
+WARNING 2026-07-22 23:13:50,409 log 10208 36232 Not Found: /api/sessions/reflection-evaluations/not-a-real-id/
+WARNING 2026-07-22 23:13:51,492 log 10208 36232 Not Found: /api/sessions/roulette-assignments/8a1a5d6d-67a6-4143-b18d-32a0796c0223:999/accept/
+WARNING 2026-07-22 23:13:51,938 log 10208 36232 Bad Request: /api/sessions/roulette-assignments/30df7e57-e975-4823-9346-8f2e069337f8:50/accept/
+WARNING 2026-07-22 23:13:53,425 log 10208 36232 Bad Request: /api/sessions/roulette-assignments/
+WARNING 2026-07-22 23:13:53,848 log 10208 36232 Unauthorized: /api/sessions/roulette-assignments/
+WARNING 2026-07-22 23:13:54,270 log 10208 36232 Not Found: /api/sessions/roulette-assignments/
+WARNING 2026-07-22 23:13:54,700 log 10208 36232 Not Found: /api/sessions/roulette-assignments/
+WARNING 2026-07-22 23:13:55,111 log 10208 36232 Not Found: /api/sessions/roulette-assignments/
+WARNING 2026-07-22 23:13:57,034 log 10208 36232 Not Found: /api/sessions/roulette-assignments/7b7fe894-267d-4eb5-91ae-439d662afbb2:999/
+WARNING 2026-07-22 23:13:59,771 log 10208 36232 Bad Request: /api/sessions/roulette-assignments/ca9420b8-a52e-45e5-b46d-92bd31b789aa:65/validate/
+WARNING 2026-07-22 23:14:02,043 log 10208 36232 Not Found: /api/sessions/token-transactions/some-id/
+WARNING 2026-07-22 23:14:04,283 log 10208 36232 Bad Request: /api/sessions/session-stages/78/generate_presentation_order/
+WARNING 2026-07-22 23:14:05,163 log 10208 36232 Bad Request: /api/sessions/session-stages/81/generate_presentation_order/
+WARNING 2026-07-22 23:14:05,596 log 10208 36232 Bad Request: /api/sessions/session-stages/83/generate_presentation_order/
+WARNING 2026-07-22 23:14:07,180 log 10208 36232 Bad Request: /api/sessions/session-stages/89/mark_presentation_done/
+WARNING 2026-07-22 23:14:08,203 log 10208 36232 Bad Request: /api/sessions/session-stages/93/presentation_evaluation_progress/
+WARNING 2026-07-22 23:14:10,226 log 10208 36232 Bad Request: /api/sessions/session-stages/101/presentation_timer/
+WARNING 2026-07-22 23:14:10,652 log 10208 36232 Bad Request: /api/sessions/session-stages/103/presentation_timer/
+WARNING 2026-07-22 23:14:14,641 log 10208 36232 Not Found: /api/sessions/session-stages/118/
+WARNING 2026-07-22 23:14:15,696 log 10208 36232 Bad Request: /api/sessions/session-stages/123/
+WARNING 2026-07-22 23:14:17,011 log 10208 36232 Bad Request: /api/sessions/session-stages/129/start_presentation/
+WARNING 2026-07-22 23:14:18,557 log 10208 36232 Bad Request: /api/sessions/session-stages/135/finish_team_presentation/
+WARNING 2026-07-22 23:14:19,456 log 10208 36232 Bad Request: /api/sessions/session-stages/139/start_team_pitch/
+WARNING 2026-07-22 23:14:20,111 log 10208 36232 Bad Request: /api/sessions/session-stages/141/update_presentation_order/
+WARNING 2026-07-22 23:14:21,351 log 10208 36232 Bad Request: /api/sessions/tablet-connections/by_team/
+WARNING 2026-07-22 23:14:21,961 log 10208 36232 Not Found: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-22 23:14:22,390 log 10208 36232 Bad Request: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-22 23:14:22,814 log 10208 36232 Bad Request: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-22 23:14:23,260 log 10208 36232 Bad Request: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-22 23:14:23,733 log 10208 36232 Forbidden: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-22 23:14:24,179 log 10208 36232 Bad Request: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-22 23:14:25,330 log 10208 36232 Bad Request: /api/sessions/tablet-connections/a291375d-ea46-4ac2-8aef-fd79947b6086/disconnect/
+WARNING 2026-07-22 23:14:26,183 log 10208 36232 Unauthorized: /api/sessions/tablet-connections/73c5e098-11ef-4015-9536-68d9a88e0b52/disconnect/
+WARNING 2026-07-22 23:14:26,333 log 10208 36232 Not Found: /api/sessions/tablet-connections/reconnect/
+WARNING 2026-07-22 23:14:26,477 log 10208 36232 Bad Request: /api/sessions/tablet-connections/reconnect/
+WARNING 2026-07-22 23:14:27,635 log 10208 36232 Forbidden: /api/sessions/tablet-connections/reconnect/
+WARNING 2026-07-22 23:14:28,344 log 10208 36232 Not Found: /api/sessions/tablet-connections/status/
+WARNING 2026-07-22 23:14:29,256 log 10208 36232 Bad Request: /api/sessions/tablet-connections/status/
+WARNING 2026-07-22 23:14:30,512 log 10208 36232 Bad Request: /api/sessions/tablets/
+WARNING 2026-07-22 23:14:30,946 log 10208 36232 Not Found: /api/sessions/tablets/TAB-050/
+WARNING 2026-07-22 23:14:32,585 log 10208 36232 Unauthorized: /api/sessions/tablets/
+WARNING 2026-07-22 23:14:33,372 log 10208 36232 Not Found: /api/sessions/tablets/NOPE/
+WARNING 2026-07-22 23:14:33,530 log 10208 36232 Not Found: /api/sessions/tablet-connections/nonexistent-token/update_screen/
+WARNING 2026-07-22 23:14:37,614 log 10208 36232 Bad Request: /api/sessions/team-activity-progress/
+WARNING 2026-07-22 23:14:38,034 log 10208 36232 Not Found: /api/sessions/team-activity-progress/
+WARNING 2026-07-22 23:14:38,443 log 10208 36232 Not Found: /api/sessions/team-activity-progress/
+WARNING 2026-07-22 23:14:38,842 log 10208 36232 Not Found: /api/sessions/team-activity-progress/
+WARNING 2026-07-22 23:14:42,064 log 10208 36232 Forbidden: /api/sessions/team-activity-progress/2cad2295-82cc-4778-a9b3-88f1e542005a:192/
+WARNING 2026-07-22 23:14:45,255 log 10208 36232 Not Found: /api/sessions/team-activity-progress/not-a-valid-pk/
+WARNING 2026-07-22 23:14:45,410 log 10208 36232 Not Found: /api/sessions/team-activity-progress/nope:1/
+WARNING 2026-07-22 23:14:47,611 log 10208 36232 Bad Request: /api/sessions/team-activity-progress/submit_anagram/
+WARNING 2026-07-22 23:14:49,185 log 10208 36232 Not Found: /api/sessions/team-activity-progress/submit_anagram/
+WARNING 2026-07-22 23:14:50,857 log 10208 36232 Bad Request: /api/sessions/team-activity-progress/save_pitch/
+WARNING 2026-07-22 23:14:51,265 log 10208 36232 Not Found: /api/sessions/team-activity-progress/save_pitch/
+WARNING 2026-07-22 23:14:52,527 log 10208 36232 Bad Request: /api/sessions/team-activity-progress/select_challenge/
+WARNING 2026-07-22 23:14:53,400 log 10208 36232 Not Found: /api/sessions/team-activity-progress/select_challenge/
+WARNING 2026-07-22 23:14:53,771 log 10208 36232 Bad Request: /api/sessions/team-activity-progress/select_topic/
+WARNING 2026-07-22 23:14:55,110 log 10208 36232 Not Found: /api/sessions/team-activity-progress/select_topic/
+WARNING 2026-07-22 23:14:55,527 log 10208 36232 Not Found: /api/sessions/team-activity-progress/select_topic/
+WARNING 2026-07-22 23:14:56,345 log 10208 36232 Bad Request: /api/sessions/team-activity-progress/upload_prototype/
+WARNING 2026-07-22 23:14:58,012 log 10208 36232 Not Found: /api/sessions/team-activity-progress/upload_prototype/
+WARNING 2026-07-22 23:15:00,618 log 10208 36232 Bad Request: /api/sessions/team-bubble-maps/
+WARNING 2026-07-22 23:15:01,273 log 10208 36232 Not Found: /api/sessions/team-bubble-maps/
+WARNING 2026-07-22 23:15:01,665 log 10208 36232 Not Found: /api/sessions/team-bubble-maps/
+WARNING 2026-07-22 23:15:03,777 log 10208 36232 Not Found: /api/sessions/team-bubble-maps/finalize_bubble_map/
+WARNING 2026-07-22 23:15:03,928 log 10208 36232 Bad Request: /api/sessions/team-bubble-maps/finalize_bubble_map/
+WARNING 2026-07-22 23:15:05,267 log 10208 36232 Not Found: /api/sessions/team-bubble-maps/finalize_bubble_map/
+WARNING 2026-07-22 23:15:07,817 log 10208 36232 Not Found: /api/sessions/team-bubble-maps/not-a-composite-id/
+WARNING 2026-07-22 23:15:08,248 log 10208 36232 Not Found: /api/sessions/team-bubble-maps/1f9e803f-cbd3-4c91-a900-56bbe99e9342:205/
+WARNING 2026-07-22 23:15:09,784 log 10208 36232 Not Found: /api/sessions/team-bubble-maps/bb595ee5-7a24-41b9-aafc-9d069bcc0757:208/
+WARNING 2026-07-22 23:15:11,156 log 10208 36232 Bad Request: /api/sessions/teams/c7b7f678-b39a-4b1d-aae8-5e211610798e/move_student/
+WARNING 2026-07-22 23:15:11,845 log 10208 36232 Bad Request: /api/sessions/teams/e550ff2f-4d96-4ddb-b8f8-5171c20a147e/move_student/
+WARNING 2026-07-22 23:15:12,316 log 10208 36232 Not Found: /api/sessions/teams/3aa9468a-65be-4aa3-880b-5bbca1609318/move_student/
+WARNING 2026-07-22 23:15:12,733 log 10208 36232 Not Found: /api/sessions/teams/a2583365-7db5-4309-8cce-9f6fca4beb31/move_student/
+WARNING 2026-07-22 23:15:13,117 log 10208 36232 Bad Request: /api/sessions/teams/shuffle_all/
+WARNING 2026-07-22 23:15:13,524 log 10208 36232 Bad Request: /api/sessions/teams/shuffle_all/
+WARNING 2026-07-22 23:15:14,127 log 10208 36232 Bad Request: /api/sessions/teams/shuffle_all/
+WARNING 2026-07-22 23:15:15,475 log 10208 36232 Not Found: /api/sessions/teams/shuffle_all/
+WARNING 2026-07-22 23:15:16,467 log 10208 36232 Bad Request: /api/sessions/teams/
+WARNING 2026-07-22 23:15:17,665 log 10208 36232 Bad Request: /api/sessions/teams/6f6147c2-1595-451c-8c6a-78e34a6e91f9/
+WARNING 2026-07-22 23:15:19,537 log 10208 36232 Bad Request: /api/sessions/teams/13196732-892b-4bdd-82b3-00eb57b5ed92/
+WARNING 2026-07-22 23:15:19,945 log 10208 36232 Not Found: /api/sessions/teams/does-not-exist/
+WARNING 2026-07-22 23:15:21,190 log 10208 36232 Bad Request: /api/sessions/team-personalizations/
+WARNING 2026-07-22 23:15:21,367 log 10208 36232 Not Found: /api/sessions/team-personalizations/
+WARNING 2026-07-22 23:15:24,689 log 10208 36232 Bad Request: /api/sessions/game-sessions/TESTC035/show_results/
+WARNING 2026-07-22 23:15:25,431 log 10208 36232 Unauthorized: /api/sessions/game-sessions/TESTFB8E/show_results/
+WARNING 2026-07-23 12:18:29,200 log 16464 31624 Bad Request: /api/sessions/game-sessions/
+WARNING 2026-07-23 12:18:30,510 log 16464 31624 Bad Request: /api/sessions/game-sessions/create_with_excel/
+WARNING 2026-07-23 12:18:34,794 log 16464 31624 Not Found: /api/sessions/game-sessions/UNKNOWN/
+WARNING 2026-07-23 12:18:39,837 log 16464 31624 Not Found: /api/sessions/game-sessions/UNKNOWN/
+WARNING 2026-07-23 12:18:41,613 log 16464 31624 Not Found: /api/sessions/game-sessions/UNKNOWN/
+WARNING 2026-07-23 12:18:43,437 log 16464 31624 Bad Request: /api/sessions/game-sessions/ROOMC2/complete_stage/
+WARNING 2026-07-23 12:18:44,498 log 16464 31624 Bad Request: /api/sessions/game-sessions/ROOMN1/next_activity/
+WARNING 2026-07-23 12:18:46,356 log 16464 31624 Bad Request: /api/sessions/game-sessions/ROOMV2/set_video_institucional_activity/
+WARNING 2026-07-23 12:18:47,777 log 16464 31624 Bad Request: /api/sessions/game-sessions/ROOMS3/start/
+WARNING 2026-07-23 12:18:48,265 log 16464 31624 Bad Request: /api/sessions/game-sessions/ROOMS2/start/
+WARNING 2026-07-23 12:18:48,745 log 16464 31624 Bad Request: /api/sessions/game-sessions/ROOMS1/start/
+WARNING 2026-07-23 12:18:50,614 log 16464 31624 Not Found: /api/sessions/game-sessions/UNKNOWN/start/
+WARNING 2026-07-23 12:18:51,907 log 16464 31624 Bad Request: /api/sessions/game-sessions/ROOMT1/sync_teams/
+WARNING 2026-07-23 12:18:52,928 log 16464 31624 Bad Request: /api/sessions/game-sessions/ROOMT2/sync_teams/
+WARNING 2026-07-23 12:18:55,039 log 16464 31624 Forbidden: /api/sessions/game-sessions/active_session/
+WARNING 2026-07-23 12:18:56,561 log 16464 31624 Bad Request: /api/sessions/game-sessions/ROOMAT1/activity_timer/
+WARNING 2026-07-23 12:18:57,478 log 16464 31624 Not Found: /api/sessions/game-sessions/UNKNOWN/activity_timer/
+WARNING 2026-07-23 12:18:59,156 log 16464 31624 Bad Request: /api/sessions/game-sessions/ROOME1/end/
+WARNING 2026-07-23 12:18:59,571 log 16464 31624 Not Found: /api/sessions/game-sessions/UNKNOWN/end/
+WARNING 2026-07-23 12:19:00,031 log 16464 31624 Unauthorized: /api/sessions/game-sessions/ROOMET3/etapa/221/
+WARNING 2026-07-23 12:19:00,952 log 16464 31624 Not Found: /api/sessions/game-sessions/UNKNOWN/etapa/223/
+WARNING 2026-07-23 12:19:01,406 log 16464 31624 Not Found: /api/sessions/game-sessions/ROOMET1/etapa/999999/
+WARNING 2026-07-23 12:19:02,631 log 16464 31624 Forbidden: /api/sessions/game-sessions/ROOMLB1/lobby/
+WARNING 2026-07-23 12:19:03,309 log 16464 31624 Not Found: /api/sessions/game-sessions/UNKNOWN/lobby/
+WARNING 2026-07-23 12:19:04,983 log 16464 31624 Bad Request: /api/sessions/game-sessions/ROOMNS2/next_stage/
+WARNING 2026-07-23 12:19:05,469 log 16464 31624 Bad Request: /api/sessions/game-sessions/ROOMNS1/next_stage/
+WARNING 2026-07-23 12:19:06,892 log 16464 31624 Not Found: /api/sessions/game-sessions/UNKNOWN/reflection_qr/
+WARNING 2026-07-23 12:19:07,340 log 16464 31624 Bad Request: /api/sessions/game-sessions/ROOMSHR2/show_results/
+WARNING 2026-07-23 12:19:07,794 log 16464 31624 Unauthorized: /api/sessions/game-sessions/ROOMSHR3/show_results/
+WARNING 2026-07-23 12:19:08,711 log 16464 31624 Not Found: /api/sessions/game-sessions/UNKNOWN/show_results/
+WARNING 2026-07-23 12:19:09,174 log 16464 31624 Not Found: /api/sessions/game-sessions/ROOMSR2/stage_results/
+WARNING 2026-07-23 12:19:09,896 log 16464 31624 Bad Request: /api/sessions/game-sessions/ROOMSR1/stage_results/
+WARNING 2026-07-23 12:19:10,671 log 16464 31624 Not Found: /api/sessions/game-sessions/UNKNOWN/stage_results/
+WARNING 2026-07-23 12:19:11,889 log 16464 31624 Not Found: /api/sessions/game-sessions/ROOMSTR2/start_reflection/
+WARNING 2026-07-23 12:19:12,372 log 16464 31624 Not Found: /api/sessions/game-sessions/ROOMSTR1/start_reflection/
+WARNING 2026-07-23 12:19:13,301 log 16464 31624 Not Found: /api/sessions/game-sessions/UNKNOWN/teams/
+WARNING 2026-07-23 12:19:13,756 log 16464 31624 Bad Request: /api/sessions/game-sessions/STG1A/start_stage_1/
+WARNING 2026-07-23 12:19:14,203 log 16464 31624 Not Found: /api/sessions/game-sessions/UNKNOWN/start_stage_1/
+WARNING 2026-07-23 12:19:19,738 log 16464 31624 Bad Request: /api/sessions/peer-evaluations/
+WARNING 2026-07-23 12:19:20,214 log 16464 31624 Bad Request: /api/sessions/peer-evaluations/
+WARNING 2026-07-23 12:19:20,682 log 16464 31624 Not Found: /api/sessions/peer-evaluations/
+WARNING 2026-07-23 12:19:21,355 log 16464 31624 Not Found: /api/sessions/peer-evaluations/
+WARNING 2026-07-23 12:19:21,823 log 16464 31624 Not Found: /api/sessions/peer-evaluations/
+WARNING 2026-07-23 12:19:22,003 log 16464 31624 Bad Request: /api/sessions/peer-evaluations/for_professor/
+WARNING 2026-07-23 12:19:22,960 log 16464 31624 Not Found: /api/sessions/peer-evaluations/for_professor/
+WARNING 2026-07-23 12:19:23,151 log 16464 31624 Bad Request: /api/sessions/peer-evaluations/for_team/
+WARNING 2026-07-23 12:19:24,542 log 16464 31624 Not Found: /api/sessions/peer-evaluations/for_team/
+WARNING 2026-07-23 12:19:28,070 log 16464 31624 Not Found: /api/sessions/peer-evaluations/not-a-composite-id/
+WARNING 2026-07-23 12:19:28,548 log 16464 31624 Not Found: /api/sessions/peer-evaluations/bc9a55d9-1ad6-424e-a2da-56d3330b4182:f0d7aa6d-59a9-4cf4-8686-e7f3c561ad8d/
+WARNING 2026-07-23 12:19:33,581 log 16464 31624 Bad Request: /api/sessions/reflection-evaluations/by_room/
+WARNING 2026-07-23 12:19:33,769 log 16464 31624 Not Found: /api/sessions/reflection-evaluations/by_room/
+WARNING 2026-07-23 12:19:37,141 log 16464 31624 Bad Request: /api/sessions/reflection-evaluations/
+WARNING 2026-07-23 12:19:37,650 log 16464 31624 Bad Request: /api/sessions/reflection-evaluations/
+WARNING 2026-07-23 12:19:37,847 log 16464 31624 Not Found: /api/sessions/reflection-evaluations/
+WARNING 2026-07-23 12:19:41,374 log 16464 31624 Not Found: /api/sessions/reflection-evaluations/not-a-real-id/
+WARNING 2026-07-23 12:19:42,830 log 16464 31624 Not Found: /api/sessions/roulette-assignments/3b0cf364-897b-4fb3-bad1-d2efe0922fa9:999/accept/
+WARNING 2026-07-23 12:19:43,385 log 16464 31624 Bad Request: /api/sessions/roulette-assignments/b31c6b8c-2273-4757-b0e2-5cd4e0224c13:260/accept/
+WARNING 2026-07-23 12:19:45,089 log 16464 31624 Bad Request: /api/sessions/roulette-assignments/
+WARNING 2026-07-23 12:19:45,600 log 16464 31624 Unauthorized: /api/sessions/roulette-assignments/
+WARNING 2026-07-23 12:19:46,204 log 16464 31624 Not Found: /api/sessions/roulette-assignments/
+WARNING 2026-07-23 12:19:46,814 log 16464 31624 Not Found: /api/sessions/roulette-assignments/
+WARNING 2026-07-23 12:19:47,272 log 16464 31624 Not Found: /api/sessions/roulette-assignments/
+WARNING 2026-07-23 12:19:49,619 log 16464 31624 Not Found: /api/sessions/roulette-assignments/854295a3-d562-41fb-81f1-21b4ba647d14:999/
+WARNING 2026-07-23 12:19:52,570 log 16464 31624 Bad Request: /api/sessions/roulette-assignments/aa7915a8-c94d-4f00-979e-4ae97ba6ee87:275/validate/
+WARNING 2026-07-23 12:19:55,342 log 16464 31624 Not Found: /api/sessions/token-transactions/some-id/
+WARNING 2026-07-23 12:20:00,233 log 16464 31624 Bad Request: /api/sessions/session-stages/288/generate_presentation_order/
+WARNING 2026-07-23 12:20:01,376 log 16464 31624 Bad Request: /api/sessions/session-stages/291/generate_presentation_order/
+WARNING 2026-07-23 12:20:02,005 log 16464 31624 Bad Request: /api/sessions/session-stages/293/generate_presentation_order/
+WARNING 2026-07-23 12:20:04,045 log 16464 31624 Bad Request: /api/sessions/session-stages/299/mark_presentation_done/
+WARNING 2026-07-23 12:20:05,406 log 16464 31624 Bad Request: /api/sessions/session-stages/303/presentation_evaluation_progress/
+WARNING 2026-07-23 12:20:07,888 log 16464 31624 Bad Request: /api/sessions/session-stages/311/presentation_timer/
+WARNING 2026-07-23 12:20:08,495 log 16464 31624 Bad Request: /api/sessions/session-stages/313/presentation_timer/
+WARNING 2026-07-23 12:20:15,931 log 16464 31624 Not Found: /api/sessions/session-stages/328/
+WARNING 2026-07-23 12:20:18,013 log 16464 31624 Bad Request: /api/sessions/session-stages/333/
+WARNING 2026-07-23 12:20:20,489 log 16464 31624 Bad Request: /api/sessions/session-stages/339/start_presentation/
+WARNING 2026-07-23 12:20:23,249 log 16464 31624 Bad Request: /api/sessions/session-stages/345/finish_team_presentation/
+WARNING 2026-07-23 12:20:25,222 log 16464 31624 Bad Request: /api/sessions/session-stages/349/start_team_pitch/
+WARNING 2026-07-23 12:20:26,313 log 16464 31624 Bad Request: /api/sessions/session-stages/351/update_presentation_order/
+WARNING 2026-07-23 12:20:28,740 log 16464 31624 Bad Request: /api/sessions/tablet-connections/by_team/
+WARNING 2026-07-23 12:20:29,784 log 16464 31624 Not Found: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-23 12:20:30,330 log 16464 31624 Bad Request: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-23 12:20:31,026 log 16464 31624 Bad Request: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-23 12:20:31,812 log 16464 31624 Bad Request: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-23 12:20:32,570 log 16464 31624 Forbidden: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-23 12:20:33,354 log 16464 31624 Bad Request: /api/sessions/tablet-connections/connect/
+WARNING 2026-07-23 12:20:35,221 log 16464 31624 Bad Request: /api/sessions/tablet-connections/354c60fe-3238-4b3f-85d2-cf99d8ced82b/disconnect/
+WARNING 2026-07-23 12:20:36,754 log 16464 31624 Unauthorized: /api/sessions/tablet-connections/7930fc31-d2a0-409a-a91a-17e49d532552/disconnect/
+WARNING 2026-07-23 12:20:37,033 log 16464 31624 Not Found: /api/sessions/tablet-connections/reconnect/
+WARNING 2026-07-23 12:20:37,309 log 16464 31624 Bad Request: /api/sessions/tablet-connections/reconnect/
+WARNING 2026-07-23 12:20:39,160 log 16464 31624 Forbidden: /api/sessions/tablet-connections/reconnect/
+WARNING 2026-07-23 12:20:40,183 log 16464 31624 Not Found: /api/sessions/tablet-connections/status/
+WARNING 2026-07-23 12:20:41,513 log 16464 31624 Bad Request: /api/sessions/tablet-connections/status/
+WARNING 2026-07-23 12:20:43,780 log 16464 31624 Bad Request: /api/sessions/tablets/
+WARNING 2026-07-23 12:20:44,539 log 16464 31624 Not Found: /api/sessions/tablets/TAB-050/
+WARNING 2026-07-23 12:20:47,294 log 16464 31624 Unauthorized: /api/sessions/tablets/
+WARNING 2026-07-23 12:20:48,803 log 16464 31624 Not Found: /api/sessions/tablets/NOPE/
+WARNING 2026-07-23 12:20:49,141 log 16464 31624 Not Found: /api/sessions/tablet-connections/nonexistent-token/update_screen/
+WARNING 2026-07-23 12:20:55,936 log 16464 31624 Bad Request: /api/sessions/team-activity-progress/
+WARNING 2026-07-23 12:20:56,653 log 16464 31624 Not Found: /api/sessions/team-activity-progress/
+WARNING 2026-07-23 12:20:57,424 log 16464 31624 Not Found: /api/sessions/team-activity-progress/
+WARNING 2026-07-23 12:20:58,317 log 16464 31624 Not Found: /api/sessions/team-activity-progress/
+WARNING 2026-07-23 12:21:04,059 log 16464 31624 Forbidden: /api/sessions/team-activity-progress/e53906f2-b2c3-4a5a-9ce7-78bbe683d4ef:415/
+WARNING 2026-07-23 12:21:09,392 log 16464 31624 Not Found: /api/sessions/team-activity-progress/not-a-valid-pk/
+WARNING 2026-07-23 12:21:09,637 log 16464 31624 Not Found: /api/sessions/team-activity-progress/nope:1/
+WARNING 2026-07-23 12:21:13,557 log 16464 31624 Bad Request: /api/sessions/team-activity-progress/submit_anagram/
+WARNING 2026-07-23 12:21:16,373 log 16464 31624 Not Found: /api/sessions/team-activity-progress/submit_anagram/
+WARNING 2026-07-23 12:21:19,339 log 16464 31624 Bad Request: /api/sessions/team-activity-progress/save_pitch/
+WARNING 2026-07-23 12:21:20,081 log 16464 31624 Not Found: /api/sessions/team-activity-progress/save_pitch/
+WARNING 2026-07-23 12:21:22,298 log 16464 31624 Bad Request: /api/sessions/team-activity-progress/select_challenge/
+WARNING 2026-07-23 12:21:23,859 log 16464 31624 Not Found: /api/sessions/team-activity-progress/select_challenge/
+WARNING 2026-07-23 12:21:24,371 log 16464 31624 Bad Request: /api/sessions/team-activity-progress/select_topic/
+WARNING 2026-07-23 12:21:26,854 log 16464 31624 Not Found: /api/sessions/team-activity-progress/select_topic/
+WARNING 2026-07-23 12:21:27,667 log 16464 31624 Not Found: /api/sessions/team-activity-progress/select_topic/
+WARNING 2026-07-23 12:21:29,274 log 16464 31624 Bad Request: /api/sessions/team-activity-progress/upload_prototype/
+WARNING 2026-07-23 12:21:32,226 log 16464 31624 Not Found: /api/sessions/team-activity-progress/upload_prototype/
+WARNING 2026-07-23 12:21:36,874 log 16464 31624 Bad Request: /api/sessions/team-bubble-maps/
+WARNING 2026-07-23 12:21:37,974 log 16464 31624 Not Found: /api/sessions/team-bubble-maps/
+WARNING 2026-07-23 12:21:38,733 log 16464 31624 Not Found: /api/sessions/team-bubble-maps/
+WARNING 2026-07-23 12:21:42,313 log 16464 31624 Not Found: /api/sessions/team-bubble-maps/finalize_bubble_map/
+WARNING 2026-07-23 12:21:42,556 log 16464 31624 Bad Request: /api/sessions/team-bubble-maps/finalize_bubble_map/
+WARNING 2026-07-23 12:21:44,533 log 16464 31624 Not Found: /api/sessions/team-bubble-maps/finalize_bubble_map/
+WARNING 2026-07-23 12:21:48,925 log 16464 31624 Not Found: /api/sessions/team-bubble-maps/not-a-composite-id/
+WARNING 2026-07-23 12:21:49,660 log 16464 31624 Not Found: /api/sessions/team-bubble-maps/6d897b51-d37b-4fd7-95b4-c9aa25665d92:415/
+WARNING 2026-07-23 12:21:52,458 log 16464 31624 Not Found: /api/sessions/team-bubble-maps/7afdbc82-04f2-43ce-acef-7a63a831466c:418/
+WARNING 2026-07-23 12:21:54,957 log 16464 31624 Bad Request: /api/sessions/teams/8bcac8a0-1b90-44cb-af8e-64aa5e2eee4d/move_student/
+WARNING 2026-07-23 12:21:55,974 log 16464 31624 Bad Request: /api/sessions/teams/91ba0af7-1f78-4a98-8b37-65a23a208669/move_student/
+WARNING 2026-07-23 12:21:56,782 log 16464 31624 Not Found: /api/sessions/teams/1207b13b-0b75-4789-b641-9f0676836a8f/move_student/
+WARNING 2026-07-23 12:21:57,662 log 16464 31624 Not Found: /api/sessions/teams/6ec95b6a-dcfa-436f-b31a-dd976866cfd9/move_student/
+WARNING 2026-07-23 12:21:58,543 log 16464 31624 Bad Request: /api/sessions/teams/shuffle_all/
+WARNING 2026-07-23 12:21:59,557 log 16464 31624 Bad Request: /api/sessions/teams/shuffle_all/
+WARNING 2026-07-23 12:22:00,713 log 16464 31624 Bad Request: /api/sessions/teams/shuffle_all/
+WARNING 2026-07-23 12:22:03,780 log 16464 31624 Not Found: /api/sessions/teams/shuffle_all/
+WARNING 2026-07-23 12:22:05,848 log 16464 31624 Bad Request: /api/sessions/teams/
+WARNING 2026-07-23 12:22:08,467 log 16464 31624 Bad Request: /api/sessions/teams/f727f210-ef1a-4879-9475-94137cb2c4be/
+WARNING 2026-07-23 12:22:11,889 log 16464 31624 Bad Request: /api/sessions/teams/b3a9a251-4957-41d3-a28d-557cf8986db0/
+WARNING 2026-07-23 12:22:12,663 log 16464 31624 Not Found: /api/sessions/teams/does-not-exist/
+WARNING 2026-07-23 12:22:14,996 log 16464 31624 Bad Request: /api/sessions/team-personalizations/
+WARNING 2026-07-23 12:22:15,283 log 16464 31624 Not Found: /api/sessions/team-personalizations/
+WARNING 2026-07-23 12:22:20,927 log 16464 31624 Bad Request: /api/sessions/game-sessions/TEST41F8/show_results/
+WARNING 2026-07-23 12:22:21,715 log 16464 31624 Unauthorized: /api/sessions/game-sessions/TEST531C/show_results/
+ERROR 2026-07-29 11:18:08,185 exception 14472 32668 Invalid HTTP_HOST header: 'testserver'. You may need to add 'testserver' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\utils\deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+           ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: 'testserver'. You may need to add 'testserver' to ALLOWED_HOSTS.
+WARNING 2026-07-29 11:18:09,040 log 14472 32668 Bad Request: /
+ERROR 2026-07-29 11:18:09,042 exception 14472 32668 Invalid HTTP_HOST header: 'testserver'. You may need to add 'testserver' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\utils\deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+           ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: 'testserver'. You may need to add 'testserver' to ALLOWED_HOSTS.
+WARNING 2026-07-29 11:18:09,122 log 14472 32668 Bad Request: /some/fake/route
+ERROR 2026-07-29 11:18:09,123 exception 14472 32668 Invalid HTTP_HOST header: 'testserver'. You may need to add 'testserver' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\utils\deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+           ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: 'testserver'. You may need to add 'testserver' to ALLOWED_HOSTS.
+WARNING 2026-07-29 11:18:09,198 log 14472 32668 Bad Request: /api/health/
+ERROR 2026-07-29 11:18:09,198 exception 14472 32668 Invalid HTTP_HOST header: 'testserver'. You may need to add 'testserver' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\utils\deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+           ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: 'testserver'. You may need to add 'testserver' to ALLOWED_HOSTS.
+WARNING 2026-07-29 11:18:09,262 log 14472 32668 Bad Request: /admin/
+ERROR 2026-07-29 11:18:09,264 exception 14472 32668 Invalid HTTP_HOST header: 'testserver'. You may need to add 'testserver' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\utils\deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+           ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Agustin\Documents\GitHub\misionEmprendeJose\.venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: 'testserver'. You may need to add 'testserver' to ALLOWED_HOSTS.
+WARNING 2026-07-29 11:18:09,400 log 14472 32668 Bad Request: /api/this-does-not-exist/
+WARNING 2026-07-29 11:18:42,479 log 22596 13988 Not Found: /api/this-does-not-exist/
+WARNING 2026-07-29 11:18:57,226 log 12976 5384 Not Found: /

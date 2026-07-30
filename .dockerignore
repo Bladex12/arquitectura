@@ -18,3 +18,18 @@ sessions
 .idea
 *.sqlite3
 *.db
+
+# Frontend source / dev tooling -- NOT needed in the Lambda image; only
+# frontend/dist/** (built by `npm run build` before `sam build`) is needed.
+# Do NOT add a blanket `frontend`/`frontend/*` exclude + `!frontend/dist/**`
+# negation -- Docker can't re-include a child of an already-excluded dir.
+frontend/src
+frontend/public
+frontend/index.html
+frontend/package.json
+frontend/package-lock.json
+frontend/tsconfig*.json
+frontend/*.config.js
+frontend/*.config.ts
+frontend/.env*
+frontend/.gitignore

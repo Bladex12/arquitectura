@@ -242,7 +242,7 @@ export function AdminPanel() {
             transition={{ delay: 0.1, type: 'spring', stiffness: 200, damping: 24 }}
             className="flex items-center gap-2 bg-white/80 backdrop-blur-sm rounded-full px-4 py-2 shadow-sm border border-white/60"
           >
-            <img src="/images/logoudd.png" alt="UDD" className="h-5 object-contain" />
+            <img src={`${import.meta.env.BASE_URL}images/logoudd.png`} alt="UDD" className="h-5 object-contain" />
             <span className="text-xs font-semibold text-[#1B1B2F]/60 tracking-wide uppercase hidden sm:inline">
               Admin
             </span>

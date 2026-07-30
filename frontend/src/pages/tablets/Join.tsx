@@ -252,7 +252,7 @@ export function TabletJoin() {
         transition={{ delay: 0.4, type: 'spring', stiffness: 200, damping: 24 }}
         className="absolute top-5 left-5 flex items-center gap-2 bg-white/80 backdrop-blur-sm rounded-full px-4 py-2 shadow-md border border-white/60"
       >
-        <img src="/images/logoudd.png" alt="UDD" className="h-6 object-contain" />
+        <img src={`${import.meta.env.BASE_URL}images/logoudd.png`} alt="UDD" className="h-6 object-contain" />
         <span className="text-xs font-semibold text-[#1B1B2F] opacity-70 tracking-wide uppercase">
           Emprendimiento
         </span>
@@ -283,7 +283,7 @@ export function TabletJoin() {
               >
                 <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-[#F5F0E8] flex items-center justify-center shadow-inner">
                   <img
-                    src="/images/mascotaprueba.svg"
+                    src={`${import.meta.env.BASE_URL}images/mascotaprueba.svg`}
                     alt="Mascota"
                     className="w-12 h-12 sm:w-16 sm:h-16 object-contain drop-shadow-md"
                   />
@@ -582,8 +582,9 @@ export function TabletJoin() {
           transition={{ delay: 1.2 }}
           className="flex justify-center mt-4"
         >
-          <a
-            href="/profesor/login"
+          <button
+            type="button"
+            onClick={() => navigate('/profesor/login')}
             className="
               inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl
               border border-[#1B1B2F]/15 bg-white/50 backdrop-blur-sm
@@ -593,7 +594,7 @@ export function TabletJoin() {
             "
           >
             Acceso profesores →
-          </a>
+          </button>
         </motion.div>
       </motion.div>
     </div>

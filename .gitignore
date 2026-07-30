@@ -1,5 +1,6 @@
 .worktrees/
 secrets.local.txt
+samconfig.toml
 env-vars.local.json
 .aws-sam/
 __pycache__/

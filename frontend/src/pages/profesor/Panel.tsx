@@ -518,7 +518,7 @@ export function ProfesorPanel() {
         <div className="p-5 border-b border-white/5">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center flex-shrink-0">
-              <img src="/images/logoudd.png" alt="UDD" className="h-5 brightness-0 invert object-contain" />
+              <img src={`${import.meta.env.BASE_URL}images/logoudd.png`} alt="UDD" className="h-5 brightness-0 invert object-contain" />
             </div>
             <div className="min-w-0">
               <p

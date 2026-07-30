@@ -247,6 +247,11 @@ else:
     MEDIA_URL = '/media/'
     MEDIA_ROOT = BASE_DIR / 'media'
 
+# ============================================
+# FRONTEND SPA (served by Django, see mision_emprende_backend/views_frontend.py)
+# ============================================
+FRONTEND_DIST_DIR = BASE_DIR / 'frontend' / 'dist'
+
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -308,6 +313,7 @@ CORS_ALLOWED_ORIGINS = [
     'http://localhost:5173',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:5173',
+    'http://mision-emprende-frontendbucket-qasoew4t04sv.s3-website-us-east-1.amazonaws.com',
 ]
 
 CORS_ALLOW_ALL_ORIGINS = False

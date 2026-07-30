@@ -231,6 +231,48 @@ Resources:
         RestrictPublicBuckets: true
 
   # ==========================================================
+  # Frontend hosting (React SPA build, S3 static website)
+  # ==========================================================
+  # CloudFront (OAC/Distribution) is NOT usable on this AWS Academy Learner
+  # Lab account -- confirmed via a real deploy attempt (AccessDenied on
+  # cloudfront:CreateOriginAccessControl) and a direct read-only probe
+  # (cloudfront:ListDistributions also AccessDenied) -- the service is
+  # blocked wholesale for this account's role, not just OAC creation. S3
+  # static website hosting instead: public bucket, no HTTPS, but a
+  # deterministic SAM-output URL and no extra service dependency.
+  #
+  # ErrorDocument -> index.html is the standard SPA-on-S3 trick: S3 returns
+  # its error document (with an error status code, not 200) for any path
+  # that isn't a literal object key, which is enough for React Router to
+  # take over client-side on load. The build itself (frontend/dist/) is
+  # uploaded out-of-band with `aws s3 sync`, same as how DjangoFunction's
+  # container image is pushed outside this template.
+
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: false
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: false
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+
+  # ==========================================================
   # DynamoDB: game_sessions runtime data (single-table)
   # ==========================================================
   # PK/SK scheme filled in by the "DynamoDB single-table design for
@@ -515,5 +557,9 @@ Outputs:
     Value: !Ref ConnectionsTable
   StaticMediaBucketName:
     Value: !Ref StaticMediaBucket
+  FrontendBucketName:
+    Value: !Ref FrontendBucket
+  FrontendUrl:
+    Value: !GetAtt FrontendBucket.WebsiteURL
   AnalyticsBucketName:
     Value: !Ref AnalyticsBucket

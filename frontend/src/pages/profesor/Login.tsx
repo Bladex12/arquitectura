@@ -259,7 +259,7 @@ export function ProfesorLogin() {
           {/* Logo */}
           <div className="flex items-center gap-3 mb-auto">
             <img
-              src="/images/logoudd.png"
+              src={`${import.meta.env.BASE_URL}images/logoudd.png`}
               alt="UDD"
               className="h-8 object-contain brightness-0 invert opacity-90"
             />
@@ -351,7 +351,7 @@ export function ProfesorLogin() {
               style={{ background: B.navy }}
             >
               <img
-                src="/images/logoudd.png"
+                src={`${import.meta.env.BASE_URL}images/logoudd.png`}
                 alt="UDD"
                 className="h-5 object-contain brightness-0 invert"
               />
@@ -519,14 +519,15 @@ export function ProfesorLogin() {
           </AnimatePresence>
 
           {/* Tablet access hint */}
-          <a
-            href="/tablet/join"
+          <button
+            type="button"
+            onClick={() => navigate('/tablet/join')}
             className="mt-6 flex items-center justify-center gap-2.5 w-full py-3 px-4 rounded-xl border border-blue-100 bg-blue-50 text-blue-700 text-sm font-semibold hover:bg-blue-100 transition-colors"
           >
             <Tablet className="w-4 h-4 flex-shrink-0" />
             Soy estudiante — Acceso a Tablets
             <ArrowRight className="w-4 h-4 flex-shrink-0 ml-auto" />
-          </a>
+          </button>
         </motion.div>
       </div>
     </div>

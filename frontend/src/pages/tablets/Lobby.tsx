@@ -506,7 +506,7 @@ export function TabletLobby() {
           style={{ height: 'clamp(50px, 6vw, 100px)', width: 'auto' }}
         >
           <img
-            src="/images/UDD-negro.png"
+            src={`${import.meta.env.BASE_URL}images/UDD-negro.png`}
             alt="Logo UDD"
             className="h-full w-auto object-contain drop-shadow-lg"
           />

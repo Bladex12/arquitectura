@@ -17,8 +17,11 @@ export function SpaceWarpTransition() {
 
     const tc = canvasRef.current;
     if (!tc) return;
-    const tx = tc.getContext('2d');
-    if (!tx) return;
+    const ctx2d = tc.getContext('2d');
+    if (!ctx2d) return;
+    // Re-bind with an explicit non-null type: TS doesn't carry the narrowing
+    // from the guard above into the nested drawShoots/drawUFO/frame closures.
+    const tx: CanvasRenderingContext2D = ctx2d;
     tc.width = window.innerWidth;
     tc.height = window.innerHeight;
     const W = tc.width, H = tc.height;

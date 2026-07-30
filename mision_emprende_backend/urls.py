@@ -5,7 +5,7 @@ The `urlpatterns` list routes URLs to views. For more information please see:
     https://docs.djangoproject.com/en/5.0/topics/http/urls/
 """
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
 from django.conf import settings
 from django.conf.urls.static import static
 from drf_spectacular.views import (
@@ -14,6 +14,7 @@ from drf_spectacular.views import (
     SpectacularRedocView,
 )
 from .views_health import health
+from .views_frontend import spa_view
 
 urlpatterns = [
     # Health check (Lambda Web Adapter readiness probe, no DB dependency)
@@ -21,10 +22,7 @@ urlpatterns = [
 
     # Admin
     path('admin/', admin.site.urls),
-    
-    # Frontend (HTML de prueba)
-    path('', include('mision_emprende_backend.urls_frontend')),
-    
+
     # API Documentation
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
@@ -56,3 +54,11 @@ if settings.DEBUG:
         urlpatterns += [
             path('__debug__/', include('debug_toolbar.urls')),
         ]
+
+# Frontend SPA (frontend/dist) -- MUST be the last thing appended to
+# urlpatterns (after the DEBUG block above), and MUST NOT match api/*,
+# admin/*, static/*, media/* even when unmatched by a specific route above,
+# so that a typo'd/missing API path still 404s instead of returning HTML.
+urlpatterns += [
+    re_path(r'^(?!api/|admin/|static/|media/)(?P<path>.*)$', spa_view, name='spa'),
+]
