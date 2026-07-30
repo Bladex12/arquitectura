@@ -43,7 +43,8 @@ class GameSessionSerializer(serializers.Serializer):
     Expects display fields already attached via annotate_game_session_display_fields()
     -- this serializer does no cross-app lookups itself."""
     id = serializers.CharField(source='room_code')  # room_code IS the id now
-    professor = serializers.IntegerField(source='professor_id')
+    # users-app ids are DynamoDB UUID4 strings now, not ORM integer pks.
+    professor = serializers.CharField(source='professor_id')
     professor_name = serializers.CharField(read_only=True, default=None, allow_null=True)
     course = serializers.IntegerField(source='course_id')
     course_name = serializers.CharField(read_only=True, default=None, allow_null=True)
@@ -132,7 +133,7 @@ class GameSessionCreateSerializer(serializers.Serializer):
     """Serializer para crear una Sesión de Juego. Validates the shape of the
     creation payload before calling game_sessions.dynamodb.game_session.create_session
     (which enforces room_code uniqueness itself via a ConditionExpression)."""
-    professor = serializers.IntegerField()
+    professor = serializers.CharField()  # users-app id: UUID4 string, not an int pk
     course = serializers.IntegerField()
     room_code = serializers.CharField()
 
@@ -156,7 +157,7 @@ class TeamSerializer(serializers.Serializer):
     tokens_total = serializers.IntegerField(read_only=True, default=0)
     students = serializers.SerializerMethodField()
     student_ids = serializers.ListField(
-        child=serializers.IntegerField(), write_only=True, required=False
+        child=serializers.CharField(), write_only=True, required=False  # Student ids are UUID4 strings
     )
     students_count = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField(read_only=True)
@@ -477,7 +478,7 @@ class TeamRouletteAssignmentSerializer(serializers.Serializer):
     accepted_at = serializers.DateTimeField(allow_null=True, required=False)
     rejected_at = serializers.DateTimeField(allow_null=True, required=False)
     completed_at = serializers.DateTimeField(allow_null=True, required=False)
-    validated_by = serializers.IntegerField(source='validated_by_id', allow_null=True, required=False)
+    validated_by = serializers.CharField(source='validated_by_id', allow_null=True, required=False)
     validated_by_name = serializers.CharField(read_only=True, default=None, allow_null=True)
 
 
@@ -549,7 +550,7 @@ class TokenTransactionSerializer(serializers.Serializer):
     # string source_id.
     source_id = serializers.CharField(allow_null=True, required=False)
     reason = serializers.CharField(allow_null=True, required=False, allow_blank=True)
-    awarded_by = serializers.IntegerField(source='awarded_by_id', allow_null=True, required=False)
+    awarded_by = serializers.CharField(source='awarded_by_id', allow_null=True, required=False)
     awarded_by_name = serializers.CharField(read_only=True, default=None, allow_null=True)
     created_at = serializers.DateTimeField()
 
