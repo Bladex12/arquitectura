@@ -320,7 +320,10 @@ class PeerEvaluationPresentationCompletionTest(PeerEvaluationTestCase):
             room_code, stage_4.id,
             presentation_order=[team_a['team_id'], team_b['team_id'], team_c['team_id']],
         )
-        presentation_activity = Activity.objects.get(stage=stage_4, activity_type__name__icontains='presentación')
+        presentation_activity = next(
+            a for a in Activity.objects.filter(stage=stage_4, is_active=True)
+            if a.activity_type and 'presentación' in (a.activity_type.name or '').lower()
+        )
 
         # team_b is evaluated by both other teams (team_a and team_c) -- 2
         # evaluations >= (3 teams - 1), so its presentation activity

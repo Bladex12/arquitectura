@@ -1,898 +1,1109 @@
 """
-Modelos para la app challenges (Etapas, Actividades, Desafíos, Retos, Temas, etc.)
+Compatibility shim: Stage/ActivityType/Activity/Topic/Challenge/
+RouletteChallenge/WordSearchOption/Minigame/LearningObjective/AnagramWord/
+ChaosQuestion/GeneralKnowledgeQuestion used to be Django ORM models.
+They're now plain Python classes backed by DynamoDB's ContentTable (see
+challenges/dynamodb/ and
+docs/superpowers/specs/2026-08-03-academic-challenges-dynamodb-migration-design.md).
+
+This shim exists so existing call sites (challenges/views.py,
+challenges/serializers.py, the six challenges/management/commands/*.py
+seed commands, admin_dashboard/views.py, admin_dashboard/services.py, and
+game_sessions call sites) keep working with `.objects.get/.filter/
+.create/.get_or_create(...)` call shapes.
+
+The real Django ORM class definitions this replaced are frozen in
+challenges/legacy_orm_models.py, used only by the one-time RDS->DynamoDB
+backfill script.
 """
-from django.db import models
-from django.core.validators import MinValueValidator, MaxValueValidator
-from academic.models import Faculty
-from typing import Optional, Dict
 import random
+from typing import Optional, Dict
+
+from django.core.exceptions import ObjectDoesNotExist
+
+from challenges.dynamodb import stage as stage_repo
+from challenges.dynamodb import activity_type as activity_type_repo
+from challenges.dynamodb import activity as activity_repo
+from challenges.dynamodb import word_search_option as wso_repo
+from challenges.dynamodb import topic as topic_repo
+from challenges.dynamodb import challenge as challenge_repo
+from challenges.dynamodb import roulette_challenge as roulette_repo
+from challenges.dynamodb import minigame as minigame_repo
+from challenges.dynamodb import learning_objective as lo_repo
+from challenges.dynamodb import anagram_word as anagram_repo
+from challenges.dynamodb import chaos_question as chaos_repo
+from challenges.dynamodb import general_knowledge_question as gk_repo
 
 
-class Stage(models.Model):
-    """
-    Etapa del juego (Trabajo en equipo, Empatía, Creatividad, Comunicación)
-    """
-    number = models.IntegerField(
-        unique=True,
-        verbose_name='Número'
-    )
-    name = models.CharField(
-        max_length=100,
-        verbose_name='Nombre'
-    )
-    description = models.TextField(
-        blank=True,
-        null=True,
-        verbose_name='Descripción'
-    )
-    objective = models.TextField(
-        blank=True,
-        null=True,
-        verbose_name='Objetivo'
-    )
-    estimated_duration = models.IntegerField(
-        blank=True,
-        null=True,
-        verbose_name='Duración Estimada (minutos)'
-    )
-    is_active = models.BooleanField(
-        default=True,
-        verbose_name='Activa'
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+class _ListResult(list):
+    """list subclass adding the QuerySet-ish methods actual call sites
+    use: .exists(), .first(), .values_list(field), .order_by(field),
+    .count() (zero-arg, QuerySet-style -- shadows list.count(value) on
+    purpose, no call site here uses the built-in single-value form)."""
 
-    class Meta:
-        db_table = 'stages'
-        verbose_name = 'Etapa'
-        verbose_name_plural = 'Etapas'
-        indexes = [
-            models.Index(fields=['number']),
-            models.Index(fields=['is_active']),
-        ]
-        ordering = ['number']
+    def exists(self):
+        return len(self) > 0
+
+    def first(self):
+        return self[0] if self else None
+
+    def values_list(self, field, flat=False):
+        return [getattr(obj, field) for obj in self]
+
+    def order_by(self, field):
+        reverse = field.startswith('-')
+        field = field.lstrip('-')
+        return _ListResult(sorted(self, key=lambda o: getattr(o, field), reverse=reverse))
+
+    def count(self):
+        return len(self)
+
+    def exclude(self, **kwargs):
+        def matches(obj):
+            return all(getattr(obj, k, None) == v for k, v in kwargs.items())
+        return _ListResult(o for o in self if not matches(o))
+
+
+def _id_of(value):
+    if value is None:
+        return None
+    return getattr(value, 'id', value)
+
+
+# ---------------------------------------------------------------------------
+# Stage
+# ---------------------------------------------------------------------------
+
+class Stage:
+    class DoesNotExist(ObjectDoesNotExist):
+        pass
+
+    class _Manager:
+        def get(self, id=None, pk=None, number=None, is_active=None):
+            if id is not None or pk is not None:
+                item = stage_repo.get_stage(_id_of(id if id is not None else pk))
+            elif number is not None:
+                item = stage_repo.find_stage_by_number(number)
+                if item and is_active is not None and item['is_active'] != is_active:
+                    item = None
+            else:
+                raise ValueError('Stage.objects.get() needs id/pk or number')
+            if item is None:
+                raise Stage.DoesNotExist('Stage does not exist')
+            return Stage(item)
+
+        def filter(self, is_active=None, id__in=None, number=None):
+            if id__in is not None:
+                items = list(stage_repo.get_stages_by_ids([_id_of(i) for i in id__in]).values())
+            else:
+                items = stage_repo.list_stages(active_only=is_active is True)
+                if is_active is False:
+                    items = [i for i in items if not i['is_active']]
+            if number is not None:
+                items = [i for i in items if i['number'] == number]
+            return _ListResult(Stage(i) for i in items)
+
+        def all(self):
+            return self.filter()
+
+        def create(self, *, number, name, description=None, objective=None,
+                   estimated_duration=None, is_active=True):
+            return Stage(stage_repo.create_stage(
+                number=number, name=name, description=description, objective=objective,
+                estimated_duration=estimated_duration, is_active=is_active,
+            ))
+
+        def get_or_create(self, *, number, defaults=None):
+            existing = stage_repo.find_stage_by_number(number)
+            if existing:
+                return Stage(existing), False
+            fields = dict(defaults or {})
+            fields.setdefault('name', '')
+            return Stage(stage_repo.create_stage(number=number, **fields)), True
+
+    objects = _Manager()
+
+    def __init__(self, item):
+        self.id = item['id']
+        self.number = item['number']
+        self.name = item['name']
+        self.description = item.get('description')
+        self.objective = item.get('objective')
+        self.estimated_duration = item.get('estimated_duration')
+        self.is_active = item.get('is_active', True)
+        self.created_at = item.get('created_at')
+        self.updated_at = item.get('updated_at')
 
     def __str__(self):
         return f"Etapa {self.number}: {self.name}"
 
+    def save(self):
+        item = stage_repo.update_stage(self.id, {
+            'number': self.number, 'name': self.name, 'description': self.description,
+            'objective': self.objective, 'estimated_duration': self.estimated_duration,
+            'is_active': self.is_active,
+        })
+        self.updated_at = item['updated_at']
 
-class ActivityType(models.Model):
-    """
-    Tipo de actividad (personalización, minijuego, tema, etc.)
-    """
-    code = models.CharField(
-        max_length=50,
-        unique=True,
-        verbose_name='Código'
-    )
-    name = models.CharField(
-        max_length=100,
-        verbose_name='Nombre'
-    )
-    description = models.TextField(
-        blank=True,
-        null=True,
-        verbose_name='Descripción'
-    )
-    is_active = models.BooleanField(
-        default=True,
-        verbose_name='Activo'
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta:
-        db_table = 'activity_types'
-        verbose_name = 'Tipo de Actividad'
-        verbose_name_plural = 'Tipos de Actividades'
-        indexes = [
-            models.Index(fields=['code']),
-        ]
+# ---------------------------------------------------------------------------
+# ActivityType
+# ---------------------------------------------------------------------------
+
+class ActivityType:
+    class DoesNotExist(ObjectDoesNotExist):
+        pass
+
+    class _Manager:
+        def get(self, id=None, pk=None, code=None):
+            if id is not None or pk is not None:
+                item = activity_type_repo.get_activity_type(_id_of(id if id is not None else pk))
+            elif code is not None:
+                item = activity_type_repo.find_activity_type_by_code(code)
+            else:
+                raise ValueError('ActivityType.objects.get() needs id/pk or code')
+            if item is None:
+                raise ActivityType.DoesNotExist('ActivityType does not exist')
+            return ActivityType(item)
+
+        def filter(self, is_active=None, id__in=None, code=None):
+            if id__in is not None:
+                items = list(activity_type_repo.get_activity_types_by_ids([_id_of(i) for i in id__in]).values())
+            else:
+                items = activity_type_repo.list_activity_types(active_only=is_active is True)
+                if is_active is False:
+                    items = [i for i in items if not i['is_active']]
+            if code is not None:
+                items = [i for i in items if i['code'] == code]
+            return _ListResult(ActivityType(i) for i in items)
+
+        def all(self):
+            return self.filter()
+
+        def create(self, *, code, name, description=None, is_active=True):
+            return ActivityType(activity_type_repo.create_activity_type(
+                code=code, name=name, description=description, is_active=is_active,
+            ))
+
+        def get_or_create(self, *, code, defaults=None):
+            existing = activity_type_repo.find_activity_type_by_code(code)
+            if existing:
+                return ActivityType(existing), False
+            fields = dict(defaults or {})
+            fields.setdefault('name', code)
+            return ActivityType(activity_type_repo.create_activity_type(code=code, **fields)), True
+
+    objects = _Manager()
+
+    def __init__(self, item):
+        self.id = item['id']
+        self.code = item['code']
+        self.name = item['name']
+        self.description = item.get('description')
+        self.is_active = item.get('is_active', True)
+        self.created_at = item.get('created_at')
+        self.updated_at = item.get('updated_at')
 
     def __str__(self):
         return self.name
 
+    def save(self):
+        item = activity_type_repo.update_activity_type(self.id, {
+            'code': self.code, 'name': self.name, 'description': self.description,
+            'is_active': self.is_active,
+        })
+        self.updated_at = item['updated_at']
 
-class Activity(models.Model):
-    """
-    Actividad dentro de una etapa
-    """
-    stage = models.ForeignKey(
-        Stage,
-        on_delete=models.RESTRICT,
-        related_name='activities',
-        verbose_name='Etapa'
-    )
-    activity_type = models.ForeignKey(
-        ActivityType,
-        on_delete=models.RESTRICT,
-        related_name='activities',
-        verbose_name='Tipo de Actividad'
-    )
-    name = models.CharField(
-        max_length=100,
-        verbose_name='Nombre'
-    )
-    description = models.TextField(
-        blank=True,
-        null=True,
-        verbose_name='Descripción'
-    )
-    order_number = models.IntegerField(
-        verbose_name='Número de Orden'
-    )
-    timer_duration = models.IntegerField(
-        blank=True,
-        null=True,
-        verbose_name='Duración del Temporizador (segundos)'
-    )
-    config_data = models.JSONField(
-        blank=True,
-        null=True,
-        verbose_name='Datos de Configuración'
-    )
-    is_active = models.BooleanField(
-        default=True,
-        verbose_name='Activa'
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta:
-        db_table = 'activities'
-        verbose_name = 'Actividad'
-        verbose_name_plural = 'Actividades'
-        unique_together = [['stage', 'order_number']]
-        indexes = [
-            models.Index(fields=['stage']),
-            models.Index(fields=['activity_type']),
-            models.Index(fields=['stage', 'order_number']),
-        ]
-        ordering = ['stage', 'order_number']
+# ---------------------------------------------------------------------------
+# Activity
+# ---------------------------------------------------------------------------
+
+class Activity:
+    class DoesNotExist(ObjectDoesNotExist):
+        pass
+
+    class _Manager:
+        def get(self, id=None, pk=None, stage=None, stage_id=None, activity_type=None,
+                 activity_type_id=None, is_active=None):
+            if id is not None or pk is not None:
+                item = activity_repo.get_activity(_id_of(id if id is not None else pk))
+                if item is None:
+                    raise Activity.DoesNotExist('Activity does not exist')
+                return Activity(item)
+            match = self.filter(stage=stage, stage_id=stage_id, activity_type=activity_type,
+                                 activity_type_id=activity_type_id, is_active=is_active).first()
+            if match is None:
+                raise Activity.DoesNotExist('Activity does not exist')
+            return match
+
+        def filter(self, stage=None, stage_id=None, activity_type=None, activity_type_id=None,
+                   is_active=None, id__in=None, name__icontains=None):
+            if id__in is not None:
+                items = list(activity_repo.get_activities_by_ids([_id_of(i) for i in id__in]).values())
+            else:
+                sid = _id_of(stage) if stage is not None else stage_id
+                if sid is not None:
+                    items = activity_repo.list_activities_for_stage(sid)
+                else:
+                    items = activity_repo.list_activities()
+                atid = _id_of(activity_type) if activity_type is not None else activity_type_id
+                if atid is not None:
+                    items = [i for i in items if i['activity_type_id'] == str(atid)]
+                if is_active is not None:
+                    items = [i for i in items if i['is_active'] == is_active]
+                if name__icontains is not None:
+                    needle = name__icontains.lower()
+                    items = [i for i in items if needle in (i['name'] or '').lower()]
+            items = sorted(items, key=lambda i: i['order_number'])
+            return _ListResult(Activity(i) for i in items)
+
+        def all(self):
+            return _ListResult(Activity(i) for i in activity_repo.list_activities())
+
+        def select_related(self, *_args, **_kwargs):
+            return self
+
+        def prefetch_related(self, *_args, **_kwargs):
+            return self
+
+        def create(self, *, stage, activity_type, name, order_number, description=None,
+                   timer_duration=None, config_data=None, is_active=True):
+            return Activity(activity_repo.create_activity(
+                stage_id=_id_of(stage), activity_type_id=_id_of(activity_type), name=name,
+                order_number=order_number, description=description, timer_duration=timer_duration,
+                config_data=config_data, is_active=is_active,
+            ))
+
+        def get_or_create(self, *, stage, order_number, defaults=None):
+            sid = _id_of(stage)
+            existing = activity_repo.find_activity(sid, order_number)
+            if existing:
+                return Activity(existing), False
+            fields = dict(defaults or {})
+            fields['activity_type_id'] = _id_of(fields.pop('activity_type', fields.get('activity_type_id')))
+            fields.setdefault('name', '')
+            fields.pop('order_number', None)
+            item = activity_repo.create_activity(stage_id=sid, order_number=order_number, **fields)
+            return Activity(item), True
+
+    objects = _Manager()
+
+    def __init__(self, item):
+        self.id = item['id']
+        self.stage_id = item['stage_id']
+        self.activity_type_id = item['activity_type_id']
+        self.name = item['name']
+        self.description = item.get('description')
+        self.order_number = item['order_number']
+        self.timer_duration = item.get('timer_duration')
+        self.config_data = item.get('config_data')
+        self.is_active = item.get('is_active', True)
+        self.created_at = item.get('created_at')
+        self.updated_at = item.get('updated_at')
+        self._stage = None
+        self._activity_type = None
+
+    def __str__(self):
+        return f"{self.stage.name} - {self.name}" if self.stage else self.name
+
+    @property
+    def stage(self):
+        if self._stage is None and self.stage_id:
+            item = stage_repo.get_stage(self.stage_id)
+            self._stage = Stage(item) if item else None
+        return self._stage
+
+    @stage.setter
+    def stage(self, value):
+        self._stage = value
+        self.stage_id = _id_of(value)
+
+    @property
+    def stage_name(self):
+        return self.stage.name if self.stage else None
+
+    @property
+    def activity_type(self):
+        if self._activity_type is None and self.activity_type_id:
+            item = activity_type_repo.get_activity_type(self.activity_type_id)
+            self._activity_type = ActivityType(item) if item else None
+        return self._activity_type
+
+    @activity_type.setter
+    def activity_type(self, value):
+        self._activity_type = value
+        self.activity_type_id = _id_of(value)
+
+    @property
+    def activity_type_name(self):
+        return self.activity_type.name if self.activity_type else None
+
+    @property
+    def word_search_options(self):
+        items = wso_repo.list_word_search_options_for_activity(self.id)
+        return _ListResult(WordSearchOption(i) for i in items)
+
+    def save(self):
+        item = activity_repo.update_activity(self.id, {
+            'stage_id': self.stage_id, 'activity_type_id': self.activity_type_id, 'name': self.name,
+            'description': self.description, 'order_number': self.order_number,
+            'timer_duration': self.timer_duration, 'config_data': self.config_data,
+            'is_active': self.is_active,
+        })
+        self.updated_at = item['updated_at']
+
+    # -- Business logic (ported unchanged from the pre-migration ORM model) --
 
     def get_word_search_data(self, team_id: Optional[int] = None, session_stage_id: Optional[int] = None) -> Optional[Dict]:
-        """
-        Genera y devuelve los datos de la sopa de letras para esta actividad.
-        Si hay múltiples opciones de sopas de letras, selecciona una determinísticamente
-        basada en team_id y session_stage_id.
-        
-        Args:
-            team_id: ID del equipo (para selección determinística)
-            session_stage_id: ID de la sesión de etapa (para selección determinística)
-        
-        Returns:
-            Diccionario con 'words', 'grid' y 'wordPositions' o None si no es una actividad de sopa de letras
-        """
         from challenges.services import generate_word_search
-        
+
         config = self.config_data or {}
-        
-        # Verificar si es una actividad de minijuego
-        # Para minijuegos, siempre devolver word_search_data si hay opciones guardadas
-        # El código puede ser 'minigame' o 'minijuego' dependiendo de la base de datos
+
         if self.activity_type.code not in ['minigame', 'minijuego']:
             return None
-        
-        # Obtener opciones de sopas de letras si existen
-        word_search_options = self.word_search_options.filter(is_active=True)
-        
+
+        options_list = [o for o in self.word_search_options if o.is_active]
+
         words = []
         seed = None
-        
-        if word_search_options.exists():
-            # Si hay múltiples opciones, seleccionar una determinísticamente
-            options_list = list(word_search_options)
-            
+
+        if options_list:
             if team_id is not None and session_stage_id is not None:
-                # Generar índice determinístico basado en team_id, session_stage_id y activity_id
-                # Esto hace que diferentes equipos tengan diferentes sopas de letras
                 seed_string = f"{team_id}_{session_stage_id}_{self.id}"
                 seed_value = abs(sum(ord(c) for c in seed_string))
                 selected_index = seed_value % len(options_list)
             else:
-                # Si no hay team_id/session_stage_id, seleccionar aleatoriamente
                 selected_index = random.randint(0, len(options_list) - 1)
-            
+
             selected_option = options_list[selected_index]
             words = selected_option.words if isinstance(selected_option.words, list) else []
-            
-            # Si la opción ya tiene grid y word_positions guardados, devolverlos directamente
+
             if selected_option.grid and selected_option.word_positions:
-                # Asegurar que words sea una lista de strings en mayúsculas
                 words_list = [w.upper() if isinstance(w, str) else str(w).upper() for w in words] if words else []
                 return {
                     'words': words_list,
                     'grid': selected_option.grid,
                     'wordPositions': selected_option.word_positions,
                 }
-            
-            # Si no tiene grid guardado, generar uno (fallback - no debería pasar)
-            # Usar el ID de la opción como parte de la semilla para generar la misma sopa siempre
+
             if seed is None:
-                seed = selected_option.id * 1000 + (team_id or 0) + (session_stage_id or 0)
+                seed = selected_option.id_int * 1000 + (team_id or 0) + (session_stage_id or 0)
         elif config.get('words'):
-            # Compatibilidad: usar palabras de config_data (estructura antigua)
             words_config = config.get('words', [])
             if isinstance(words_config, list):
                 if words_config and isinstance(words_config[0], str):
                     words = words_config
                 elif words_config and isinstance(words_config[0], dict):
                     words = [w.get('word', '') for w in words_config if w.get('word')]
-            
-            # Generar semilla basada en team_id y session_stage_id si están disponibles
+
             if team_id is not None and session_stage_id is not None:
                 seed_string = f"{team_id}_{session_stage_id}_{self.id}"
                 seed = abs(sum(ord(c) for c in seed_string))
-        
+
         if not words:
             return None
-        
-        # Generar la sopa de letras
+
         return generate_word_search(words, seed=seed)
-    
+
     def get_bubble_map_config(self) -> Dict:
-        """
-        Obtiene la configuración del bubble map para esta actividad.
-        Retorna valores por defecto si no hay configuración específica en config_data.
-        
-        Returns:
-            Diccionario con la configuración del bubble map:
-            - max_answers_per_question: máximo de respuestas por pregunta (default: 4)
-            - max_questions: máximo de preguntas (default: 7)
-            - max_question_length: longitud máxima de pregunta (default: 60)
-            - max_answer_length: longitud máxima de respuesta (default: 30)
-        """
         config = self.config_data or {}
         bubble_map_config = config.get('bubble_map', {})
-        
+
         return {
             'max_answers_per_question': bubble_map_config.get('max_answers_per_question', 4),
             'max_questions': bubble_map_config.get('max_questions', 7),
             'max_question_length': bubble_map_config.get('max_question_length', 60),
             'max_answer_length': bubble_map_config.get('max_answer_length', 30),
         }
-    
+
     def get_anagram_data(self, count: int = 5, team_id: Optional[int] = None, session_stage_id: Optional[int] = None) -> Optional[Dict]:
-        """
-        Obtiene palabras aleatorias para el juego de anagrama.
-        La selección es determinística basada en team_id y session_stage_id para que sea consistente.
-        
-        Args:
-            count: Número de palabras a obtener (default: 5)
-            team_id: ID del equipo (para selección determinística)
-            session_stage_id: ID de la etapa de sesión (para selección determinística)
-        
-        Returns:
-            Diccionario con 'words' (lista de objetos {word, scrambled_word})
-        """
-        from .models import AnagramWord
-        import random
-        
-        # Obtener todas las palabras activas
-        all_words = list(AnagramWord.objects.filter(is_active=True))
-        
+        all_words = anagram_repo.list_anagram_words(active_only=True)
+
         if not all_words:
             return None
-        
-        # Validar que haya suficientes palabras
+
         if len(all_words) < count:
-            # Si no hay suficientes palabras, lanzar error
             raise ValueError(f'No hay suficientes palabras activas. Se requieren {count} pero solo hay {len(all_words)}')
-        
-        # Si hay team_id y session_stage_id, usar selección determinística
+
         if team_id is not None and session_stage_id is not None:
             seed_string = f"{team_id}_{session_stage_id}_{self.id}"
             seed_value = abs(sum(ord(c) for c in seed_string))
             random.seed(seed_value)
-            selected_words = random.sample(all_words, count)  # Siempre devolver exactamente 'count' palabras
-            random.seed()  # Resetear semilla
+            selected_words = random.sample(all_words, count)
+            random.seed()
         else:
-            # Selección completamente aleatoria
-            selected_words = random.sample(all_words, count)  # Siempre devolver exactamente 'count' palabras
-        
+            selected_words = random.sample(all_words, count)
+
         return {
             'words': [
-                {
-                    'word': word.word,
-                    'anagram': word.scrambled_word
-                }
-                for word in selected_words
+                {'word': w['word'], 'anagram': w['scrambled_word']}
+                for w in selected_words
             ]
         }
-    
+
     def get_chaos_data(self, team_id: Optional[int] = None, session_stage_id: Optional[int] = None) -> Optional[Dict]:
-        """
-        Obtiene información sobre las preguntas del caos disponibles.
-        Las preguntas del caos son aleatorias (no determinísticas).
-        Solo se devuelve si la actividad es de tipo presentación.
-        """
-        # Verificar si es una actividad de presentación
         if self.activity_type.code not in ['presentation', 'presentación']:
             return None
-        
-        # Importar aquí para evitar importación circular
-        from challenges.models import ChaosQuestion
-        
-        # Obtener todas las preguntas activas del caos
-        active_questions = ChaosQuestion.objects.filter(is_active=True)
-        
-        if not active_questions.exists():
+
+        active_questions = chaos_repo.list_chaos_questions(active_only=True)
+
+        if not active_questions:
             return None
-        
-        # Devolver información sobre las preguntas disponibles
-        # (no devolvemos las preguntas completas porque son aleatorias)
+
         return {
-            'available_count': active_questions.count(),
+            'available_count': len(active_questions),
             'questions_available': True,
         }
-    
+
     def get_general_knowledge_data(self, count: int = 5, team_id: Optional[int] = None, session_stage_id: Optional[int] = None) -> Optional[Dict]:
-        """
-        Obtiene preguntas aleatorias de conocimiento general.
-        La selección es determinística basada en team_id y session_stage_id para que sea consistente.
-        
-        Args:
-            count: Número de preguntas a obtener (default: 5)
-            team_id: ID del equipo (para selección determinística)
-            session_stage_id: ID de la etapa de sesión (para selección determinística)
-        
-        Returns:
-            Diccionario con 'questions' (lista de objetos de pregunta)
-        """
-        from .models import GeneralKnowledgeQuestion
-        import random
-        
-        # Obtener todas las preguntas activas
-        all_questions = list(GeneralKnowledgeQuestion.objects.filter(is_active=True))
-        
+        all_questions = gk_repo.list_general_knowledge_questions(active_only=True)
+
         if not all_questions:
             return None
-        
-        # Validar que haya suficientes preguntas
+
         if len(all_questions) < count:
-            # Si no hay suficientes preguntas, lanzar error
             raise ValueError(f'No hay suficientes preguntas activas. Se requieren {count} pero solo hay {len(all_questions)}')
-        
-        # Si hay team_id y session_stage_id, usar selección determinística
+
         if team_id is not None and session_stage_id is not None:
             seed_string = f"{team_id}_{session_stage_id}_{self.id}_gk"
             seed_value = abs(sum(ord(c) for c in seed_string))
             random.seed(seed_value)
-            selected_questions = random.sample(all_questions, count)  # Siempre devolver exactamente 'count' preguntas
-            random.seed()  # Resetear semilla
-        else:
-            # Selección completamente aleatoria
             selected_questions = random.sample(all_questions, count)
-        
-        # Serializar las preguntas
+            random.seed()
+        else:
+            selected_questions = random.sample(all_questions, count)
+
         questions_data = []
         for q in selected_questions:
             questions_data.append({
-                'id': q.id,
-                'question': q.question,
-                'option_a': q.option_a,
-                'option_b': q.option_b,
-                'option_c': q.option_c,
-                'option_d': q.option_d,
-                'correct_answer': q.correct_answer,
+                'id': q['id'],
+                'question': q['question'],
+                'option_a': q['option_a'],
+                'option_b': q['option_b'],
+                'option_c': q['option_c'],
+                'option_d': q['option_d'],
+                'correct_answer': q['correct_answer'],
                 'options': [
-                    {'label': 'A', 'text': q.option_a},
-                    {'label': 'B', 'text': q.option_b},
-                    {'label': 'C', 'text': q.option_c},
-                    {'label': 'D', 'text': q.option_d},
+                    {'label': 'A', 'text': q['option_a']},
+                    {'label': 'B', 'text': q['option_b']},
+                    {'label': 'C', 'text': q['option_c']},
+                    {'label': 'D', 'text': q['option_d']},
                 ]
             })
-        
-        return {
-            'questions': questions_data
-        }
-    
-    def __str__(self):
-        return f"{self.stage.name} - {self.name}"
+
+        return {'questions': questions_data}
 
 
-class Topic(models.Model):
-    """
-    Tema para la etapa de Empatía (Many-to-Many con Facultades)
-    """
-    name = models.CharField(
-        max_length=200,
-        verbose_name='Nombre'
-    )
-    icon = models.CharField(
-        max_length=10,
-        blank=True,
-        null=True,
-        verbose_name='Icono',
-        help_text='Emoji o símbolo para representar el tema (ej: 🏥, 💰, 🌱)'
-    )
-    description = models.TextField(
-        blank=True,
-        null=True,
-        verbose_name='Descripción'
-    )
-    image_url = models.URLField(
-        max_length=500,
-        blank=True,
-        null=True,
-        verbose_name='URL de Imagen'
-    )
-    category = models.CharField(
-        max_length=100,
-        blank=True,
-        null=True,
-        verbose_name='Categoría'
-    )
-    is_active = models.BooleanField(
-        default=True,
-        verbose_name='Activo'
-    )
-    faculties = models.ManyToManyField(
-        Faculty,
-        related_name='topics',
-        verbose_name='Facultades'
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+# ---------------------------------------------------------------------------
+# Topic
+# ---------------------------------------------------------------------------
 
-    class Meta:
-        db_table = 'topics'
-        verbose_name = 'Tema'
-        verbose_name_plural = 'Temas'
-        indexes = [
-            models.Index(fields=['is_active']),
-            models.Index(fields=['category']),
-        ]
+class Topic:
+    class DoesNotExist(ObjectDoesNotExist):
+        pass
+
+    class _Manager:
+        def get(self, id=None, pk=None):
+            item = topic_repo.get_topic(_id_of(id if id is not None else pk))
+            if item is None:
+                raise Topic.DoesNotExist('Topic does not exist')
+            return Topic(item)
+
+        def filter(self, is_active=None, faculty_id=None, id__in=None):
+            if id__in is not None:
+                items = list(topic_repo.get_topics_by_ids([_id_of(i) for i in id__in]).values())
+            elif faculty_id is not None:
+                items = topic_repo.list_topics_for_faculty(faculty_id, active_only=is_active is True)
+                if is_active is False:
+                    items = [i for i in items if not i['is_active']]
+            else:
+                items = topic_repo.list_topics(active_only=is_active is True)
+                if is_active is False:
+                    items = [i for i in items if not i['is_active']]
+            return _ListResult(Topic(i) for i in items)
+
+        def all(self):
+            return self.filter()
+
+        def prefetch_related(self, *_args, **_kwargs):
+            return self
+
+        def create(self, *, name, icon=None, description=None, image_url=None, category=None,
+                   is_active=True, faculties=None):
+            faculty_ids = [_id_of(f) for f in faculties] if faculties else None
+            return Topic(topic_repo.create_topic(
+                name=name, icon=icon, description=description, image_url=image_url,
+                category=category, is_active=is_active, faculty_ids=faculty_ids,
+            ))
+
+        def get_or_create(self, *, name, defaults=None):
+            for t in topic_repo.list_topics():
+                if t['name'] == name:
+                    return Topic(t), False
+            fields = dict(defaults or {})
+            fields.setdefault('is_active', True)
+            return Topic(topic_repo.create_topic(name=name, **fields)), True
+
+    objects = _Manager()
+
+    def __init__(self, item):
+        self.id = item['id']
+        self.name = item['name']
+        self.icon = item.get('icon')
+        self.description = item.get('description')
+        self.image_url = item.get('image_url')
+        self.category = item.get('category')
+        self.is_active = item.get('is_active', True)
+        self.created_at = item.get('created_at')
+        self.updated_at = item.get('updated_at')
+        self._faculties = None
 
     def __str__(self):
         return self.name
 
+    @property
+    def faculties(self):
+        if self._faculties is None:
+            from academic.models import Faculty
+            ids = topic_repo.list_faculty_ids_for_topic(self.id)
+            self._faculties = _ListResult(Faculty.objects.filter(id__in=ids)) if ids else _ListResult()
+        return self._faculties
 
-class Challenge(models.Model):
-    """
-    Desafío (Historia de Usuario) asociado a un tema
-    """
-    DIFFICULTY_LEVEL_CHOICES = [
-        ('low', 'Baja'),
-        ('medium', 'Media'),
-        ('high', 'Alta'),
-    ]
+    def save(self):
+        item = topic_repo.update_topic(self.id, {
+            'name': self.name, 'icon': self.icon, 'description': self.description,
+            'image_url': self.image_url, 'category': self.category, 'is_active': self.is_active,
+        })
+        self.updated_at = item['updated_at']
 
-    topic = models.ForeignKey(
-        Topic,
-        on_delete=models.RESTRICT,
-        related_name='challenges',
-        verbose_name='Tema'
-    )
-    title = models.CharField(
-        max_length=200,
-        verbose_name='Título'
-    )
-    description = models.TextField(
-        blank=True,
-        null=True,
-        verbose_name='Descripción del Desafío',
-        help_text='Descripción del problema o desafío que se busca resolver'
-    )
-    icon = models.CharField(
-        max_length=10,
-        blank=True,
-        null=True,
-        verbose_name='Icono',
-        help_text='Emoji o símbolo para representar el desafío (ej: 💰, 🎓, 📱)'
-    )
-    # Campos para la persona de la historia de usuario
-    persona_name = models.CharField(
-        max_length=100,
-        blank=True,
-        null=True,
-        verbose_name='Nombre de la Persona',
-        help_text='Nombre de la persona en la historia de usuario'
-    )
-    persona_age = models.IntegerField(
-        blank=True,
-        null=True,
-        verbose_name='Edad de la Persona',
-        help_text='Edad de la persona en la historia de usuario'
-    )
-    persona_story = models.TextField(
-        blank=True,
-        null=True,
-        verbose_name='Historia de la Persona',
-        help_text='Cita o historia específica de la persona'
-    )
-    persona_image = models.ImageField(
-        upload_to='personas/',
-        blank=True,
-        null=True,
-        verbose_name='Imagen de la Persona',
-        help_text='Imagen de perfil de la persona del desafío'
-    )
-    difficulty_level = models.CharField(
-        max_length=20,
-        choices=DIFFICULTY_LEVEL_CHOICES,
-        default='medium',
-        verbose_name='Nivel de Dificultad'
-    )
-    learning_objectives = models.TextField(
-        blank=True,
-        null=True,
-        verbose_name='Objetivos de Aprendizaje'
-    )
-    additional_resources = models.TextField(
-        blank=True,
-        null=True,
-        verbose_name='Recursos Adicionales'
-    )
-    is_active = models.BooleanField(
-        default=True,
-        verbose_name='Activo'
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta:
-        db_table = 'challenges'
-        verbose_name = 'Desafío'
-        verbose_name_plural = 'Desafíos'
-        indexes = [
-            models.Index(fields=['topic']),
-            models.Index(fields=['difficulty_level']),
-            models.Index(fields=['is_active']),
-        ]
+# ---------------------------------------------------------------------------
+# Challenge
+# ---------------------------------------------------------------------------
+
+class Challenge:
+    class DoesNotExist(ObjectDoesNotExist):
+        pass
+
+    class _Manager:
+        def get(self, id=None, pk=None):
+            item = challenge_repo.get_challenge(_id_of(id if id is not None else pk))
+            if item is None:
+                raise Challenge.DoesNotExist('Challenge does not exist')
+            return Challenge(item)
+
+        def filter(self, topic=None, topic_id=None, is_active=None, id__in=None):
+            if id__in is not None:
+                items = list(challenge_repo.get_challenges_by_ids([_id_of(i) for i in id__in]).values())
+            else:
+                tid = _id_of(topic) if topic is not None else topic_id
+                if tid is not None:
+                    items = challenge_repo.list_challenges_for_topic(tid)
+                else:
+                    items = challenge_repo.list_challenges()
+                if is_active is not None:
+                    items = [i for i in items if i['is_active'] == is_active]
+            return _ListResult(Challenge(i) for i in items)
+
+        def all(self):
+            return self.filter()
+
+        def select_related(self, *_args, **_kwargs):
+            return self
+
+        def create(self, *, topic, title, **fields):
+            return Challenge(challenge_repo.create_challenge(topic_id=_id_of(topic), title=title, **fields))
+
+        def get_or_create(self, *, topic, title, defaults=None):
+            tid = _id_of(topic)
+            for c in challenge_repo.list_challenges_for_topic(tid):
+                if c['title'] == title:
+                    return Challenge(c), False
+            fields = dict(defaults or {})
+            return Challenge(challenge_repo.create_challenge(topic_id=tid, title=title, **fields)), True
+
+    objects = _Manager()
+
+    def __init__(self, item):
+        self.id = item['id']
+        self.topic_id = item['topic_id']
+        self.title = item['title']
+        self.description = item.get('description')
+        self.icon = item.get('icon')
+        self.persona_name = item.get('persona_name')
+        self.persona_age = item.get('persona_age')
+        self.persona_story = item.get('persona_story')
+        self.persona_image = item.get('persona_image')
+        self.difficulty_level = item.get('difficulty_level', 'medium')
+        self.learning_objectives = item.get('learning_objectives')
+        self.additional_resources = item.get('additional_resources')
+        self.is_active = item.get('is_active', True)
+        self.created_at = item.get('created_at')
+        self.updated_at = item.get('updated_at')
+        self._topic = None
 
     def __str__(self):
-        return f"{self.title} - {self.topic.name}"
+        return f"{self.title} - {self.topic.name}" if self.topic else self.title
+
+    @property
+    def topic(self):
+        if self._topic is None and self.topic_id:
+            item = topic_repo.get_topic(self.topic_id)
+            self._topic = Topic(item) if item else None
+        return self._topic
+
+    @topic.setter
+    def topic(self, value):
+        self._topic = value
+        self.topic_id = _id_of(value)
+
+    @property
+    def topic_name(self):
+        return self.topic.name if self.topic else None
+
+    def save(self):
+        item = challenge_repo.update_challenge(self.id, {
+            'topic_id': self.topic_id, 'title': self.title, 'description': self.description,
+            'icon': self.icon, 'persona_name': self.persona_name, 'persona_age': self.persona_age,
+            'persona_story': self.persona_story, 'persona_image': self.persona_image,
+            'difficulty_level': self.difficulty_level, 'learning_objectives': self.learning_objectives,
+            'additional_resources': self.additional_resources, 'is_active': self.is_active,
+        })
+        self.updated_at = item['updated_at']
+
+    def refresh_from_db(self):
+        item = challenge_repo.get_challenge(self.id)
+        if item is None:
+            raise Challenge.DoesNotExist('Challenge does not exist')
+        self.__init__(item)
 
 
-class RouletteChallenge(models.Model):
-    """
-    Reto de ruleta (retos físicos/mentales/creativos)
-    """
-    CHALLENGE_TYPE_CHOICES = [
-        ('physical', 'Físico'),
-        ('mental', 'Mental'),
-        ('creative', 'Creativo'),
-        ('other', 'Otro'),
-    ]
+# ---------------------------------------------------------------------------
+# RouletteChallenge
+# ---------------------------------------------------------------------------
 
-    description = models.TextField(
-        verbose_name='Descripción'
-    )
-    challenge_type = models.CharField(
-        max_length=20,
-        choices=CHALLENGE_TYPE_CHOICES,
-        verbose_name='Tipo de Reto'
-    )
-    difficulty_estimated = models.IntegerField(
-        default=5,
-        validators=[MinValueValidator(1), MaxValueValidator(10)],
-        verbose_name='Dificultad Estimada (1-10)'
-    )
-    token_reward_min = models.IntegerField(
-        default=0,
-        verbose_name='Recompensa Mínima en Tokens'
-    )
-    token_reward_max = models.IntegerField(
-        default=0,
-        verbose_name='Recompensa Máxima en Tokens'
-    )
-    stages_applicable = models.JSONField(
-        blank=True,
-        null=True,
-        verbose_name='Etapas Aplicables'
-    )
-    is_active = models.BooleanField(
-        default=True,
-        verbose_name='Activo'
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+class RouletteChallenge:
+    class DoesNotExist(ObjectDoesNotExist):
+        pass
 
-    class Meta:
-        db_table = 'roulette_challenges'
-        verbose_name = 'Reto de Ruleta'
-        verbose_name_plural = 'Retos de Ruleta'
-        indexes = [
-            models.Index(fields=['challenge_type']),
-            models.Index(fields=['is_active']),
-        ]
+    class _Manager:
+        def get(self, id=None, pk=None):
+            item = roulette_repo.get_roulette_challenge(_id_of(id if id is not None else pk))
+            if item is None:
+                raise RouletteChallenge.DoesNotExist('RouletteChallenge does not exist')
+            return RouletteChallenge(item)
+
+        def filter(self, is_active=None, challenge_type=None):
+            items = roulette_repo.list_roulette_challenges(active_only=is_active is True)
+            if is_active is False:
+                items = [i for i in items if not i['is_active']]
+            if challenge_type is not None:
+                items = [i for i in items if i['challenge_type'] == challenge_type]
+            return _ListResult(RouletteChallenge(i) for i in items)
+
+        def all(self):
+            return self.filter()
+
+        def create(self, **fields):
+            return RouletteChallenge(roulette_repo.create_roulette_challenge(**fields))
+
+    objects = _Manager()
+
+    def __init__(self, item):
+        self.id = item['id']
+        self.description = item['description']
+        self.challenge_type = item['challenge_type']
+        self.difficulty_estimated = item.get('difficulty_estimated', 5)
+        self.token_reward_min = item.get('token_reward_min', 0)
+        self.token_reward_max = item.get('token_reward_max', 0)
+        self.stages_applicable = item.get('stages_applicable')
+        self.is_active = item.get('is_active', True)
+        self.created_at = item.get('created_at')
+        self.updated_at = item.get('updated_at')
 
     def __str__(self):
         return f"{self.description[:50]}... ({self.challenge_type})"
 
+    def save(self):
+        item = roulette_repo.update_roulette_challenge(self.id, {
+            'description': self.description, 'challenge_type': self.challenge_type,
+            'difficulty_estimated': self.difficulty_estimated, 'token_reward_min': self.token_reward_min,
+            'token_reward_max': self.token_reward_max, 'stages_applicable': self.stages_applicable,
+            'is_active': self.is_active,
+        })
+        self.updated_at = item['updated_at']
 
-class WordSearchOption(models.Model):
-    """
-    Opción de sopa de letras creada por la administradora
-    Cada opción contiene una lista de palabras que se usarán para generar la sopa de letras
-    """
-    activity = models.ForeignKey(
-        'Activity',
-        on_delete=models.CASCADE,
-        related_name='word_search_options',
-        verbose_name='Actividad'
-    )
-    name = models.CharField(
-        max_length=100,
-        verbose_name='Nombre de la opción',
-        help_text='Nombre descriptivo para identificar esta opción de sopa de letras'
-    )
-    words = models.JSONField(
-        verbose_name='Palabras',
-        help_text='Lista de palabras para esta sopa de letras (máximo 5 palabras)'
-    )
-    grid = models.JSONField(
-        blank=True,
-        null=True,
-        verbose_name='Grid Generado',
-        help_text='Matriz 12x12 de la sopa de letras generada'
-    )
-    word_positions = models.JSONField(
-        blank=True,
-        null=True,
-        verbose_name='Posiciones de Palabras',
-        help_text='Lista de posiciones de cada palabra en el grid'
-    )
-    seed = models.IntegerField(
-        blank=True,
-        null=True,
-        verbose_name='Semilla',
-        help_text='Semilla usada para generar esta sopa de letras'
-    )
-    is_active = models.BooleanField(
-        default=True,
-        verbose_name='Activa'
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta:
-        db_table = 'word_search_options'
-        verbose_name = 'Opción de Sopa de Letras'
-        verbose_name_plural = 'Opciones de Sopa de Letras'
-        indexes = [
-            models.Index(fields=['activity', 'is_active']),
-        ]
-        ordering = ['activity', 'name']
+# ---------------------------------------------------------------------------
+# WordSearchOption
+# ---------------------------------------------------------------------------
+
+class WordSearchOption:
+    class DoesNotExist(ObjectDoesNotExist):
+        pass
+
+    class _Manager:
+        def filter(self, activity=None, activity_id=None, is_active=None):
+            aid = _id_of(activity) if activity is not None else activity_id
+            if aid is None:
+                raise ValueError('WordSearchOption.objects.filter() needs activity or activity_id')
+            items = wso_repo.list_word_search_options_for_activity(aid, active_only=is_active is True)
+            if is_active is False:
+                items = [i for i in items if not i['is_active']]
+            return _ListResult(WordSearchOption(i) for i in items)
+
+        def select_related(self, *_args, **_kwargs):
+            return self
+
+        def create(self, *, activity_id, name, words, grid=None, word_positions=None, seed=None, is_active=True):
+            return WordSearchOption(wso_repo.create_word_search_option(
+                activity_id=activity_id, name=name, words=words, grid=grid,
+                word_positions=word_positions, seed=seed, is_active=is_active,
+            ))
+
+    objects = _Manager()
+
+    def __init__(self, item):
+        self.id = item['id']
+        self.activity_id = item['activity_id']
+        self.name = item['name']
+        self.words = item.get('words')
+        self.grid = item.get('grid')
+        self.word_positions = item.get('word_positions')
+        self.seed = item.get('seed')
+        self.is_active = item.get('is_active', True)
+        self.created_at = item.get('created_at')
+        self.updated_at = item.get('updated_at')
+        self._activity = None
 
     def __str__(self):
-        return f"{self.name} ({self.activity.name})"
+        return f"{self.name} ({self.activity.name})" if self.activity else self.name
+
+    @property
+    def id_int(self):
+        # Legacy get_word_search_data() fallback-seed math assumed an
+        # integer pk; UUID4 ids aren't numeric, so hash down to an int.
+        return abs(hash(self.id)) % 1_000_000
+
+    @property
+    def activity(self):
+        if self._activity is None and self.activity_id:
+            item = activity_repo.get_activity(self.activity_id)
+            self._activity = Activity(item) if item else None
+        return self._activity
 
 
-class Minigame(models.Model):
-    """
-    Minijuego (sopa de letras, puzzle, etc.)
-    """
-    MINIGAME_TYPE_CHOICES = [
-        ('word_search', 'Sopa de Letras'),
-        ('puzzle', 'Puzzle'),
-        ('other', 'Otro'),
-    ]
+# ---------------------------------------------------------------------------
+# Minigame
+# ---------------------------------------------------------------------------
 
-    name = models.CharField(
-        max_length=100,
-        verbose_name='Nombre'
-    )
-    type = models.CharField(
-        max_length=20,
-        choices=MINIGAME_TYPE_CHOICES,
-        verbose_name='Tipo'
-    )
-    config = models.JSONField(
-        blank=True,
-        null=True,
-        verbose_name='Configuración'
-    )
-    is_active = models.BooleanField(
-        default=True,
-        verbose_name='Activo'
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+class Minigame:
+    class DoesNotExist(ObjectDoesNotExist):
+        pass
 
-    class Meta:
-        db_table = 'minigames'
-        verbose_name = 'Minijuego'
-        verbose_name_plural = 'Minijuegos'
-        indexes = [
-            models.Index(fields=['is_active']),
-        ]
+    class _Manager:
+        def get(self, id=None, pk=None):
+            item = minigame_repo.get_minigame(_id_of(id if id is not None else pk))
+            if item is None:
+                raise Minigame.DoesNotExist('Minigame does not exist')
+            return Minigame(item)
+
+        def filter(self, is_active=None):
+            items = minigame_repo.list_minigames(active_only=is_active is True)
+            if is_active is False:
+                items = [i for i in items if not i['is_active']]
+            return _ListResult(Minigame(i) for i in items)
+
+        def all(self):
+            return self.filter()
+
+        def create(self, **fields):
+            return Minigame(minigame_repo.create_minigame(**fields))
+
+    objects = _Manager()
+
+    MINIGAME_TYPE_CHOICES = [('word_search', 'Sopa de Letras'), ('puzzle', 'Puzzle'), ('other', 'Otro')]
+
+    def __init__(self, item):
+        self.id = item['id']
+        self.name = item['name']
+        self.type = item['type']
+        self.config = item.get('config')
+        self.is_active = item.get('is_active', True)
+        self.created_at = item.get('created_at')
+        self.updated_at = item.get('updated_at')
 
     def __str__(self):
-        return f"{self.name} ({self.get_type_display()})"
+        return self.name
+
+    def get_type_display(self):
+        return dict(self.MINIGAME_TYPE_CHOICES).get(self.type, self.type)
+
+    def save(self):
+        item = minigame_repo.update_minigame(self.id, {
+            'name': self.name, 'type': self.type, 'config': self.config, 'is_active': self.is_active,
+        })
+        self.updated_at = item['updated_at']
 
 
-class LearningObjective(models.Model):
-    """
-    Objetivo de aprendizaje (puede estar asociado a una etapa)
-    """
-    stage = models.ForeignKey(
-        Stage,
-        on_delete=models.SET_NULL,
-        blank=True,
-        null=True,
-        related_name='learning_objectives',
-        verbose_name='Etapa'
-    )
-    title = models.CharField(
-        max_length=200,
-        verbose_name='Título'
-    )
-    description = models.TextField(
-        blank=True,
-        null=True,
-        verbose_name='Descripción'
-    )
-    evaluation_criteria = models.TextField(
-        blank=True,
-        null=True,
-        verbose_name='Criterios de Evaluación'
-    )
-    pedagogical_recommendations = models.TextField(
-        blank=True,
-        null=True,
-        verbose_name='Recomendaciones Pedagógicas'
-    )
-    estimated_time = models.IntegerField(
-        blank=True,
-        null=True,
-        verbose_name='Tiempo Estimado (minutos)'
-    )
-    associated_resources = models.TextField(
-        blank=True,
-        null=True,
-        verbose_name='Recursos Asociados'
-    )
-    is_active = models.BooleanField(
-        default=True,
-        verbose_name='Activo'
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+# ---------------------------------------------------------------------------
+# LearningObjective
+# ---------------------------------------------------------------------------
 
-    class Meta:
-        db_table = 'learning_objectives'
-        verbose_name = 'Objetivo de Aprendizaje'
-        verbose_name_plural = 'Objetivos de Aprendizaje'
-        indexes = [
-            models.Index(fields=['stage']),
-            models.Index(fields=['is_active']),
-        ]
+class LearningObjective:
+    class DoesNotExist(ObjectDoesNotExist):
+        pass
+
+    class _Manager:
+        def get(self, id=None, pk=None):
+            item = lo_repo.get_learning_objective(_id_of(id if id is not None else pk))
+            if item is None:
+                raise LearningObjective.DoesNotExist('LearningObjective does not exist')
+            return LearningObjective(item)
+
+        def filter(self, stage=None, stage_id=None, is_active=None):
+            sid = _id_of(stage) if stage is not None else stage_id
+            if sid is not None:
+                items = lo_repo.list_learning_objectives_for_stage(sid, active_only=is_active is True)
+            else:
+                items = lo_repo.list_learning_objectives(active_only=is_active is True)
+            if is_active is False:
+                items = [i for i in items if not i['is_active']]
+            return _ListResult(LearningObjective(i) for i in items)
+
+        def all(self):
+            return self.filter()
+
+        def select_related(self, *_args, **_kwargs):
+            return self
+
+        def create(self, *, stage=None, **fields):
+            return LearningObjective(lo_repo.create_learning_objective(stage_id=_id_of(stage), **fields))
+
+    objects = _Manager()
+
+    def __init__(self, item):
+        self.id = item['id']
+        self.stage_id = item.get('stage_id')
+        self.title = item['title']
+        self.description = item.get('description')
+        self.evaluation_criteria = item.get('evaluation_criteria')
+        self.pedagogical_recommendations = item.get('pedagogical_recommendations')
+        self.estimated_time = item.get('estimated_time')
+        self.associated_resources = item.get('associated_resources')
+        self.is_active = item.get('is_active', True)
+        self.created_at = item.get('created_at')
+        self.updated_at = item.get('updated_at')
+        self._stage = None
 
     def __str__(self):
         return f"{self.title} - {self.stage.name if self.stage else 'General'}"
 
+    @property
+    def stage(self):
+        if self._stage is None and self.stage_id:
+            item = stage_repo.get_stage(self.stage_id)
+            self._stage = Stage(item) if item else None
+        return self._stage
 
-class AnagramWord(models.Model):
-    """
-    Palabras para el juego de Anagrama
-    """
-    word = models.CharField(
-        max_length=100,
-        verbose_name='Palabra'
-    )
-    scrambled_word = models.CharField(
-        max_length=100,
-        blank=True,
-        null=True,
-        verbose_name='Palabra Desordenada',
-        help_text='Se genera automáticamente al guardar'
-    )
-    is_active = models.BooleanField(
-        default=True,
-        verbose_name='Activa'
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    @stage.setter
+    def stage(self, value):
+        self._stage = value
+        self.stage_id = _id_of(value)
 
-    class Meta:
-        db_table = 'anagram_words'
-        verbose_name = 'Palabra de Anagrama'
-        verbose_name_plural = 'Palabras de Anagrama'
-        indexes = [
-            models.Index(fields=['is_active']),
-        ]
-        ordering = ['word']
+    @property
+    def stage_name(self):
+        return self.stage.name if self.stage else None
+
+    @property
+    def stage_number(self):
+        return self.stage.number if self.stage else None
+
+    def save(self):
+        item = lo_repo.update_learning_objective(self.id, {
+            'stage_id': self.stage_id, 'title': self.title, 'description': self.description,
+            'evaluation_criteria': self.evaluation_criteria,
+            'pedagogical_recommendations': self.pedagogical_recommendations,
+            'estimated_time': self.estimated_time, 'associated_resources': self.associated_resources,
+            'is_active': self.is_active,
+        })
+        self.updated_at = item['updated_at']
+
+
+# ---------------------------------------------------------------------------
+# AnagramWord
+# ---------------------------------------------------------------------------
+
+class AnagramWord:
+    class DoesNotExist(ObjectDoesNotExist):
+        pass
+
+    class _Manager:
+        def get(self, id=None, pk=None):
+            item = anagram_repo.get_anagram_word(_id_of(id if id is not None else pk))
+            if item is None:
+                raise AnagramWord.DoesNotExist('AnagramWord does not exist')
+            return AnagramWord(item)
+
+        def filter(self, is_active=None):
+            items = anagram_repo.list_anagram_words(active_only=is_active is True)
+            if is_active is False:
+                items = [i for i in items if not i['is_active']]
+            return _ListResult(AnagramWord(i) for i in items)
+
+        def all(self):
+            return self.filter()
+
+        def create(self, *, word, is_active=True):
+            return AnagramWord(anagram_repo.create_anagram_word(word=word, is_active=is_active))
+
+        def get_or_create(self, *, word, defaults=None):
+            for w in anagram_repo.list_anagram_words():
+                if w['word'] == word:
+                    return AnagramWord(w), False
+            fields = dict(defaults or {})
+            fields.setdefault('is_active', True)
+            return AnagramWord(anagram_repo.create_anagram_word(word=word, **fields)), True
+
+        def count(self):
+            return len(anagram_repo.list_anagram_words())
+
+    objects = _Manager()
+
+    def __init__(self, item):
+        self.id = item['id']
+        self.word = item['word']
+        self.scrambled_word = item.get('scrambled_word')
+        self.is_active = item.get('is_active', True)
+        self.created_at = item.get('created_at')
+        self.updated_at = item.get('updated_at')
 
     def __str__(self):
         return self.word
 
-    def save(self, *args, **kwargs):
-        # Auto-generar scrambled_word si no existe o si la palabra cambió
-        if not self.scrambled_word or (self.pk and self.word != self._get_original_word()):
-            self.scrambled_word = self._scramble_word(self.word)
-        super().save(*args, **kwargs)
-
-    def _get_original_word(self):
-        """Obtener la palabra original desde la BD"""
-        if self.pk:
-            try:
-                original = AnagramWord.objects.get(pk=self.pk)
-                return original.word
-            except AnagramWord.DoesNotExist:
-                pass
-        return None
-
-    @staticmethod
-    def _scramble_word(word):
-        """Desordenar palabra aleatoriamente"""
-        word_list = list(word.upper())
-        random.shuffle(word_list)
-        return ''.join(word_list)
+    def save(self):
+        item = anagram_repo.update_anagram_word(self.id, {'word': self.word, 'is_active': self.is_active})
+        self.scrambled_word = item['scrambled_word']
+        self.updated_at = item['updated_at']
 
 
-class ChaosQuestion(models.Model):
-    """
-    Preguntas del caos (Parte 2 de Presentación)
-    Cada estudiante presiona el botón y recibe una pregunta aleatoria
-    """
-    question = models.TextField(
-        verbose_name='Pregunta'
-    )
-    is_active = models.BooleanField(
-        default=True,
-        verbose_name='Activa'
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+# ---------------------------------------------------------------------------
+# ChaosQuestion
+# ---------------------------------------------------------------------------
 
-    class Meta:
-        db_table = 'chaos_questions'
-        verbose_name = 'Pregunta del Caos'
-        verbose_name_plural = 'Preguntas del Caos'
-        indexes = [
-            models.Index(fields=['is_active']),
-        ]
-        ordering = ['-created_at']
+class ChaosQuestion:
+    class DoesNotExist(ObjectDoesNotExist):
+        pass
+
+    class _Manager:
+        def get(self, id=None, pk=None):
+            item = chaos_repo.get_chaos_question(_id_of(id if id is not None else pk))
+            if item is None:
+                raise ChaosQuestion.DoesNotExist('ChaosQuestion does not exist')
+            return ChaosQuestion(item)
+
+        def filter(self, is_active=None, id__in=None):
+            items = chaos_repo.list_chaos_questions(active_only=is_active is True)
+            if is_active is False:
+                items = [i for i in items if not i['is_active']]
+            if id__in is not None:
+                wanted = {str(i) for i in id__in}
+                items = [i for i in items if i['id'] in wanted]
+            return _ListResult(ChaosQuestion(i) for i in items)
+
+        def all(self):
+            return self.filter()
+
+        def create(self, *, question, is_active=True):
+            return ChaosQuestion(chaos_repo.create_chaos_question(question=question, is_active=is_active))
+
+        def get_or_create(self, *, question, defaults=None):
+            for q in chaos_repo.list_chaos_questions():
+                if q['question'] == question:
+                    return ChaosQuestion(q), False
+            fields = dict(defaults or {})
+            fields.setdefault('is_active', True)
+            return ChaosQuestion(chaos_repo.create_chaos_question(question=question, **fields)), True
+
+        def count(self):
+            return len(chaos_repo.list_chaos_questions())
+
+    objects = _Manager()
+
+    def __init__(self, item):
+        self.id = item['id']
+        self.question = item['question']
+        self.is_active = item.get('is_active', True)
+        self.created_at = item.get('created_at')
+        self.updated_at = item.get('updated_at')
+
+    def __str__(self):
+        return self.question[:50] + '...' if len(self.question) > 50 else self.question
+
+    def save(self):
+        item = chaos_repo.update_chaos_question(self.id, {'question': self.question, 'is_active': self.is_active})
+        self.updated_at = item['updated_at']
+
+
+# ---------------------------------------------------------------------------
+# GeneralKnowledgeQuestion
+# ---------------------------------------------------------------------------
+
+class GeneralKnowledgeQuestion:
+    class DoesNotExist(ObjectDoesNotExist):
+        pass
+
+    class _Manager:
+        def get(self, id=None, pk=None):
+            item = gk_repo.get_general_knowledge_question(_id_of(id if id is not None else pk))
+            if item is None:
+                raise GeneralKnowledgeQuestion.DoesNotExist('GeneralKnowledgeQuestion does not exist')
+            return GeneralKnowledgeQuestion(item)
+
+        def filter(self, is_active=None):
+            items = gk_repo.list_general_knowledge_questions(active_only=is_active is True)
+            if is_active is False:
+                items = [i for i in items if not i['is_active']]
+            return _ListResult(GeneralKnowledgeQuestion(i) for i in items)
+
+        def all(self):
+            return self.filter()
+
+        def create(self, **fields):
+            return GeneralKnowledgeQuestion(gk_repo.create_general_knowledge_question(**fields))
+
+        def get_or_create(self, *, question, defaults=None):
+            for q in gk_repo.list_general_knowledge_questions():
+                if q['question'] == question:
+                    return GeneralKnowledgeQuestion(q), False
+            fields = dict(defaults or {})
+            return GeneralKnowledgeQuestion(gk_repo.create_general_knowledge_question(question=question, **fields)), True
+
+        def count(self):
+            return len(gk_repo.list_general_knowledge_questions())
+
+    objects = _Manager()
+
+    def __init__(self, item):
+        self.id = item['id']
+        self.question = item['question']
+        self.option_a = item['option_a']
+        self.option_b = item['option_b']
+        self.option_c = item['option_c']
+        self.option_d = item['option_d']
+        self.correct_answer = item['correct_answer']
+        self.is_active = item.get('is_active', True)
+        self.created_at = item.get('created_at')
+        self.updated_at = item.get('updated_at')
 
     def __str__(self):
         return self.question[:50] + '...' if len(self.question) > 50 else self.question
 
-
-class GeneralKnowledgeQuestion(models.Model):
-    """
-    Preguntas de conocimiento general (no emprendimiento)
-    Usadas en Parte 3 del minijuego y presentación
-    """
-    question = models.TextField(
-        verbose_name='Pregunta'
-    )
-    option_a = models.CharField(
-        max_length=255,
-        verbose_name='Opción A'
-    )
-    option_b = models.CharField(
-        max_length=255,
-        verbose_name='Opción B'
-    )
-    option_c = models.CharField(
-        max_length=255,
-        verbose_name='Opción C'
-    )
-    option_d = models.CharField(
-        max_length=255,
-        verbose_name='Opción D'
-    )
-    correct_answer = models.IntegerField(
-        choices=[(0, 'A'), (1, 'B'), (2, 'C'), (3, 'D')],
-        verbose_name='Respuesta Correcta'
-    )
-    is_active = models.BooleanField(
-        default=True,
-        verbose_name='Activa'
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = 'general_knowledge_questions'
-        verbose_name = 'Pregunta de Conocimiento General'
-        verbose_name_plural = 'Preguntas de Conocimiento General'
-        indexes = [
-            models.Index(fields=['is_active']),
-        ]
-        ordering = ['-created_at']
-
-    def __str__(self):
-        return self.question[:50] + '...' if len(self.question) > 50 else self.question
+    def save(self):
+        item = gk_repo.update_general_knowledge_question(self.id, {
+            'question': self.question, 'option_a': self.option_a, 'option_b': self.option_b,
+            'option_c': self.option_c, 'option_d': self.option_d, 'correct_answer': self.correct_answer,
+            'is_active': self.is_active,
+        })
+        self.updated_at = item['updated_at']

@@ -8,14 +8,13 @@ from botocore.exceptions import ClientError
 from boto3.dynamodb.conditions import Attr, Key
 from boto3.dynamodb.types import TypeSerializer
 
-from .client import build_update_expression, get_table, now_iso
+from .client import build_update_expression, get_client, get_table, now_iso
 from .keys import metadata_sk, student_email_gsi2pk, student_pk
 
 
 def create_student(*, full_name, email, rut):
     """Creates a Student item. Raises ValueError if the email is already
     taken (enforced via transactional write with email-reservation item)."""
-    table = get_table()
     student_id = str(uuid.uuid4())
     now = now_iso()
     item = {
@@ -41,7 +40,7 @@ def create_student(*, full_name, email, rut):
     }
 
     # Write both items transactionally using low-level client API
-    dynamodb = boto3.client('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
+    dynamodb = get_client()
     table_name = os.environ['USERS_TABLE']
     serializer = TypeSerializer()
 
@@ -99,10 +98,10 @@ def get_students_by_ids(student_ids):
     unique_ids = list({sid for sid in student_ids if sid})
     if not unique_ids:
         return {}
-    dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
+    table = get_table()
     table_name = os.environ['USERS_TABLE']
     keys = [{'PK': student_pk(sid), 'SK': metadata_sk()} for sid in unique_ids]
-    resp = dynamodb.batch_get_item(RequestItems={table_name: {'Keys': keys}})
+    resp = table.meta.client.batch_get_item(RequestItems={table_name: {'Keys': keys}})
     items = resp['Responses'].get(table_name, [])
     # Filter out reservation items (only return Student type)
     return {item['id']: item for item in items if item.get('type') == 'Student'}

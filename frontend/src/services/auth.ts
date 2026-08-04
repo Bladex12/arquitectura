@@ -37,11 +37,6 @@ export const authAPI = {
     return response.data;
   },
   
-  verifyToken: async (token: string) => {
-    const response = await api.post('/auth/token/verify/', { token });
-    return response.data;
-  },
-
   getStats: async () => {
     const response = await api.get('/auth/professors/stats/');
     return response.data;

@@ -13,21 +13,5 @@ export const academicAPI = {
     return unwrapResults(response.data);
   },
 
-  getCourses: async (careerId: string) => {
-    const response = await api.get('/academic/courses/', {
-      params: { career: careerId },
-    });
-    return unwrapResults(response.data);
-  },
-
-  getCourseById: async (courseId: number | string) => {
-    const response = await api.get(`/academic/courses/${courseId}/`);
-    return response.data;
-  },
-
-  getCareerById: async (careerId: number | string) => {
-    const response = await api.get(`/academic/careers/${careerId}/`);
-    return response.data;
-  },
 };
 

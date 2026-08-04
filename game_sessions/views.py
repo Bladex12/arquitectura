@@ -24,6 +24,27 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 logger = logging.getLogger(__name__)
+
+
+def _find_activity_by_stage_number_and_type_name(stage_number, type_name_substring):
+    """Finds the first active Activity in the Stage with the given number
+    whose ActivityType.name contains type_name_substring (case-insensitive).
+    Python-side lookup replacing the old ORM's stage__number=/
+    activity_type__name__icontains= double-underscore traversal -- Stage/
+    Activity/ActivityType are DynamoDB-backed shims now (challenges/models.py),
+    not real FKs a queryset can join across."""
+    from challenges.models import Stage, Activity
+    try:
+        stage = Stage.objects.get(number=stage_number)
+    except Stage.DoesNotExist:
+        return None
+    needle = type_name_substring.lower()
+    for activity in Activity.objects.filter(stage=stage, is_active=True):
+        if activity.activity_type and needle in (activity.activity_type.name or '').lower():
+            return activity
+    return None
+
+
 from users.models import Professor, Student
 from .serializers import (
     GameSessionSerializer, GameSessionCreateSerializer, annotate_game_session_display_fields,
@@ -1051,54 +1072,45 @@ class GameSessionViewSet(viewsets.ViewSet):
             )
 
         from challenges.models import Stage, Activity
-        from django.db.models import Q
 
         current_stage = Stage.objects.get(id=current_stage_id)
         current_activity = Activity.objects.get(id=current_activity_id)
 
         # Buscar la siguiente actividad en la misma etapa
+        # (Python-side filtering, not ORM __ lookups/Q objects -- Activity is
+        # a DynamoDB-backed shim now, see challenges/models.py.)
         current_order = current_activity.order_number
+        activities_in_stage = sorted(
+            Activity.objects.filter(stage=current_stage, is_active=True),
+            key=lambda a: a.order_number,
+        )
+        activities_after_current = [a for a in activities_in_stage if a.order_number > current_order]
 
         # En Etapa 2: Si estamos en "Seleccionar Tema" (orden 1), saltar "Ver Desafío" (orden 2)
         # y ir directo a "Bubble Map"
         if current_stage.number == 2 and current_order == 1:
             # Buscar Bubble Map por nombre (más robusto que asumir orden 3)
-            bubble_map_activity = Activity.objects.filter(
-                stage=current_stage,
-                is_active=True
-            ).filter(
-                Q(name__icontains='bubble') |
-                Q(name__icontains='mapa') |
-                Q(name__icontains='mapa mental') |
-                Q(name__icontains='bubblemap')
-            ).filter(
-                order_number__gt=current_order
-            ).order_by('order_number').first()
+            bubble_map_keywords = ('bubble', 'mapa', 'mapa mental', 'bubblemap')
+            bubble_map_activity = next(
+                (
+                    a for a in activities_after_current
+                    if any(kw in (a.name or '').lower() for kw in bubble_map_keywords)
+                ),
+                None,
+            )
 
             if bubble_map_activity:
                 next_activity = bubble_map_activity
             else:
                 # Si no se encuentra por nombre, intentar orden 3
-                next_activity = Activity.objects.filter(
-                    stage=current_stage,
-                    order_number=3,
-                    is_active=True
-                ).first()
+                next_activity = next((a for a in activities_in_stage if a.order_number == 3), None)
 
                 # Si tampoco existe orden 3, buscar la siguiente actividad normalmente
                 if not next_activity:
-                    next_activity = Activity.objects.filter(
-                        stage=current_stage,
-                        order_number__gt=current_order,
-                        is_active=True
-                    ).order_by('order_number').first()
+                    next_activity = activities_after_current[0] if activities_after_current else None
         else:
             # Para otras etapas o situaciones, buscar la siguiente actividad normalmente
-            next_activity = Activity.objects.filter(
-                stage=current_stage,
-                order_number__gt=current_order,
-                is_active=True
-            ).order_by('order_number').first()
+            next_activity = activities_after_current[0] if activities_after_current else None
 
         # Si no hay más actividades en esta etapa, marcar etapa como completada y retornar resultados
         if not next_activity:
@@ -1200,51 +1212,61 @@ class GameSessionViewSet(viewsets.ViewSet):
             stage_1.save(update_fields=['is_active'])
 
         # Buscar la actividad de Personalización usando cuatro estrategias en orden de fiabilidad.
+        # (Python-side filtering, not ORM __ lookups/Q objects -- Activity is a
+        # DynamoDB-backed shim now, see challenges/models.py; activity_type is
+        # a lazily-resolved property on it, not a real FK a queryset can join.)
+        active_stage_1_activities = sorted(
+            Activity.objects.filter(stage=stage_1, is_active=True),
+            key=lambda a: a.order_number,
+        )
+
+        def _activity_type_code(activity):
+            return activity.activity_type.code if activity.activity_type else None
 
         # Estrategia 1: por código de ActivityType ('personalizacion').
         #   ASCII puro → inmune a colaciones de BD o encoding con la 'ó' de 'Personalización'.
-        first_activity = Activity.objects.filter(
-            stage=stage_1,
-            is_active=True,
-            activity_type__code='personalizacion'
-        ).order_by('order_number').first()
+        first_activity = next(
+            (a for a in active_stage_1_activities if _activity_type_code(a) == 'personalizacion'),
+            None,
+        )
 
         # Estrategia 2: excluir actividades pre-etapa por código de ActivityType.
-        #   Usa Q objects con OR explícito para NULL-safety: un ActivityType con code=NULL
-        #   (registros previos al campo 'code') NO es pre-etapa y sí debe incluirse.
+        #   Un ActivityType con code=None (registros previos al campo 'code') NO es pre-etapa y sí debe incluirse.
         if not first_activity:
-            first_activity = Activity.objects.filter(
-                stage=stage_1,
-                is_active=True,
-            ).filter(
-                Q(activity_type__code__isnull=True) |
-                ~Q(activity_type__code__in=['instructivo', 'video_institucional'])
-            ).exclude(
-                name__icontains='Instructivo'
-            ).exclude(
-                name__icontains='Video'
-            ).order_by('order_number').first()
+            first_activity = next(
+                (
+                    a for a in active_stage_1_activities
+                    if _activity_type_code(a) not in ('instructivo', 'video_institucional')
+                    and 'instructivo' not in (a.name or '').lower()
+                    and 'video' not in (a.name or '').lower()
+                ),
+                None,
+            )
 
         # Estrategia 3 (último recurso): excluir solo por nombre.
         #   Nunca selecciona Instructivo/Video para evitar el estado inconsistente
         #   current_stage_number=1 + current_activity_name="Instructivo".
         if not first_activity:
-            first_activity = Activity.objects.filter(
-                stage=stage_1,
-                is_active=True
-            ).exclude(
-                name__icontains='Instructivo'
-            ).exclude(
-                name__icontains='Video'
-            ).order_by('order_number').first()
+            first_activity = next(
+                (
+                    a for a in active_stage_1_activities
+                    if 'instructivo' not in (a.name or '').lower()
+                    and 'video' not in (a.name or '').lower()
+                ),
+                None,
+            )
 
         # Estrategia 4 (self-healing): si los seeders create_initial_data no fueron ejecutados,
         #   Stage 1 puede existir sin ninguna actividad de Personalización.
         #   En ese caso, la creamos automáticamente para que el juego pueda continuar.
         if not first_activity:
-            all_acts = list(Activity.objects.filter(stage=stage_1).values(
-                'id', 'name', 'order_number', 'is_active', 'activity_type__code'
-            ))
+            all_acts = [
+                {
+                    'id': a.id, 'name': a.name, 'order_number': a.order_number,
+                    'is_active': a.is_active, 'activity_type__code': _activity_type_code(a),
+                }
+                for a in Activity.objects.filter(stage=stage_1)
+            ]
             logger.warning(f'[start_stage_1] ⚠️ Ninguna estrategia encontró Personalización. '
                            f'Actividades en Stage {stage_1.id}: {all_acts}')
             logger.info(f'[start_stage_1] ⚙️ Auto-creando ActivityType + Activity "Personalización"...')
@@ -1806,7 +1828,6 @@ class GameSessionViewSet(viewsets.ViewSet):
         from challenges.models import Stage, Activity
 
         try:
-            stage_id = int(stage_id)
             stage = Stage.objects.get(id=stage_id)
         except (ValueError, TypeError, Stage.DoesNotExist):
             return Response(
@@ -2318,7 +2339,7 @@ class GameSessionViewSet(viewsets.ViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        from challenges.models import Stage
+        from challenges.models import Stage, Activity
         from challenges.serializers import ActivitySerializer
 
         try:
@@ -2329,7 +2350,7 @@ class GameSessionViewSet(viewsets.ViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        actividades = etapa.activities.filter(is_active=True).order_by('order_number')
+        actividades = Activity.objects.filter(stage=etapa, is_active=True)
         serializer = ActivitySerializer(actividades, many=True)
 
         return Response({
@@ -2785,13 +2806,7 @@ class SessionStageViewSet(viewsets.ViewSet):
             return None, Response(
                 {'error': 'Se requiere game_session'}, status=status.HTTP_400_BAD_REQUEST
             )
-        try:
-            stage_id = int(pk)
-        except (TypeError, ValueError):
-            return None, Response(
-                {'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND
-            )
-        session_stage = get_session_stage(room_code, stage_id)
+        session_stage = get_session_stage(room_code, pk)
         if session_stage is None:
             return None, Response(
                 {'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND
@@ -3114,10 +3129,7 @@ class SessionStageViewSet(viewsets.ViewSet):
 
         # Obtener la actividad de presentación del pitch
         try:
-            presentation_activity = Activity.objects.filter(
-                stage__number=4,
-                activity_type__name__icontains='presentación'
-            ).first()
+            presentation_activity = _find_activity_by_stage_number_and_type_name(4, 'presentación')
 
             if presentation_activity and presentation_order:
                 # Verificar qué equipos ya completaron su presentación
@@ -3144,16 +3156,10 @@ class SessionStageViewSet(viewsets.ViewSet):
         if current_team_id:
             try:
                 # Obtener actividad de prototipo (Etapa 3)
-                prototype_activity = Activity.objects.filter(
-                    stage__number=3,
-                    activity_type__name__icontains='prototipo'
-                ).first()
+                prototype_activity = _find_activity_by_stage_number_and_type_name(3, 'prototipo')
 
                 # Obtener actividad de formulario pitch (Etapa 4)
-                pitch_activity = Activity.objects.filter(
-                    stage__number=4,
-                    activity_type__name__icontains='formulario'
-                ).first()
+                pitch_activity = _find_activity_by_stage_number_and_type_name(4, 'formulario')
 
                 # Obtener prototipo
                 if prototype_activity:
@@ -3508,11 +3514,7 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         activity_id), or None if pk doesn't match that shape."""
         if not pk or ':' not in pk:
             return None
-        team_id, _, activity_id_str = pk.rpartition(':')
-        try:
-            activity_id = int(activity_id_str)
-        except ValueError:
-            return None
+        team_id, _, activity_id = pk.rpartition(':')
         return team_id, activity_id
 
     def _existing_fields(self, existing):
@@ -3570,12 +3572,8 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         activity_id = request.query_params.get('activity')
         session_stage_id = request.query_params.get('session_stage')
 
-        activity_id_int = None
-        if activity_id not in (None, ''):
-            try:
-                activity_id_int = int(activity_id)
-            except (TypeError, ValueError):
-                return Response([])
+        if activity_id in (None, ''):
+            activity_id = None
 
         if team_id:
             team = self._resolve_team(request, team_id)
@@ -3583,24 +3581,17 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
                 return Response([])
             progress_items = list_progress_for_team(team['room_code'], team_id)
         else:
-            progress_items = scan_all_progress(activity_id=activity_id_int)
+            progress_items = scan_all_progress(activity_id=activity_id)
 
-        if activity_id_int is not None:
-            progress_items = [p for p in progress_items if p['activity_id'] == activity_id_int]
+        if activity_id is not None:
+            progress_items = [p for p in progress_items if p['activity_id'] == activity_id]
 
         if session_stage_id not in (None, ''):
-            try:
-                stage_id_int = int(session_stage_id)
-            except (TypeError, ValueError):
-                stage_id_int = None
-            if stage_id_int is None:
-                progress_items = []
-            else:
-                from challenges.models import Activity
-                activity_ids_in_stage = set(
-                    Activity.objects.filter(stage_id=stage_id_int).values_list('id', flat=True)
-                )
-                progress_items = [p for p in progress_items if p['activity_id'] in activity_ids_in_stage]
+            from challenges.models import Activity
+            activity_ids_in_stage = set(
+                Activity.objects.filter(stage_id=session_stage_id).values_list('id', flat=True)
+            )
+            progress_items = [p for p in progress_items if p['activity_id'] in activity_ids_in_stage]
 
         team_cache = {}
         for item in progress_items:
@@ -3654,15 +3645,10 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         room_code = team['room_code']
 
         try:
-            activity_id = int(activity_id)
             activity = Activity.objects.get(id=activity_id)
         except (Activity.DoesNotExist, ValueError, TypeError):
             return Response({'error': 'Actividad no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
-        try:
-            session_stage_id = int(session_stage_id)
-        except (ValueError, TypeError):
-            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
         if get_session_stage(room_code, session_stage_id) is None:
             return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -3825,15 +3811,10 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         room_code = team['room_code']
 
         try:
-            activity_id = int(activity_id)
             activity = Activity.objects.get(id=activity_id)
         except (Activity.DoesNotExist, ValueError, TypeError):
             return Response({'error': 'Actividad no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
-        try:
-            session_stage_id = int(session_stage_id)
-        except (ValueError, TypeError):
-            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
         if get_session_stage(room_code, session_stage_id) is None:
             return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -4137,15 +4118,10 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         room_code = team['room_code']
 
         try:
-            activity_id = int(activity_id)
             activity = Activity.objects.get(id=activity_id)
         except (Activity.DoesNotExist, ValueError, TypeError):
             return Response({'error': 'Actividad no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
-        try:
-            session_stage_id = int(session_stage_id)
-        except (ValueError, TypeError):
-            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
         if get_session_stage(room_code, session_stage_id) is None:
             return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -4348,15 +4324,10 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         room_code = team['room_code']
 
         try:
-            activity_id = int(activity_id)
             activity = Activity.objects.get(id=activity_id)
         except (Activity.DoesNotExist, ValueError, TypeError):
             return Response({'error': 'Actividad no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
-        try:
-            session_stage_id = int(session_stage_id)
-        except (ValueError, TypeError):
-            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
         if get_session_stage(room_code, session_stage_id) is None:
             return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -4523,15 +4494,10 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         room_code = team['room_code']
 
         try:
-            activity_id = int(activity_id)
             activity = Activity.objects.get(id=activity_id)
         except (Activity.DoesNotExist, ValueError, TypeError):
             return Response({'error': 'Actividad no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
-        try:
-            session_stage_id = int(session_stage_id)
-        except (ValueError, TypeError):
-            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
         if get_session_stage(room_code, session_stage_id) is None:
             return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -4598,15 +4564,10 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         room_code = team['room_code']
 
         try:
-            activity_id = int(activity_id)
             activity = Activity.objects.get(id=activity_id)
         except (Activity.DoesNotExist, ValueError, TypeError):
             return Response({'error': 'Actividad no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
-        try:
-            session_stage_id = int(session_stage_id)
-        except (ValueError, TypeError):
-            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
         if get_session_stage(room_code, session_stage_id) is None:
             return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -4657,16 +4618,14 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
                 buffer.seek(0)
 
                 # Si ya había una imagen, eliminar la anterior
-                if challenge.persona_image:
-                    old_path = challenge.persona_image.path
-                    if os.path.exists(old_path):
-                        os.remove(old_path)
+                if challenge.persona_image and default_storage.exists(challenge.persona_image):
+                    default_storage.delete(challenge.persona_image)
 
                 # Guardar la nueva imagen
                 import uuid
                 file_extension = 'jpg'
                 filename = f'personas/{challenge.id}_{uuid.uuid4().hex[:8]}.{file_extension}'
-                challenge.persona_image.save(filename, ContentFile(buffer.read()), save=False)
+                challenge.persona_image = default_storage.save(filename, ContentFile(buffer.read()))
                 challenge.save()
 
             except Exception as img_error:
@@ -4775,15 +4734,10 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         room_code = team['room_code']
 
         try:
-            activity_id = int(activity_id)
             activity = Activity.objects.get(id=activity_id)
         except (Activity.DoesNotExist, ValueError, TypeError):
             return Response({'error': 'Actividad no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
-        try:
-            session_stage_id = int(session_stage_id)
-        except (ValueError, TypeError):
-            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
         if get_session_stage(room_code, session_stage_id) is None:
             return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -4911,15 +4865,10 @@ class TeamActivityProgressViewSet(viewsets.ViewSet):
         room_code = team['room_code']
 
         try:
-            activity_id = int(activity_id)
             activity = Activity.objects.get(id=activity_id)
         except (Activity.DoesNotExist, ValueError, TypeError):
             return Response({'error': 'Actividad no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
-        try:
-            session_stage_id = int(session_stage_id)
-        except (ValueError, TypeError):
-            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
         if get_session_stage(room_code, session_stage_id) is None:
             return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -5479,11 +5428,7 @@ class TeamRouletteAssignmentViewSet(viewsets.ViewSet):
         or None if pk doesn't match that shape."""
         if not pk or ':' not in pk:
             return None
-        team_id, _, stage_id_str = pk.rpartition(':')
-        try:
-            stage_id = int(stage_id_str)
-        except ValueError:
-            return None
+        team_id, _, stage_id = pk.rpartition(':')
         return team_id, stage_id
 
     def list(self, request):
@@ -5553,16 +5498,11 @@ class TeamRouletteAssignmentViewSet(viewsets.ViewSet):
             return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
         room_code = team['room_code']
 
-        try:
-            session_stage_id = int(session_stage_id)
-        except (TypeError, ValueError):
-            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
         if get_session_stage(room_code, session_stage_id) is None:
             return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
         from challenges.models import RouletteChallenge
         try:
-            roulette_challenge_id = int(roulette_challenge_id)
             RouletteChallenge.objects.get(id=roulette_challenge_id)
         except (RouletteChallenge.DoesNotExist, TypeError, ValueError):
             return Response({'error': 'Reto de ruleta no encontrado'}, status=status.HTTP_404_NOT_FOUND)
@@ -5747,11 +5687,7 @@ class TokenTransactionViewSet(viewsets.ViewSet):
             items = [i for i in items if i['team_id'] == team_id]
 
         if session_stage_id not in (None, ''):
-            try:
-                stage_id_int = int(session_stage_id)
-            except (TypeError, ValueError):
-                stage_id_int = None
-            items = [i for i in items if i.get('session_stage_id') == stage_id_int]
+            items = [i for i in items if i.get('session_stage_id') == session_stage_id]
 
         if source_type:
             items = [i for i in items if i['source_type'] == source_type]
@@ -5974,9 +5910,7 @@ class PeerEvaluationViewSet(viewsets.ViewSet):
             if not session_stage or not session_stage.get('presentation_order'):
                 return
 
-            presentation_activity = Activity.objects.filter(
-                stage__number=4, activity_type__name__icontains='presentación'
-            ).first()
+            presentation_activity = _find_activity_by_stage_number_and_type_name(4, 'presentación')
             if not presentation_activity:
                 return
 
@@ -6487,11 +6421,7 @@ class TeamBubbleMapViewSet(viewsets.ViewSet):
         or None if pk doesn't match that shape."""
         if not pk or ':' not in pk:
             return None
-        team_id, _, stage_id_str = pk.rpartition(':')
-        try:
-            stage_id = int(stage_id_str)
-        except ValueError:
-            return None
+        team_id, _, stage_id = pk.rpartition(':')
         return team_id, stage_id
 
     def list(self, request):
@@ -6510,11 +6440,7 @@ class TeamBubbleMapViewSet(viewsets.ViewSet):
             items = []
 
         if session_stage_id:
-            try:
-                session_stage_id_int = int(session_stage_id)
-            except (TypeError, ValueError):
-                session_stage_id_int = None
-            items = [i for i in items if i['stage_id'] == session_stage_id_int]
+            items = [i for i in items if i['stage_id'] == session_stage_id]
 
         team_cache = {}
         for item in items:
@@ -6562,10 +6488,6 @@ class TeamBubbleMapViewSet(viewsets.ViewSet):
             return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
         room_code = team['room_code']
 
-        try:
-            session_stage_id = int(session_stage_id)
-        except (TypeError, ValueError):
-            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
         if get_session_stage(room_code, session_stage_id) is None:
             return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -6641,10 +6563,6 @@ class TeamBubbleMapViewSet(viewsets.ViewSet):
             return Response({'error': 'Equipo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
         room_code = team['room_code']
 
-        try:
-            session_stage_id = int(session_stage_id)
-        except (TypeError, ValueError):
-            return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
         if get_session_stage(room_code, session_stage_id) is None:
             return Response({'error': 'Etapa de sesión no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 

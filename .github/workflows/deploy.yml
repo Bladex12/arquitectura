@@ -1,0 +1,113 @@
+name: Deploy
+
+# Runs the test suite on every push to main, then (if tests pass) builds
+# and deploys the SAM stack. Also runnable by hand from the Actions tab
+# (workflow_dispatch) -- useful right after refreshing the AWS Academy
+# Learner Lab credentials below, since those go stale on their own and a
+# push-triggered run won't wait for you to do that.
+#
+# IMPORTANT -- AWS Academy Learner Lab credentials expire (session-based,
+# a few hours per lab session). This workflow can't refresh them itself;
+# nothing running outside the Learner Lab portal's browser session can.
+# When AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_SESSION_TOKEN go stale,
+# every deploy fails at the "Configure AWS credentials" step until a human
+# starts a new lab session and updates the three secrets below. "Deploys
+# automatically on every commit" is true only within a given lab session's
+# lifetime, not indefinitely unattended -- that's a hard constraint of this
+# AWS account type, not something this workflow can work around.
+#
+# Required repo secrets (Settings -> Secrets and variables -> Actions):
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN
+#     -- from the Learner Lab's "AWS Details" -> "AWS CLI" credentials
+#        block; copy fresh ones in every time you start a new lab session.
+#   LAB_ROLE_ARN
+#     -- the Lab's execution role ARN (arn:aws:iam::<account>:role/LabRole)
+#        shown on the same "AWS Details" page. Usually stable across
+#        sessions within the same course/account, but re-check if deploys
+#        start failing on the changeset step specifically (not the
+#        credentials step) after a lab reset.
+#   DJANGO_SECRET_KEY
+#     -- Django's prod SECRET_KEY. Generate once, keep stable across
+#        deploys (rotating it invalidates any live JWTs).
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Full suite, whole repo. Was scoped to academic/challenges/
+      # admin_dashboard/users while game_sessions/test_*.py had ~147
+      # failures from shim methods (Q()/double-underscore lookups,
+      # IntegerField-typed ids, int() casts) not supporting the ORM
+      # patterns those tests used, post RDS->DynamoDB migration. Fixed
+      # 2026-08-04; 680/680 passing across the whole repo.
+      - name: Run tests
+        env:
+          DJANGO_SETTINGS_MODULE: mision_emprende_backend.settings
+        run: python -m pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Configure AWS credentials (Learner Lab session)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - uses: aws-actions/setup-sam@v2
+
+      - name: sam build
+        run: sam build
+
+      # samconfig.toml is gitignored (it held plaintext secrets locally),
+      # so every parameter template.yaml declares must be supplied here
+      # explicitly. LAB_ROLE_ARN/DJANGO_SECRET_KEY come in as step env vars
+      # (not interpolated directly into the command string) specifically so
+      # the shell never re-parses `$`/`%` characters that may appear inside
+      # either secret's value.
+      - name: sam deploy
+        env:
+          LAB_ROLE_ARN: ${{ secrets.LAB_ROLE_ARN }}
+          DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
+        run: |
+          sam deploy \
+            --stack-name mision-emprende \
+            --region us-east-1 \
+            --capabilities CAPABILITY_IAM \
+            --resolve-s3 \
+            --resolve-image-repos \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides LabRoleArn="$LAB_ROLE_ARN" DjangoSecretKey="$DJANGO_SECRET_KEY"

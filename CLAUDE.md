@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Misión Emprende** is an educational game platform for UDD (Universidad del Desarrollo) students. Professors create game sessions where student teams progress through 4 entrepreneurship stages (Trabajo en equipo, Empatía, Creatividad, Comunicación). Students join via tablets using a room code/QR. The system uses real-time WebSocket communication managed by Django Channels + Redis.
+**Misión Emprende** is an educational game platform for UDD (Universidad del Desarrollo) students. Professors create game sessions where student teams progress through 4 entrepreneurship stages (Trabajo en equipo, Empatía, Creatividad, Comunicación). Students join via tablets using a room code/QR. The system is fully serverless: Django REST API on Lambda (via Lambda Web Adapter), real-time WebSocket layer on API Gateway + Lambda, DynamoDB for all persistence. No relational database, no Redis.
 
 ## Running the Project
 
@@ -24,24 +24,13 @@ docker-compose down
 ### Required `.env` file (root)
 
 ```
-DATABASE_HOST=host.docker.internal
-DATABASE_PORT=3306
-DATABASE_NAME=mision_emprende2
-DATABASE_USER=root
-DATABASE_PASSWORD=1234
 SECRET_KEY=tu-secret-key-aqui
 DEBUG=True
 ALLOWED_HOSTS=localhost,127.0.0.1
-REDIS_HOST=redis
-REDIS_PORT=6379
 CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
 ```
 
-### Import database dump
-
-```bash
-mysql -u root -p mision_emprende2 < "Dump20251203 (1).sql"
-```
+`docker-compose.yml` also starts a `dynamodb-local` container and points the backend at it (`DYNAMODB_ENDPOINT_URL`, `USERS_TABLE`/`GAME_SESSIONS_TABLE`/`CONTENT_TABLE`) — no AWS account needed for local dev. Django's own `auth`/`sessions`/`contenttypes` apps use a local SQLite file (`db.sqlite3`, gitignored) purely to satisfy Django's migration framework; nothing in the app's request path reads from it.
 
 ### Seed game data
 
@@ -93,7 +82,7 @@ Django apps:
 
 **Authentication:** JWT Bearer tokens. Tablet routes explicitly skip auth in `api.ts` interceptor — tablet endpoints use `AllowAny` permissions.
 
-**Real-time:** Django Channels + Redis channel layers. WebSocket routes defined in `mision_emprende_backend/routing.py` (currently empty — consumers are set up per feature).
+**Real-time:** Not Django Channels — a separate WebSocket API (API Gateway + Lambda, `lambda/ws-connect`/`ws-disconnect`/`ws-default`/`broadcast`, DynamoDB `ConnectionsTable`) defined in `template.yaml`, independent of the Django REST API.
 
 **Game content seeding:** Use management commands in `challenges/management/commands/` for initial data.
 

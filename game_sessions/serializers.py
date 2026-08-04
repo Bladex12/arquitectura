@@ -20,9 +20,13 @@ task brief explicitly carves out as unchanged nested-lookup patterns.
 Identifier-type note: every synthetic auto-increment `id` the ORM used to
 hand out is gone. Where the DynamoDB item carries its own natural
 identifying attribute (room_code, team_id, stage_id, tablet_code,
-team_session_token), `id` is sourced from that attribute with the matching
-field type (CharField for UUID/code-like strings, IntegerField for real
-challenges-app ints like stage_id). Where an item has no such attribute
+team_session_token), `id` is sourced from that attribute via CharField --
+challenges/academic ids are opaque strings now too (backfilled rows keep
+their old MySQL integer as a stringified id; anything created after the
+2026-08-03/04 DynamoDB cutover gets a fresh UUID4), not the real ints the
+ORM handed out, so nothing content-app-id-shaped may be an IntegerField
+anymore, even though it always looks numeric in dev data seeded before
+that cutover. Where an item has no such attribute
 (TeamActivityProgress, TeamRouletteAssignment, TokenTransaction,
 TeamBubbleMap, PeerEvaluation, ReflectionEvaluation -- all addressed by a
 composite natural key or an append-only ledger key), `id` is sourced from
@@ -46,17 +50,17 @@ class GameSessionSerializer(serializers.Serializer):
     # users-app ids are DynamoDB UUID4 strings now, not ORM integer pks.
     professor = serializers.CharField(source='professor_id')
     professor_name = serializers.CharField(read_only=True, default=None, allow_null=True)
-    course = serializers.IntegerField(source='course_id')
+    course = serializers.CharField(source='course_id')
     course_name = serializers.CharField(read_only=True, default=None, allow_null=True)
     room_code = serializers.CharField()
     qr_code = serializers.CharField(allow_null=True, required=False)
     status = serializers.CharField()
     started_at = serializers.DateTimeField(allow_null=True, required=False)
     ended_at = serializers.DateTimeField(allow_null=True, required=False)
-    current_stage = serializers.IntegerField(source='current_stage_id', allow_null=True, required=False)
+    current_stage = serializers.CharField(source='current_stage_id', allow_null=True, required=False)
     current_stage_name = serializers.CharField(read_only=True, default=None, allow_null=True)
     current_stage_number = serializers.IntegerField(read_only=True, default=None, allow_null=True)
-    current_activity = serializers.IntegerField(source='current_activity_id', allow_null=True, required=False)
+    current_activity = serializers.CharField(source='current_activity_id', allow_null=True, required=False)
     current_activity_name = serializers.CharField(read_only=True, default=None, allow_null=True)
     current_session_stage = serializers.SerializerMethodField()
     cancellation_reason = serializers.CharField(allow_null=True, required=False)
@@ -134,7 +138,7 @@ class GameSessionCreateSerializer(serializers.Serializer):
     creation payload before calling game_sessions.dynamodb.game_session.create_session
     (which enforces room_code uniqueness itself via a ConditionExpression)."""
     professor = serializers.CharField()  # users-app id: UUID4 string, not an int pk
-    course = serializers.IntegerField()
+    course = serializers.CharField()
     room_code = serializers.CharField()
 
 
@@ -216,10 +220,10 @@ class TeamPersonalizationSerializer(serializers.Serializer):
 class SessionStageSerializer(serializers.Serializer):
     """Serializes a SessionStage dict from game_sessions.dynamodb.stage_progress.
     Expects display fields already attached via annotate_session_stage_display_fields()."""
-    id = serializers.IntegerField(source='stage_id')  # stage_id IS the id now
+    id = serializers.CharField(source='stage_id')  # stage_id IS the id now
     game_session = serializers.CharField(source='room_code')
     game_session_room_code = serializers.CharField(source='room_code', read_only=True)
-    stage = serializers.IntegerField(source='stage_id')
+    stage = serializers.CharField(source='stage_id')
     stage_name = serializers.CharField(read_only=True, default=None, allow_null=True)
     stage_number = serializers.IntegerField(read_only=True, default=None, allow_null=True)
     status = serializers.CharField()
@@ -286,9 +290,9 @@ class TeamActivityProgressSerializer(serializers.Serializer):
 
     team = serializers.CharField(source='team_id')
     team_name = serializers.CharField(read_only=True, default=None, allow_null=True)
-    session_stage = serializers.IntegerField(read_only=True, default=None, allow_null=True)
+    session_stage = serializers.CharField(read_only=True, default=None, allow_null=True)
     stage_name = serializers.CharField(read_only=True, default=None, allow_null=True)
-    activity = serializers.IntegerField(source='activity_id')
+    activity = serializers.CharField(source='activity_id')
     activity_name = serializers.CharField(read_only=True, default=None, allow_null=True)
     status = serializers.CharField()
     started_at = serializers.DateTimeField(allow_null=True, required=False)
@@ -468,8 +472,8 @@ class TeamRouletteAssignmentSerializer(serializers.Serializer):
 
     team = serializers.CharField(source='team_id')
     team_name = serializers.CharField(read_only=True, default=None, allow_null=True)
-    session_stage = serializers.IntegerField(source='stage_id')
-    roulette_challenge = serializers.IntegerField(source='roulette_challenge_id')
+    session_stage = serializers.CharField(source='stage_id')
+    roulette_challenge = serializers.CharField(source='roulette_challenge_id')
     challenge_description = serializers.CharField(read_only=True, default=None, allow_null=True)
     challenge_type = serializers.CharField(read_only=True, default=None, allow_null=True)
     status = serializers.CharField()
@@ -533,7 +537,7 @@ class TokenTransactionSerializer(serializers.Serializer):
     team_name = serializers.CharField(read_only=True, default=None, allow_null=True)
     game_session = serializers.CharField(source='room_code')
     game_session_room_code = serializers.CharField(source='room_code', read_only=True)
-    session_stage = serializers.IntegerField(source='session_stage_id', allow_null=True, required=False)
+    session_stage = serializers.CharField(source='session_stage_id', allow_null=True, required=False)
     stage_name = serializers.CharField(read_only=True, default=None, allow_null=True)
     stage_number = serializers.IntegerField(read_only=True, default=None, allow_null=True)
     amount = serializers.IntegerField()
@@ -631,7 +635,7 @@ class TeamBubbleMapSerializer(serializers.Serializer):
 
     team = serializers.CharField(source='team_id')
     team_name = serializers.CharField(read_only=True, default=None, allow_null=True)
-    session_stage = serializers.IntegerField(source='stage_id')
+    session_stage = serializers.CharField(source='stage_id')
     stage_name = serializers.CharField(read_only=True, default=None, allow_null=True)
     map_data = serializers.JSONField()
     created_at = serializers.DateTimeField()

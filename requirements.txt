@@ -13,11 +13,6 @@ djangorestframework==3.15.2  # Compatible con Django 5.0, versión estable
 django-cors-headers==4.3.1  # Compatible y estable
 
 # ============================================
-# BASE DE DATOS
-# ============================================
-mysqlclient==2.2.7  # Versión más reciente compatible con Python 3.11
-
-# ============================================
 # AUTENTICACIÓN Y SEGURIDAD
 # ============================================
 djangorestframework-simplejwt==5.3.1  # Versión estable compatible con Django 5.0
@@ -58,12 +53,6 @@ django-storages==1.14.4
 python-decouple==3.8  # Versión estable
 
 # ============================================
-# UTILIDADES
-# ============================================
-redis==5.2.1  # Versión estable compatible (evita 7.x que puede tener cambios)
-django-redis==5.4.0  # Compatible con Django 5.0
-
-# ============================================
 # VALIDACIÓN Y PERMISOS
 # ============================================
 django-permissions-policy==4.28.0  # Versión más reciente
@@ -84,11 +73,6 @@ faker==30.2.0  # Versión estable (evita 37.x que puede tener cambios mayores)
 django-debug-toolbar==5.0.1  # Versión compatible con Django 5.0 (6.x requiere Django 5.2+)
 django-extensions==3.2.3  # Herramientas de desarrollo para Django
 ipython==8.27.0  # Versión estable de IPython 8.x (evita 9.x que requiere Python 3.12+)
-
-# ============================================
-# SEGURIDAD ADICIONAL
-# ============================================
-django-ratelimit==4.1.0  # Versión estable
 
 # ============================================
 # UTILIDADES DE FECHA Y TIEMPO

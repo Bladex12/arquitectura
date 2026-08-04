@@ -11,8 +11,14 @@ def get_table():
 
     Reads the table name from the GAME_SESSIONS_TABLE env var, which
     template.yaml sets on DjangoFunction via `!Ref GameSessionTable`.
+    DYNAMODB_ENDPOINT_URL, if set (local Docker dev only -- points at the
+    dynamodb-local container), overrides boto3's default AWS endpoint
+    resolution.
     """
-    dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
+    dynamodb = boto3.resource(
+        'dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-1'),
+        endpoint_url=os.environ.get('DYNAMODB_ENDPOINT_URL') or None,
+    )
     return dynamodb.Table(os.environ['GAME_SESSIONS_TABLE'])
 
 

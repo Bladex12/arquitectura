@@ -6,3 +6,4 @@ env-vars.local.json
 __pycache__/
 *.pyc
 .superpowers/
+db.sqlite3

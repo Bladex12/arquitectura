@@ -7,8 +7,6 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Count, Q, Avg, Min, Max, F, Sum, Func, Value, IntegerField, OuterRef, Subquery
-from django.db.models.functions import ExtractYear, ExtractMonth, ExtractWeek, ExtractDay, TruncDate
 from django.utils import timezone
 from datetime import timedelta, datetime, date
 from collections import Counter, defaultdict
@@ -822,9 +820,7 @@ class AdminDashboardViewSet(viewsets.ViewSet):
         faculties = Faculty.objects.filter(is_active=True)
         sessions = scan_all_sessions()
         course_ids = {s.get('course_id') for s in sessions if s.get('course_id') is not None}
-        course_to_faculty = dict(
-            Course.objects.filter(id__in=course_ids).values_list('id', 'career__faculty_id')
-        )
+        course_to_faculty = {c.id: c.faculty_id for c in Course.objects.filter(id__in=course_ids)}
         faculty_counts = Counter(
             course_to_faculty.get(s.get('course_id')) for s in sessions
             if course_to_faculty.get(s.get('course_id')) is not None
@@ -867,9 +863,7 @@ class AdminDashboardViewSet(viewsets.ViewSet):
         careers = Career.objects.filter(faculty=faculty, is_active=True)
         sessions = scan_all_sessions()
         course_ids = {s.get('course_id') for s in sessions if s.get('course_id') is not None}
-        course_to_career = dict(
-            Course.objects.filter(id__in=course_ids).values_list('id', 'career_id')
-        )
+        course_to_career = {c.id: c.career_id for c in Course.objects.filter(id__in=course_ids)}
         career_counts = Counter(
             course_to_career.get(s.get('course_id')) for s in sessions
             if course_to_career.get(s.get('course_id')) is not None

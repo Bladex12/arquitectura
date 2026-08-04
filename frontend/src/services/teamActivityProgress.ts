@@ -11,16 +11,6 @@ export const teamActivityProgressAPI = {
     return response.data;
   },
 
-  selectTopic: async (data: {
-    team: string;
-    activity: number;
-    session_stage: number;
-    topic: number;
-  }) => {
-    const response = await api.post('/sessions/team-activity-progress/select_topic/', data);
-    return response.data;
-  },
-
   selectChallenge: async (formData: FormData) => {
     const response = await api.post('/sessions/team-activity-progress/select_challenge/', formData);
     return response.data;

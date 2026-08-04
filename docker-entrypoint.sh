@@ -3,15 +3,23 @@ set -e
 
 mkdir -p /app/logs
 
-echo "Waiting for Redis..."
-for i in {1..30}; do
-  if python -c "import socket; socket.create_connection(('$REDIS_HOST', $REDIS_PORT), timeout=2)" 2>/dev/null; then
-    echo "Redis is ready!"
-    break
-  fi
-  echo "Waiting for Redis... ($i/30)"
-  sleep 1
-done
+if [ -n "$DYNAMODB_ENDPOINT_URL" ]; then
+  echo "Waiting for local DynamoDB..."
+  for i in {1..30}; do
+    # A bare GET against DynamoDB Local's root always answers 400 (it
+    # needs a signed AWS API request) -- `curl -f` treats that as
+    # failure, so this checks for ANY HTTP response, not a 2xx status.
+    if curl -s -o /dev/null "$DYNAMODB_ENDPOINT_URL" 2>/dev/null; then
+      echo "Local DynamoDB is ready!"
+      break
+    fi
+    echo "Waiting for local DynamoDB... ($i/30)"
+    sleep 1
+  done
+
+  echo "Creating local DynamoDB tables (idempotent)..."
+  python manage.py create_local_dynamodb_tables
+fi
 
 echo "Running migrations..."
 python manage.py migrate --noinput

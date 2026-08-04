@@ -1,276 +1,363 @@
 """
-Serializers para la app challenges
+Serializers para la app challenges.
+
+Plain serializers.Serializer, not ModelSerializer -- ModelSerializer
+introspects Meta.model._meta (real Django ORM machinery), which the
+DynamoDB-backed shim classes in challenges/models.py don't have.
 """
+import os
+
 from rest_framework import serializers
-from .models import (
-    Stage, ActivityType, Activity, Topic, Challenge,
-    RouletteChallenge, Minigame, LearningObjective,
-    WordSearchOption, AnagramWord, ChaosQuestion, GeneralKnowledgeQuestion
-)
+
 from academic.serializers import FacultySerializer
 
 
-class StageSerializer(serializers.ModelSerializer):
-    """Serializer para Etapa"""
-    class Meta:
-        model = Stage
-        fields = ['id', 'number', 'name', 'description', 'objective', 'estimated_duration', 'is_active', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_at', 'updated_at']
+class StageSerializer(serializers.Serializer):
+    id = serializers.CharField(read_only=True)
+    number = serializers.IntegerField()
+    name = serializers.CharField(max_length=100)
+    description = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    objective = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    estimated_duration = serializers.IntegerField(required=False, allow_null=True)
+    is_active = serializers.BooleanField(default=True)
+    created_at = serializers.CharField(read_only=True)
+    updated_at = serializers.CharField(read_only=True)
+
+    def create(self, validated_data):
+        from challenges.models import Stage
+        return Stage.objects.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        for k, v in validated_data.items():
+            setattr(instance, k, v)
+        instance.save()
+        return instance
 
 
-class ActivityTypeSerializer(serializers.ModelSerializer):
-    """Serializer para Tipo de Actividad"""
-    class Meta:
-        model = ActivityType
-        fields = ['id', 'code', 'name', 'description', 'is_active', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_at', 'updated_at']
+class ActivityTypeSerializer(serializers.Serializer):
+    id = serializers.CharField(read_only=True)
+    code = serializers.CharField(max_length=50)
+    name = serializers.CharField(max_length=100)
+    description = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    is_active = serializers.BooleanField(default=True)
+    created_at = serializers.CharField(read_only=True)
+    updated_at = serializers.CharField(read_only=True)
+
+    def create(self, validated_data):
+        from challenges.models import ActivityType
+        return ActivityType.objects.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        for k, v in validated_data.items():
+            setattr(instance, k, v)
+        instance.save()
+        return instance
 
 
-class ActivitySerializer(serializers.ModelSerializer):
-    """Serializer para Actividad"""
-    stage_name = serializers.CharField(source='stage.name', read_only=True)
-    activity_type_name = serializers.CharField(source='activity_type.name', read_only=True)
+class ActivitySerializer(serializers.Serializer):
+    id = serializers.CharField(read_only=True)
+    stage = serializers.CharField(source='stage_id')
+    stage_name = serializers.CharField(read_only=True)
+    activity_type = serializers.CharField(source='activity_type_id')
+    activity_type_name = serializers.CharField(read_only=True)
+    name = serializers.CharField(max_length=100)
+    description = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    order_number = serializers.IntegerField()
+    timer_duration = serializers.IntegerField(required=False, allow_null=True)
+    config_data = serializers.JSONField(required=False, allow_null=True)
     word_search_data = serializers.SerializerMethodField()
     anagram_data = serializers.SerializerMethodField()
     general_knowledge_data = serializers.SerializerMethodField()
     chaos_data = serializers.SerializerMethodField()
     bubble_map_config = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = Activity
-        fields = [
-            'id', 'stage', 'stage_name', 'activity_type', 'activity_type_name',
-            'name', 'description', 'order_number', 'timer_duration', 'config_data',
-            'word_search_data', 'anagram_data', 'general_knowledge_data', 'chaos_data', 'bubble_map_config', 'is_active', 'created_at', 'updated_at'
-        ]
-        read_only_fields = ['id', 'stage_name', 'activity_type_name', 'word_search_data', 'anagram_data', 'general_knowledge_data', 'chaos_data', 'bubble_map_config', 'created_at', 'updated_at']
-    
+    is_active = serializers.BooleanField(default=True)
+    created_at = serializers.CharField(read_only=True)
+    updated_at = serializers.CharField(read_only=True)
+
+    def _team_and_stage_ids(self):
+        request = self.context.get('request')
+        if not request:
+            return None, None
+        team_id = request.query_params.get('team_id')
+        session_stage_id = request.query_params.get('session_stage_id')
+        team_id = int(team_id) if team_id and team_id.isdigit() else None
+        session_stage_id = int(session_stage_id) if session_stage_id and session_stage_id.isdigit() else None
+        return team_id, session_stage_id
+
     def get_word_search_data(self, obj):
-        """
-        Genera y devuelve los datos de la sopa de letras si es una actividad de minijuego.
-        Obtiene team_id y session_stage_id de los query params para selección determinística.
-        """
-        request = self.context.get('request')
-        if not request:
+        if not self.context.get('request'):
             return None
-        
-        # Obtener team_id y session_stage_id de los query params
-        team_id = request.query_params.get('team_id')
-        session_stage_id = request.query_params.get('session_stage_id')
-        
-        team_id = int(team_id) if team_id and team_id.isdigit() else None
-        session_stage_id = int(session_stage_id) if session_stage_id and session_stage_id.isdigit() else None
-        
-        # Generar la sopa de letras
-        word_search_data = obj.get_word_search_data(team_id=team_id, session_stage_id=session_stage_id)
-        return word_search_data
-    
+        team_id, session_stage_id = self._team_and_stage_ids()
+        return obj.get_word_search_data(team_id=team_id, session_stage_id=session_stage_id)
+
     def get_anagram_data(self, obj):
-        """
-        Obtiene palabras aleatorias para el juego de anagrama.
-        Solo se devuelve si la actividad es de tipo minijuego.
-        Obtiene team_id y session_stage_id de los query params para selección determinística.
-        """
-        # Verificar si es una actividad de minijuego
-        # El código puede ser 'minigame' o 'minijuego' dependiendo de la base de datos
         if obj.activity_type.code not in ['minigame', 'minijuego']:
             return None
-        
-        request = self.context.get('request')
-        if not request:
+        if not self.context.get('request'):
             return None
-        
-        # Obtener team_id y session_stage_id de los query params
-        team_id = request.query_params.get('team_id')
-        session_stage_id = request.query_params.get('session_stage_id')
-        
-        team_id = int(team_id) if team_id and team_id.isdigit() else None
-        session_stage_id = int(session_stage_id) if session_stage_id and session_stage_id.isdigit() else None
-        
-        # Obtener 5 palabras aleatorias (determinísticas si hay team_id y session_stage_id)
-        anagram_data = obj.get_anagram_data(count=5, team_id=team_id, session_stage_id=session_stage_id)
-        return anagram_data
-    
+        team_id, session_stage_id = self._team_and_stage_ids()
+        return obj.get_anagram_data(count=5, team_id=team_id, session_stage_id=session_stage_id)
+
     def get_general_knowledge_data(self, obj):
-        """
-        Obtiene preguntas aleatorias de conocimiento general.
-        Solo se devuelve si la actividad es de tipo minijuego.
-        Obtiene team_id y session_stage_id de los query params para selección determinística.
-        """
-        # Verificar si es una actividad de minijuego
         if obj.activity_type.code not in ['minigame', 'minijuego']:
             return None
-        
-        request = self.context.get('request')
-        if not request:
+        if not self.context.get('request'):
             return None
-        
-        # Obtener team_id y session_stage_id de los query params
-        team_id = request.query_params.get('team_id')
-        session_stage_id = request.query_params.get('session_stage_id')
-        
-        team_id = int(team_id) if team_id and team_id.isdigit() else None
-        session_stage_id = int(session_stage_id) if session_stage_id and session_stage_id.isdigit() else None
-        
-        # Obtener 5 preguntas aleatorias (determinísticas si hay team_id y session_stage_id)
-        general_knowledge_data = obj.get_general_knowledge_data(count=5, team_id=team_id, session_stage_id=session_stage_id)
-        return general_knowledge_data
-    
+        team_id, session_stage_id = self._team_and_stage_ids()
+        return obj.get_general_knowledge_data(count=5, team_id=team_id, session_stage_id=session_stage_id)
+
     def get_chaos_data(self, obj):
-        """
-        Obtiene información sobre las preguntas del caos disponibles.
-        Solo se devuelve si la actividad es de tipo presentación.
-        """
-        request = self.context.get('request')
-        if not request:
+        if not self.context.get('request'):
             return None
-        
-        # Obtener team_id y session_stage_id de los query params
-        team_id = request.query_params.get('team_id')
-        session_stage_id = request.query_params.get('session_stage_id')
-        
-        team_id = int(team_id) if team_id and team_id.isdigit() else None
-        session_stage_id = int(session_stage_id) if session_stage_id and session_stage_id.isdigit() else None
-        
-        # Obtener información sobre las preguntas del caos
-        chaos_data = obj.get_chaos_data(team_id=team_id, session_stage_id=session_stage_id)
-        return chaos_data
-    
+        team_id, session_stage_id = self._team_and_stage_ids()
+        return obj.get_chaos_data(team_id=team_id, session_stage_id=session_stage_id)
+
     def get_bubble_map_config(self, obj):
-        """
-        Obtiene la configuración del bubble map desde el backend.
-        """
         return obj.get_bubble_map_config()
 
+    def create(self, validated_data):
+        from challenges.models import Activity
+        validated_data['stage'] = validated_data.pop('stage_id')
+        validated_data['activity_type'] = validated_data.pop('activity_type_id')
+        return Activity.objects.create(**validated_data)
 
-class TopicSerializer(serializers.ModelSerializer):
-    """Serializer para Tema"""
-    from academic.models import Faculty
-    
+    def update(self, instance, validated_data):
+        if 'stage_id' in validated_data:
+            instance.stage_id = validated_data.pop('stage_id')
+        if 'activity_type_id' in validated_data:
+            instance.activity_type_id = validated_data.pop('activity_type_id')
+        for k, v in validated_data.items():
+            setattr(instance, k, v)
+        instance.save()
+        return instance
+
+
+class TopicSerializer(serializers.Serializer):
+    id = serializers.CharField(read_only=True)
+    name = serializers.CharField(max_length=200)
+    icon = serializers.CharField(max_length=10, required=False, allow_null=True, allow_blank=True)
+    description = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    image_url = serializers.URLField(max_length=500, required=False, allow_null=True, allow_blank=True)
+    category = serializers.CharField(max_length=100, required=False, allow_null=True, allow_blank=True)
     faculties = FacultySerializer(many=True, read_only=True)
-    faculty_ids = serializers.PrimaryKeyRelatedField(
-        many=True,
-        queryset=Faculty.objects.all(),
-        source='faculties',
-        write_only=True,
-        required=False,
-        allow_null=True
+    faculty_ids = serializers.ListField(
+        child=serializers.CharField(), source='faculties', write_only=True, required=False, allow_null=True,
     )
-    
-    class Meta:
-        model = Topic
-        fields = ['id', 'name', 'icon', 'description', 'image_url', 'category', 'faculties', 'faculty_ids', 'is_active', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_at', 'updated_at']
+    is_active = serializers.BooleanField(default=True)
+    created_at = serializers.CharField(read_only=True)
+    updated_at = serializers.CharField(read_only=True)
+
+    def create(self, validated_data):
+        from challenges.models import Topic
+        return Topic.objects.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        from challenges.dynamodb import topic as topic_repo
+        faculty_ids = validated_data.pop('faculties', None)
+        for k, v in validated_data.items():
+            setattr(instance, k, v)
+        instance.save()
+        if faculty_ids is not None:
+            topic_repo.set_topic_faculties(instance.id, faculty_ids)
+            instance._faculties = None
+        return instance
 
 
-class ChallengeSerializer(serializers.ModelSerializer):
-    """Serializer para Desafío"""
-    topic_name = serializers.CharField(source='topic.name', read_only=True)
+class ChallengeSerializer(serializers.Serializer):
+    id = serializers.CharField(read_only=True)
+    topic = serializers.CharField(source='topic_id')
+    topic_name = serializers.CharField(read_only=True)
+    title = serializers.CharField(max_length=200)
+    description = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    icon = serializers.CharField(max_length=10, required=False, allow_null=True, allow_blank=True)
+    persona_name = serializers.CharField(max_length=100, required=False, allow_null=True, allow_blank=True)
+    persona_age = serializers.IntegerField(required=False, allow_null=True)
+    persona_story = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    persona_image = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     persona_image_url = serializers.SerializerMethodField()
-    
+    difficulty_level = serializers.ChoiceField(
+        choices=[('low', 'Baja'), ('medium', 'Media'), ('high', 'Alta')], default='medium',
+    )
+    learning_objectives = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    additional_resources = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    is_active = serializers.BooleanField(default=True)
+    created_at = serializers.CharField(read_only=True)
+    updated_at = serializers.CharField(read_only=True)
+
     def get_persona_image_url(self, obj):
-        """Obtener la URL completa de la imagen de la persona"""
-        if obj.persona_image:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.persona_image.url)
-            return obj.persona_image.url
-        return None
-    
-    class Meta:
-        model = Challenge
-        fields = [
-            'id', 'topic', 'topic_name', 'title', 'description', 'icon',
-            'persona_name', 'persona_age', 'persona_story', 'persona_image', 'persona_image_url',
-            'difficulty_level', 'learning_objectives', 'additional_resources',
-            'is_active', 'created_at', 'updated_at'
-        ]
-        read_only_fields = ['id', 'topic_name', 'persona_image_url', 'created_at', 'updated_at']
+        if not obj.persona_image:
+            return None
+        request = self.context.get('request')
+        bucket = os.environ.get('STATIC_MEDIA_BUCKET')
+        region = os.environ.get('AWS_REGION', 'us-east-1')
+        if bucket:
+            url = f'https://{bucket}.s3.{region}.amazonaws.com/media/{obj.persona_image}'
+        else:
+            url = f'/media/{obj.persona_image}'
+        return request.build_absolute_uri(url) if request else url
+
+    def create(self, validated_data):
+        from challenges.models import Challenge
+        validated_data['topic'] = validated_data.pop('topic_id')
+        return Challenge.objects.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        if 'topic_id' in validated_data:
+            instance.topic_id = validated_data.pop('topic_id')
+        for k, v in validated_data.items():
+            setattr(instance, k, v)
+        instance.save()
+        return instance
 
 
-class RouletteChallengeSerializer(serializers.ModelSerializer):
-    """Serializer para Reto de Ruleta"""
-    class Meta:
-        model = RouletteChallenge
-        fields = [
-            'id', 'description', 'challenge_type', 'difficulty_estimated',
-            'token_reward_min', 'token_reward_max', 'stages_applicable',
-            'is_active', 'created_at', 'updated_at'
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+class RouletteChallengeSerializer(serializers.Serializer):
+    id = serializers.CharField(read_only=True)
+    description = serializers.CharField()
+    challenge_type = serializers.ChoiceField(
+        choices=[('physical', 'Físico'), ('mental', 'Mental'), ('creative', 'Creativo'), ('other', 'Otro')],
+    )
+    difficulty_estimated = serializers.IntegerField(default=5)
+    token_reward_min = serializers.IntegerField(default=0)
+    token_reward_max = serializers.IntegerField(default=0)
+    stages_applicable = serializers.JSONField(required=False, allow_null=True)
+    is_active = serializers.BooleanField(default=True)
+    created_at = serializers.CharField(read_only=True)
+    updated_at = serializers.CharField(read_only=True)
+
+    def create(self, validated_data):
+        from challenges.models import RouletteChallenge
+        return RouletteChallenge.objects.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        for k, v in validated_data.items():
+            setattr(instance, k, v)
+        instance.save()
+        return instance
 
 
-class MinigameSerializer(serializers.ModelSerializer):
-    """Serializer para Minijuego"""
-    class Meta:
-        model = Minigame
-        fields = ['id', 'name', 'type', 'config', 'is_active', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_at', 'updated_at']
+class MinigameSerializer(serializers.Serializer):
+    id = serializers.CharField(read_only=True)
+    name = serializers.CharField(max_length=100)
+    type = serializers.ChoiceField(
+        choices=[('word_search', 'Sopa de Letras'), ('puzzle', 'Puzzle'), ('other', 'Otro')],
+    )
+    config = serializers.JSONField(required=False, allow_null=True)
+    is_active = serializers.BooleanField(default=True)
+    created_at = serializers.CharField(read_only=True)
+    updated_at = serializers.CharField(read_only=True)
+
+    def create(self, validated_data):
+        from challenges.models import Minigame
+        return Minigame.objects.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        for k, v in validated_data.items():
+            setattr(instance, k, v)
+        instance.save()
+        return instance
 
 
-class LearningObjectiveSerializer(serializers.ModelSerializer):
-    """Serializer para Objetivo de Aprendizaje"""
-    stage_name = serializers.CharField(source='stage.name', read_only=True)
-    stage_number = serializers.IntegerField(source='stage.number', read_only=True)
-    
-    class Meta:
-        model = LearningObjective
-        fields = [
-            'id', 'stage', 'stage_name', 'stage_number', 'title', 'description',
-            'evaluation_criteria', 'pedagogical_recommendations',
-            'estimated_time', 'associated_resources', 'is_active',
-            'created_at', 'updated_at'
-        ]
-        read_only_fields = ['id', 'stage_name', 'stage_number', 'created_at', 'updated_at']
+class LearningObjectiveSerializer(serializers.Serializer):
+    id = serializers.CharField(read_only=True)
+    stage = serializers.CharField(source='stage_id', required=False, allow_null=True)
+    stage_name = serializers.CharField(read_only=True)
+    stage_number = serializers.IntegerField(read_only=True)
+    title = serializers.CharField(max_length=200)
+    description = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    evaluation_criteria = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    pedagogical_recommendations = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    estimated_time = serializers.IntegerField(required=False, allow_null=True)
+    associated_resources = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    is_active = serializers.BooleanField(default=True)
+    created_at = serializers.CharField(read_only=True)
+    updated_at = serializers.CharField(read_only=True)
+
+    def create(self, validated_data):
+        from challenges.models import LearningObjective
+        validated_data['stage'] = validated_data.pop('stage_id', None)
+        return LearningObjective.objects.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        if 'stage_id' in validated_data:
+            instance.stage_id = validated_data.pop('stage_id')
+        for k, v in validated_data.items():
+            setattr(instance, k, v)
+        instance.save()
+        return instance
 
 
-class WordSearchOptionSerializer(serializers.ModelSerializer):
-    """Serializer para Opción de Sopa de Letras"""
-    activity_name = serializers.CharField(source='activity.name', read_only=True)
-    
-    class Meta:
-        model = WordSearchOption
-        fields = [
-            'id', 'activity', 'activity_name', 'name', 'words', 'grid',
-            'word_positions', 'seed', 'is_active', 'created_at', 'updated_at'
-        ]
-        read_only_fields = ['id', 'activity_name', 'created_at', 'updated_at']
+class WordSearchOptionSerializer(serializers.Serializer):
+    id = serializers.CharField(read_only=True)
+    activity = serializers.CharField(source='activity_id')
+    activity_name = serializers.SerializerMethodField()
+    name = serializers.CharField(max_length=100)
+    words = serializers.JSONField()
+    grid = serializers.JSONField(required=False, allow_null=True)
+    word_positions = serializers.JSONField(required=False, allow_null=True)
+    seed = serializers.IntegerField(required=False, allow_null=True)
+    is_active = serializers.BooleanField(default=True)
+    created_at = serializers.CharField(read_only=True)
+    updated_at = serializers.CharField(read_only=True)
+
+    def get_activity_name(self, obj):
+        return obj.activity.name if obj.activity else None
+
+    def create(self, validated_data):
+        from challenges.models import WordSearchOption
+        return WordSearchOption.objects.create(**validated_data)
 
 
-class AnagramWordSerializer(serializers.ModelSerializer):
-    """Serializer para Palabra de Anagrama"""
-    class Meta:
-        model = AnagramWord
-        fields = [
-            'id', 'word', 'scrambled_word', 'is_active', 'created_at', 'updated_at'
-        ]
-        read_only_fields = ['id', 'scrambled_word', 'created_at', 'updated_at']
+class AnagramWordSerializer(serializers.Serializer):
+    id = serializers.CharField(read_only=True)
+    word = serializers.CharField(max_length=100)
+    scrambled_word = serializers.CharField(read_only=True)
+    is_active = serializers.BooleanField(default=True)
+    created_at = serializers.CharField(read_only=True)
+    updated_at = serializers.CharField(read_only=True)
+
+    def create(self, validated_data):
+        from challenges.models import AnagramWord
+        return AnagramWord.objects.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        for k, v in validated_data.items():
+            setattr(instance, k, v)
+        instance.save()
+        return instance
 
 
-class ChaosQuestionSerializer(serializers.ModelSerializer):
-    """Serializer para Pregunta del Caos"""
-    class Meta:
-        model = ChaosQuestion
-        fields = [
-            'id', 'question', 'is_active', 'created_at', 'updated_at'
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+class ChaosQuestionSerializer(serializers.Serializer):
+    id = serializers.CharField(read_only=True)
+    question = serializers.CharField()
+    is_active = serializers.BooleanField(default=True)
+    created_at = serializers.CharField(read_only=True)
+    updated_at = serializers.CharField(read_only=True)
+
+    def create(self, validated_data):
+        from challenges.models import ChaosQuestion
+        return ChaosQuestion.objects.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        for k, v in validated_data.items():
+            setattr(instance, k, v)
+        instance.save()
+        return instance
 
 
-class GeneralKnowledgeQuestionSerializer(serializers.ModelSerializer):
-    """Serializer para Pregunta de Conocimiento General"""
+class GeneralKnowledgeQuestionSerializer(serializers.Serializer):
+    id = serializers.CharField(read_only=True)
+    question = serializers.CharField()
+    option_a = serializers.CharField(max_length=255)
+    option_b = serializers.CharField(max_length=255)
+    option_c = serializers.CharField(max_length=255)
+    option_d = serializers.CharField(max_length=255)
+    correct_answer = serializers.ChoiceField(choices=[(0, 'A'), (1, 'B'), (2, 'C'), (3, 'D')])
     options = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = GeneralKnowledgeQuestion
-        fields = [
-            'id', 'question', 'option_a', 'option_b', 'option_c', 'option_d',
-            'correct_answer', 'is_active', 'created_at', 'updated_at', 'options'
-        ]
-        read_only_fields = ['id', 'options', 'created_at', 'updated_at']
-    
+    is_active = serializers.BooleanField(default=True)
+    created_at = serializers.CharField(read_only=True)
+    updated_at = serializers.CharField(read_only=True)
+
     def get_options(self, obj):
-        """Retornar opciones como lista para facilitar el frontend"""
         return [
             {'label': 'A', 'text': obj.option_a},
             {'label': 'B', 'text': obj.option_b},
@@ -278,3 +365,12 @@ class GeneralKnowledgeQuestionSerializer(serializers.ModelSerializer):
             {'label': 'D', 'text': obj.option_d},
         ]
 
+    def create(self, validated_data):
+        from challenges.models import GeneralKnowledgeQuestion
+        return GeneralKnowledgeQuestion.objects.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        for k, v in validated_data.items():
+            setattr(instance, k, v)
+        instance.save()
+        return instance

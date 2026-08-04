@@ -1,5 +1,5 @@
 from io import StringIO
-from django.test import TestCase
+from unittest import TestCase
 from django.core.management import call_command
 from challenges.services import generate_word_search
 from challenges.models import AnagramWord, ChaosQuestion, GeneralKnowledgeQuestion

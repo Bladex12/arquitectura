@@ -9,7 +9,7 @@ from boto3.dynamodb.conditions import Attr, Key
 from boto3.dynamodb.types import TypeSerializer
 from django.contrib.auth.hashers import check_password, make_password
 
-from .client import build_update_expression, get_table, now_iso
+from .client import build_update_expression, get_client, get_table, now_iso
 from .keys import email_gsi2pk, metadata_sk, user_pk, username_gsi1pk
 
 
@@ -74,7 +74,7 @@ def create_user(*, username, email, password=None, password_hash=None,
     }
 
     # Write both items transactionally using low-level client API
-    dynamodb = boto3.client('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
+    dynamodb = get_client()
     table_name = os.environ['USERS_TABLE']
     serializer = TypeSerializer()
 
@@ -134,11 +134,10 @@ def get_users_by_ids(user_ids):
     unique_ids = list({uid for uid in user_ids if uid})
     if not unique_ids:
         return {}
-    import os
-    dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
+    table = get_table()
     table_name = os.environ['USERS_TABLE']
     keys = [{'PK': user_pk(uid), 'SK': metadata_sk()} for uid in unique_ids]
-    resp = dynamodb.batch_get_item(RequestItems={table_name: {'Keys': keys}})
+    resp = table.meta.client.batch_get_item(RequestItems={table_name: {'Keys': keys}})
     items = resp['Responses'].get(table_name, [])
     return {item['id']: item for item in items}
 
@@ -174,7 +173,7 @@ def delete_user(user_id):
         return
 
     # Delete both the user item and the reservation item
-    dynamodb = boto3.client('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
+    dynamodb = get_client()
     table_name = os.environ['USERS_TABLE']
 
     dynamodb.batch_write_item(

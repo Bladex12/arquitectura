@@ -171,13 +171,6 @@ export const challengesAPI = {
     return response.data;
   },
 
-  getRandomWordSearch: async (activityId: number | string) => {
-    const response = await api.get('/challenges/word-search-options/random/', {
-      params: { activity_id: activityId },
-    });
-    return response.data;
-  },
-
   // Anagram Words CRUD
   getAnagramWords: async () => {
     const response = await api.get('/challenges/anagram-words/');
@@ -189,23 +182,8 @@ export const challengesAPI = {
     return response.data;
   },
 
-  updateAnagramWord: async (wordId: number | string, data: Partial<{
-    word?: string;
-    is_active?: boolean;
-  }>) => {
-    const response = await api.patch(`/challenges/anagram-words/${wordId}/`, data);
-    return response.data;
-  },
-
   deleteAnagramWord: async (wordId: number | string) => {
     const response = await api.delete(`/challenges/anagram-words/${wordId}/`);
-    return response.data;
-  },
-
-  getRandomAnagramWords: async (count: number = 5) => {
-    const response = await api.get('/challenges/anagram-words/random/', {
-      params: { count },
-    });
     return response.data;
   },
 

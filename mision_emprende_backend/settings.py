@@ -37,7 +37,9 @@ ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(','
 
 INSTALLED_APPS = [
     # Django Core
-    'django.contrib.admin',
+    # django.contrib.admin removed -- the /admin/ site is gone (React CMS
+    # at /admin/* already owns content management; see
+    # docs/superpowers/specs/2026-08-03-academic-challenges-dynamodb-migration-design.md).
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
@@ -52,11 +54,9 @@ INSTALLED_APPS = [
     'django_filters',
     
     # Third Party - Security
-    'django_ratelimit',
     'django_permissions_policy',
     
     # Third Party - Utilities
-    'django_redis',
     'storages',
     
     # Project Apps
@@ -115,40 +115,19 @@ WSGI_APPLICATION = 'mision_emprende_backend.wsgi.application'
 # DATABASE CONFIGURATION
 # ============================================
 
-# Configuración de MySQL
+# academic/challenges/game_sessions/users are all DynamoDB-backed now (see
+# docs/superpowers/specs/2026-08-03-academic-challenges-dynamodb-migration-design.md)
+# -- RDS MySQL is gone. django.contrib.auth/sessions/contenttypes stay
+# installed (django-admin's `/admin/` site is gone too, but a few test
+# fixtures still construct throwaway django.contrib.auth.models.User rows,
+# and Django's own migration framework needs *some* DATABASES entry to
+# exist). SQLite costs nothing and needs no external service. The deployed
+# Lambda (Dockerfile.lambda) never runs `migrate`, so this file is never
+# even created there -- it only matters for local `docker-compose` dev.
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.environ.get('DATABASE_NAME', 'mision_emprende2'),
-        'USER': os.environ.get('DATABASE_USER', 'root'),
-        'PASSWORD': os.environ.get('DATABASE_PASSWORD', '1234'),
-        'HOST': os.environ.get('DATABASE_HOST', 'localhost'),
-        'PORT': os.environ.get('DATABASE_PORT', '3306'),
-        'OPTIONS': {
-            'charset': 'utf8mb4',
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-            'connect_timeout': 10,
-            'read_timeout': 10,
-            'write_timeout': 10,
-        },
-        'CONN_MAX_AGE': 0,  # Desconectar después de cada request para evitar problemas de conexión
-        'AUTOCOMMIT': True,
-        'ATOMIC_REQUESTS': False,
-    }
-}
-
-# Cache Configuration (Redis)
-REDIS_HOST = os.environ.get('REDIS_HOST', '127.0.0.1')
-REDIS_PORT = os.environ.get('REDIS_PORT', '6379')
-
-CACHES = {
-    'default': {
-        'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': f'redis://{REDIS_HOST}:{REDIS_PORT}/1',
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-        },
-        'KEY_PREFIX': 'mision_emprende',
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
 
@@ -260,7 +239,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'users.auth.DynamoJWTAuthentication',
-        'rest_framework.authentication.SessionAuthentication',  # Para /admin/ (academic/challenges)
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',

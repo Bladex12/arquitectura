@@ -249,7 +249,7 @@ class TeamActivityProgressSerializerTest(GameSessionsSerializersTestCase):
     def test_serializes_with_annotated_fields_and_nested_topic(self):
         progress = {
             'PK': 'SESSION#ABC123',
-            'SK': 'TEAM#team-uuid-1#PROGRESS#%d' % self.activity.id,
+            'SK': 'TEAM#team-uuid-1#PROGRESS#%s' % self.activity.id,
             'team_id': 'team-uuid-1',
             'activity_id': self.activity.id,
             'room_code': 'ABC123',
@@ -283,7 +283,7 @@ class TeamActivityProgressSerializerTest(GameSessionsSerializersTestCase):
 
     def test_selected_challenge_nested_serializer(self):
         progress = {
-            'SK': 'TEAM#team-uuid-1#PROGRESS#%d' % self.activity.id,
+            'SK': 'TEAM#team-uuid-1#PROGRESS#%s' % self.activity.id,
             'team_id': 'team-uuid-1',
             'activity_id': self.activity.id,
             'room_code': 'ABC123',
@@ -374,7 +374,7 @@ class TabletConnectionSerializerTest(TestCase):
 class TeamRouletteAssignmentSerializerTest(GameSessionsSerializersTestCase):
     def test_serializes_with_annotated_fields(self):
         assignment = {
-            'SK': 'TEAM#team-uuid-1#ROULETTE#%d' % self.stage.id,
+            'SK': 'TEAM#team-uuid-1#ROULETTE#%s' % self.stage.id,
             'team_id': 'team-uuid-1',
             'stage_id': self.stage.id,
             'room_code': 'ABC123',
@@ -453,7 +453,7 @@ class TokenTransactionSerializerTest(GameSessionsSerializersTestCase):
 class TeamBubbleMapSerializerTest(GameSessionsSerializersTestCase):
     def test_serializes_with_annotated_fields(self):
         bubble_map = {
-            'SK': 'TEAM#team-uuid-1#BUBBLEMAP#%d' % self.stage.id,
+            'SK': 'TEAM#team-uuid-1#BUBBLEMAP#%s' % self.stage.id,
             'team_id': 'team-uuid-1',
             'stage_id': self.stage.id,
             'room_code': 'ABC123',

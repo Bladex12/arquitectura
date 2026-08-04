@@ -14,15 +14,5 @@ export const teamsAPI = {
     });
     return response.data;
   },
-
-  // NOTE: no call sites use this today (Lobby.tsx shuffles client-side and calls
-  // sessionsAPI.syncTeams instead). Backend expects `game_session` (room_code
-  // string), not `game_session_id` -- fix the payload key if this is ever wired up.
-  shuffleAll: async (gameSessionId: string) => {
-    const response = await api.post('/sessions/teams/shuffle_all/', {
-      game_session_id: gameSessionId,
-    });
-    return response.data;
-  },
 };
 

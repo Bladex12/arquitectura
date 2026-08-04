@@ -4,7 +4,6 @@ URL configuration for mision_emprende_backend project.
 The `urlpatterns` list routes URLs to views. For more information please see:
     https://docs.djangoproject.com/en/5.0/topics/http/urls/
 """
-from django.contrib import admin
 from django.urls import path, include, re_path
 from django.conf import settings
 from django.conf.urls.static import static
@@ -19,9 +18,6 @@ from .views_frontend import spa_view
 urlpatterns = [
     # Health check (Lambda Web Adapter readiness probe, no DB dependency)
     path('api/health/', health, name='health'),
-
-    # Admin
-    path('admin/', admin.site.urls),
 
     # API Documentation
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

@@ -11,6 +11,15 @@ fixtures below are the DynamoDB equivalent for the users table, so that
 existing test files (game_sessions/, admin_dashboard/) keep working
 without being modified.
 
+The same is true of `academic`/`challenges`/`admin_dashboard`'s metric
+models since the 2026-08-03 migration (see
+docs/superpowers/specs/2026-08-03-academic-challenges-dynamodb-migration-design.md):
+`Faculty`/`Career`/`Course`/`Stage`/`Activity`/etc. are now backed by
+ContentTable, and dozens of existing game_sessions/test_*.py fixture
+helpers (e.g. `make_course()`) call `Faculty.objects.create(...)`
+directly - so ContentTable gets the identical class-scoped
+provision-and-restore treatment below.
+
 Isolation semantics deliberately mirror Django's own TestCase:
 
 * the moto mock + table live for the duration of a *class*, so items
@@ -34,6 +43,7 @@ import pytest
 from moto import mock_aws
 
 USERS_TEST_TABLE = 'test-users'
+CONTENT_TEST_TABLE = 'test-content'
 TEST_REGION = 'us-east-1'
 
 
@@ -100,3 +110,33 @@ def users_dynamodb_isolation(users_dynamodb_table):
         yield
     finally:
         _restore(table, users_dynamodb_table['baseline'])
+
+
+@pytest.fixture(scope='class', autouse=True)
+def content_dynamodb_table():
+    """Starts a moto mock and provisions ContentTable for the class (see
+    module docstring). Independent of users_dynamodb_table's mock -
+    moto's mock_aws() contexts stack/reference-count correctly."""
+    from academic.dynamodb.testing import create_test_table
+
+    mock = mock_aws()
+    mock.start()
+    try:
+        os.environ['CONTENT_TABLE'] = CONTENT_TEST_TABLE
+        os.environ['AWS_REGION'] = TEST_REGION
+        create_test_table(CONTENT_TEST_TABLE, region_name=TEST_REGION)
+        yield {}
+    finally:
+        mock.stop()
+
+
+@pytest.fixture(autouse=True)
+def content_dynamodb_isolation(content_dynamodb_table):
+    """Per-test rollback for ContentTable (see module docstring)."""
+    table = boto3.resource('dynamodb', region_name=TEST_REGION).Table(CONTENT_TEST_TABLE)
+    if 'baseline' not in content_dynamodb_table:
+        content_dynamodb_table['baseline'] = _scan_all(table)
+    try:
+        yield
+    finally:
+        _restore(table, content_dynamodb_table['baseline'])

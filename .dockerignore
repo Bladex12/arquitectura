@@ -19,6 +19,15 @@ sessions
 *.sqlite3
 *.db
 
+# Git worktrees and SAM's own build output -- each worktree carries its own
+# full venv/.venv/node_modules copy (easily 1GB+ each); .aws-sam/build is
+# regenerated output. Neither belongs in any image's build context, and
+# both were silently bloating context-transfer time to minutes.
+.worktrees
+.aws-sam
+.pytest_cache
+.superpowers
+
 # Frontend source / dev tooling -- NOT needed in the Lambda image; only
 # frontend/dist/** (built by `npm run build` before `sam build`) is needed.
 # Do NOT add a blanket `frontend`/`frontend/*` exclude + `!frontend/dist/**`

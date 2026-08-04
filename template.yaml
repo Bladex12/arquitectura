@@ -1,10 +1,13 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Mision Emprende -- serverless stack (AWS Academy Learner Lab).
+  Mision Emprende -- fully serverless stack (AWS Academy Learner Lab).
   Django REST API on Lambda (Web Adapter), WebSocket real-time layer,
-  DynamoDB for game_sessions runtime data, RDS MySQL for users/academic/
-  challenges, S3+Firehose+Athena for admin_dashboard analytics.
+  DynamoDB for all persistence (game_sessions/users/academic/challenges/
+  admin_dashboard), S3+Firehose+Athena for admin_dashboard analytics.
+  No relational database anywhere -- RDS MySQL (users/academic/challenges)
+  was retired 2026-08-04 once those apps finished their DynamoDB cutover
+  (see docs/superpowers/specs/2026-08-03-academic-challenges-dynamodb-migration-design.md).
 
   NOTE: WS handlers (lambda/ws-*) and the stream-to-firehose Lambda are
   stubs -- see the migration plan for which tasks fill them in. Canary
@@ -19,22 +22,6 @@ Parameters:
       IAM role creation is typically blocked on these accounts, so every
       Lambda below is pinned to this role instead of letting SAM
       auto-generate one.
-  VpcId:
-    Type: AWS::EC2::VPC::Id
-    Description: Default VPC id (Lambda needs VPC access to reach RDS).
-  SubnetIds:
-    Type: List<AWS::EC2::Subnet::Id>
-    Description: Private/default subnets for the Django Lambda and RDS.
-  RouteTableIds:
-    Type: CommaDelimitedList
-    Description: >
-      Route table(s) associated with SubnetIds (or the VPC's main route
-      table, if those subnets have no explicit association) -- Gateway
-      VPC endpoints (DynamoDB, S3) attach here. (No List<AWS::EC2::RouteTable::Id>
-      parameter type exists in CloudFormation, hence CommaDelimitedList.)
-  DBPassword:
-    Type: String
-    NoEcho: true
   DjangoSecretKey:
     Type: String
     NoEcho: true
@@ -47,122 +34,6 @@ Globals:
 Resources:
 
   # ==========================================================
-  # Networking (RDS + Lambda-in-VPC)
-  # ==========================================================
-
-  DBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: MySQL access from the Django Lambda only
-      VpcId: !Ref VpcId
-
-  LambdaSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Django Lambda outbound (to RDS)
-      VpcId: !Ref VpcId
-
-  DBSecurityGroupIngress:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref DBSecurityGroup
-      IpProtocol: tcp
-      FromPort: 3306
-      ToPort: 3306
-      SourceSecurityGroupId: !Ref LambdaSecurityGroup
-
-  DBSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties:
-      DBSubnetGroupDescription: Subnets for the RDS MySQL instance
-      SubnetIds: !Ref SubnetIds
-
-  # Lambda's ENIs sit in these subnets with no public IP, so the default
-  # VPC's "0.0.0.0/0 -> igw" route on the main route table is unusable to
-  # them -- DynamoDB and S3 calls hang until Lambda's own timeout with no
-  # error (confirmed via a real deploy attempt). Gateway endpoints route
-  # this traffic privately instead, at no hourly cost (unlike a NAT Gateway).
-  DynamoDBVpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Properties:
-      VpcId: !Ref VpcId
-      ServiceName: !Sub com.amazonaws.${AWS::Region}.dynamodb
-      VpcEndpointType: Gateway
-      RouteTableIds: !Ref RouteTableIds
-
-  S3VpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Properties:
-      VpcId: !Ref VpcId
-      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
-      VpcEndpointType: Gateway
-      RouteTableIds: !Ref RouteTableIds
-
-  # Tried an execute-api Interface VPC endpoint here first -- confirmed via a
-  # real deploy that it doesn't work: that endpoint type only grants private
-  # access to REST APIs configured as PRIVATE endpoint type, not to a
-  # WebSocket API's PostToConnection Management API call (ForbiddenException).
-  # Fix instead: DjangoFunction (in the VPC, for RDS) async-invokes
-  # BroadcastFunction (NOT in the VPC, see below) to do the actual
-  # ConnectionsTable query + post_to_connection fan-out. Lambda-to-Lambda
-  # invoke via this endpoint is a standard, fully-supported PrivateLink
-  # pattern (unlike execute-api's Management API), so this one actually works.
-  LambdaVpcEndpointSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow the Django Lambda to reach the lambda Interface VPC endpoint
-      VpcId: !Ref VpcId
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          SourceSecurityGroupId: !Ref LambdaSecurityGroup
-
-  LambdaVpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Properties:
-      VpcId: !Ref VpcId
-      ServiceName: !Sub com.amazonaws.${AWS::Region}.lambda
-      VpcEndpointType: Interface
-      SubnetIds: !Ref SubnetIds
-      SecurityGroupIds:
-        - !Ref LambdaVpcEndpointSecurityGroup
-      PrivateDnsEnabled: true
-
-  # ==========================================================
-  # Relational data: users / academic / challenges catalog
-  # ==========================================================
-
-  RDSInstance:
-    Type: AWS::RDS::DBInstance
-    DeletionPolicy: Snapshot
-    UpdateReplacePolicy: Snapshot
-    Metadata:
-      # DBPassword is a NoEcho parameter, not a Secrets Manager dynamic
-      # reference, because Learner Lab's restricted IAM role typically
-      # can't create/read secrets. Suppress the lint suggestion.
-      cfn-lint:
-        config:
-          ignore_checks:
-            - W1011
-    Properties:
-      Engine: mysql
-      EngineVersion: '8.0.43'
-      DBInstanceClass: db.t3.micro
-      AllocatedStorage: '20'
-      DBName: mision_emprende2
-      MasterUsername: admin
-      MasterUserPassword: !Ref DBPassword
-      VPCSecurityGroups:
-        - !Ref DBSecurityGroup
-      DBSubnetGroupName: !Ref DBSubnetGroup
-      MultiAZ: false
-      PubliclyAccessible: false
-      BackupRetentionPeriod: 1
-      # Stop this instance between work sessions (Learner Lab $50 cap) --
-      # unlike Aurora Serverless v2, plain RDS can be stopped to ~$0 compute.
-
-  # ==========================================================
   # Django REST API (Lambda Web Adapter, container image)
   # ==========================================================
 
@@ -171,17 +42,8 @@ Resources:
     Properties:
       PackageType: Image
       Role: !Ref LabRoleArn
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
-        SubnetIds: !Ref SubnetIds
       Environment:
         Variables:
-          DATABASE_HOST: !GetAtt RDSInstance.Endpoint.Address
-          DATABASE_PORT: !GetAtt RDSInstance.Endpoint.Port
-          DATABASE_NAME: mision_emprende2
-          DATABASE_USER: admin
-          DATABASE_PASSWORD: !Ref DBPassword
           SECRET_KEY: !Ref DjangoSecretKey
           DEBUG: 'False'
           # 127.0.0.1 required so the Lambda Web Adapter's internal readiness
@@ -190,10 +52,10 @@ Resources:
           STATIC_MEDIA_BUCKET: !Ref StaticMediaBucket
           GAME_SESSIONS_TABLE: !Ref GameSessionTable
           USERS_TABLE: !Ref UsersTable
-          # game_sessions/broadcast.py async-invokes this (not in the VPC)
-          # rather than calling ConnectionsTable/apigatewaymanagementapi
-          # directly -- see BroadcastFunction and the LambdaVpcEndpoint
-          # comment above for why.
+          CONTENT_TABLE: !Ref ContentTable
+          # game_sessions/broadcast.py async-invokes this rather than calling
+          # ConnectionsTable/apigatewaymanagementapi directly -- see
+          # BroadcastFunction's comment for why.
           BROADCAST_FUNCTION_NAME: !Ref BroadcastFunction
       Events:
         RootApi:
@@ -217,6 +79,16 @@ Resources:
     Type: AWS::Serverless::Api
     Properties:
       StageName: prod
+      # Without this, API Gateway treats every request/response body as
+      # UTF-8 text and mangles binary payloads in transit -- e.g. an
+      # uploaded .xlsx (a ZIP archive) arrives corrupted at the Lambda
+      # ("bad offset for central directory" from openpyxl/zipfile).
+      # "*/*" is the standard fix when fronting Lambda Web Adapter with a
+      # REST API: LWA already base64-decodes the request body and
+      # base64-encodes binary responses, this just tells API Gateway to
+      # treat everything as binary-eligible so that machinery kicks in.
+      BinaryMediaTypes:
+        - "*/*"
 
   # ==========================================================
   # Static / media (Lambda has no persistent disk)
@@ -230,48 +102,6 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
-
-  # ==========================================================
-  # Frontend hosting (React SPA build, S3 static website)
-  # ==========================================================
-  # CloudFront (OAC/Distribution) is NOT usable on this AWS Academy Learner
-  # Lab account -- confirmed via a real deploy attempt (AccessDenied on
-  # cloudfront:CreateOriginAccessControl) and a direct read-only probe
-  # (cloudfront:ListDistributions also AccessDenied) -- the service is
-  # blocked wholesale for this account's role, not just OAC creation. S3
-  # static website hosting instead: public bucket, no HTTPS, but a
-  # deterministic SAM-output URL and no extra service dependency.
-  #
-  # ErrorDocument -> index.html is the standard SPA-on-S3 trick: S3 returns
-  # its error document (with an error status code, not 200) for any path
-  # that isn't a literal object key, which is enough for React Router to
-  # take over client-side on load. The build itself (frontend/dist/) is
-  # uploaded out-of-band with `aws s3 sync`, same as how DjangoFunction's
-  # container image is pushed outside this template.
-
-  FrontendBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: false
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: false
-      WebsiteConfiguration:
-        IndexDocument: index.html
-        ErrorDocument: index.html
-
-  FrontendBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Properties:
-      Bucket: !Ref FrontendBucket
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal: '*'
-            Action: s3:GetObject
-            Resource: !Sub "${FrontendBucket.Arn}/*"
 
   # ==========================================================
   # DynamoDB: game_sessions runtime data (single-table)
@@ -365,6 +195,49 @@ Resources:
             ProjectionType: ALL
 
   # ==========================================================
+  # DynamoDB: academic + challenges + admin_dashboard content
+  # ==========================================================
+  # See docs/superpowers/specs/2026-08-03-academic-challenges-dynamodb-
+  # migration-design.md. Shared by academic (Faculty/Career/Course),
+  # challenges (Stage/Activity/.../GeneralKnowledgeQuestion) and
+  # admin_dashboard's metric-cache models -- the first table in this
+  # codebase shared across apps, since these are small/tightly-coupled
+  # catalog entities that don't justify 3 separate tables. Item ids reuse
+  # the existing RDS auto-increment integers (stringified), not fresh
+  # UUIDs, because game_sessions DynamoDB items already reference these
+  # ids (course_id, current_stage_id, current_activity_id).
+
+  ContentTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # ==========================================================
   # DynamoDB: WebSocket connection tracking
   # ==========================================================
 
@@ -436,10 +309,12 @@ Resources:
       CodeUri: lambda/ws-default/
       Role: !Ref LabRoleArn
 
-  # Deliberately NOT in DjangoFunction's VPC -- this is exactly why it works
-  # where a direct call from DjangoFunction didn't (see LambdaVpcEndpoint's
-  # comment above). Plain Lambda networking has normal access to the
-  # regional execute-api Management API without needing any VPC endpoint.
+  # DjangoFunction async-invokes this instead of calling ConnectionsTable/
+  # apigatewaymanagementapi directly, historically because DjangoFunction
+  # used to run inside a VPC (for RDS) that couldn't reach the WebSocket
+  # Management API without extra PrivateLink plumbing. DjangoFunction left
+  # the VPC once RDS was retired (2026-08-04), so that constraint no longer
+  # applies, but the indirection is harmless and not worth unwinding.
   BroadcastFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -600,19 +475,15 @@ Outputs:
     Value: !Sub https://${DjangoApi}.execute-api.${AWS::Region}.amazonaws.com/prod/
   WebSocketUrl:
     Value: !Sub wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/prod/
-  RDSEndpoint:
-    Value: !GetAtt RDSInstance.Endpoint.Address
   GameSessionTableName:
     Value: !Ref GameSessionTable
   UsersTableName:
     Value: !Ref UsersTable
+  ContentTableName:
+    Value: !Ref ContentTable
   ConnectionsTableName:
     Value: !Ref ConnectionsTable
   StaticMediaBucketName:
     Value: !Ref StaticMediaBucket
-  FrontendBucketName:
-    Value: !Ref FrontendBucket
-  FrontendUrl:
-    Value: !GetAtt FrontendBucket.WebsiteURL
   AnalyticsBucketName:
     Value: !Ref AnalyticsBucket

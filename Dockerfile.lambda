@@ -17,7 +17,6 @@ ENV PYTHONUNBUFFERED=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
-    default-libmysqlclient-dev \
     pkg-config \
     ca-certificates \
     && apt-get upgrade -y \
