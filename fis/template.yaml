@@ -1,8 +1,21 @@
 AWSTemplateFormatVersion: '2010-09-09'
-# Kept as a SEPARATE stack from ../template.yaml deliberately: FisExperimentRole
-# below creates a new IAM role, which may be blocked on this AWS Academy
-# Learner Lab account (see DEPLOY.md's Learner Lab restrictions section) --
-# if so, only THIS stack fails/rolls back, never the main app stack.
+# NOT DEPLOYABLE on this AWS Academy Learner Lab account -- confirmed via two
+# live attempts, both documented in fis/README.md. Kept in the repo (and as a
+# SEPARATE stack from ../template.yaml) so the work isn't lost and so it's
+# ready to deploy unmodified the moment the account's restrictions change:
+#
+#   1. A first version created a new IAM role (FisExperimentRole) trusted by
+#      fis.amazonaws.com -- failed with iam:CreateRole AccessDenied.
+#   2. This version instead points every ExperimentTemplate's RoleArn
+#      directly at the account's pre-provisioned LabRoleArn (no new IAM
+#      resource). That got past the CreateRole block, but CloudFormation
+#      itself deploys as the Learner Lab user's own session, not LabRole --
+#      and that session has no policy allowing fis:CreateExperimentTemplate
+#      at all. Every ExperimentTemplate resource fails identically on that,
+#      regardless of what RoleArn it names.
+#
+# So this isn't an IAM-role-trust problem, and no further RoleArn swap can
+# fix it -- FIS is denied to this account's deploying identity outright.
 #
 # DjangoFunction is intentionally NOT covered here: it's a container-image
 # Lambda (PackageType: Image), and the AWS FIS Lambda extension can't be
@@ -23,9 +36,10 @@ Parameters:
     Type: String
     Description: >
       Same pre-provisioned AWS Academy Learner Lab role as ../template.yaml's
-      LabRoleArn parameter. Used here only as the Principal in a bucket
-      policy (granting it read access to the fault-config bucket) -- this
-      stack never modifies LabRoleArn itself.
+      LabRoleArn parameter. Used both as the Principal in a bucket policy
+      (granting it read access to the fault-config bucket) and directly as
+      the RoleArn on every experiment template below -- this stack never
+      creates or modifies LabRoleArn itself, only references it.
   WsConnectFunctionArn:
     Type: String
     Description: From ../template.yaml's WsConnectFunctionArn output.
@@ -87,54 +101,6 @@ Resources:
             Resource: !Sub '${FisConfigBucket.Arn}/FisConfigs/*'
 
   # ==========================================================
-  # FIS experiment role
-  # ==========================================================
-  # UNVERIFIED on this account: creating a new IAM role may be blocked on
-  # AWS Academy Learner Lab (../DEPLOY.md documents "No IAM role creation" as
-  # a confirmed restriction for the main stack's LabRoleArn-pinning choice).
-  # Whether that restriction extends to a role trusted only by
-  # fis.amazonaws.com (rather than a broader custom role) is unverified --
-  # reusing LabRoleArn instead isn't an option since its trust policy almost
-  # certainly doesn't include fis.amazonaws.com as a trusted principal and
-  # this stack has no way to add one. If `sam deploy` on this stack fails at
-  # this resource with an IAM AccessDenied, that's the answer: FIS isn't
-  # usable on this account without a role created some other way (e.g. by
-  # course staff), and everything above this resource (the bucket/policy)
-  # can stay -- only this role and the ExperimentTemplates below it need
-  # removing.
-  FisExperimentRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: fis.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: FisLambdaActionsPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Sid: AllowFisToWriteAndDeleteFaultConfigurations
-                Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:DeleteObject
-                Resource: !Sub '${FisConfigBucket.Arn}/FisConfigs/*'
-              - Sid: AllowFisToInspectLambdaFunctions
-                Effect: Allow
-                Action:
-                  - lambda:GetFunction
-                Resource: '*'
-              - Sid: AllowFisToDoTagLookups
-                Effect: Allow
-                Action:
-                  - tag:GetResources
-                Resource: '*'
-
-  # ==========================================================
   # Experiment templates -- one per targeted Lambda, each using
   # aws:lambda:invocation-error (see fis/README.md for why this action and
   # these parameters were chosen per function). None auto-start; every one
@@ -169,7 +135,7 @@ Resources:
         - Source: none
       Tags:
         Name: fis-ws-connect-invocation-error
-      RoleArn: !GetAtt FisExperimentRole.Arn
+      RoleArn: !Ref LabRoleArn
 
   WsDisconnectInvocationErrorExperiment:
     Type: AWS::FIS::ExperimentTemplate
@@ -198,7 +164,7 @@ Resources:
         - Source: none
       Tags:
         Name: fis-ws-disconnect-invocation-error
-      RoleArn: !GetAtt FisExperimentRole.Arn
+      RoleArn: !Ref LabRoleArn
 
   WsDefaultInvocationErrorExperiment:
     Type: AWS::FIS::ExperimentTemplate
@@ -227,7 +193,7 @@ Resources:
         - Source: none
       Tags:
         Name: fis-ws-default-invocation-error
-      RoleArn: !GetAtt FisExperimentRole.Arn
+      RoleArn: !Ref LabRoleArn
 
   # Highest-priority experiment in this stack: BroadcastFunction is invoked
   # async (InvocationType='Event', see game_sessions/broadcast.py) from every
@@ -264,7 +230,7 @@ Resources:
         - Source: none
       Tags:
         Name: fis-broadcast-invocation-error
-      RoleArn: !GetAtt FisExperimentRole.Arn
+      RoleArn: !Ref LabRoleArn
 
   # StreamToFirehoseFunction (DynamoDB Streams consumer off GameSessionTable,
   # see ../template.yaml) is analytics-only, off the gameplay critical path
@@ -299,7 +265,7 @@ Resources:
         - Source: none
       Tags:
         Name: fis-stream-to-firehose-invocation-error
-      RoleArn: !GetAtt FisExperimentRole.Arn
+      RoleArn: !Ref LabRoleArn
 
 Outputs:
   FisConfigBucketArn:
@@ -308,8 +274,6 @@ Outputs:
       (as arn:aws:s3:::<bucket>/FisConfigs/) to activate the Lambda
       extension on the targeted functions -- see fis/README.md.
     Value: !Sub '${FisConfigBucket.Arn}/FisConfigs/'
-  FisExperimentRoleArn:
-    Value: !GetAtt FisExperimentRole.Arn
   WsConnectExperimentId:
     Value: !Ref WsConnectInvocationErrorExperiment
   WsDisconnectExperimentId:

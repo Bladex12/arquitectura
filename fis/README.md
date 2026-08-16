@@ -10,21 +10,52 @@ Fault-injection experiments for the event-driven Lambdas (`WsConnectFunction`,
 (`PackageType: Image`), and the AWS FIS Lambda extension can't be attached
 as a plain Layer to those — see the same comment for detail.
 
-## Confirmed blocked on this account: IAM role creation
+## Confirmed blocked on this account: FIS itself, not just role creation
 
-`fis/template.yaml` creates a new IAM role (`FisExperimentRole`, trusted by
-`fis.amazonaws.com`). Deployed and tested 2026-08-16: fails at
-`FisExperimentRole` with `iam:CreateRole ... not authorized`, the same "no
-IAM role creation" restriction `DEPLOY.md` documents for the main stack's
-`LabRoleArn`-pinning choice, confirmed to extend to a role this narrowly
-scoped too. CloudFormation rolled the stack back cleanly (bucket, policy,
-and role all deleted, nothing left behind).
+Two attempts, both tested live 2026-08-16:
 
-FIS isn't usable on this account without a role provisioned some other way
-(e.g. by course staff). If one becomes available, deploy with
-`--parameter-overrides` unchanged and either pass its ARN in place of
-`FisExperimentRole` or remove that resource and the five
-`ExperimentTemplate` resources' `RoleArn` in favor of the provisioned role.
+**Attempt 1** — `fis/template.yaml` created a new IAM role (`FisExperimentRole`,
+trusted by `fis.amazonaws.com`). Failed at that resource with
+`iam:CreateRole ... not authorized` — the same "no IAM role creation"
+restriction `DEPLOY.md` documents for the main stack's `LabRoleArn`-pinning
+choice, confirmed to extend to a role this narrowly scoped too. Rolled back
+cleanly.
+
+**Attempt 2** — removed `FisExperimentRole` entirely and pointed every
+`ExperimentTemplate`'s `RoleArn` directly at the account's existing
+`LabRoleArn`, on the theory that `LabRole` might already be trusted by
+`fis.amazonaws.com` (this turned out to be true for `codedeploy.amazonaws.com`
+with zero new IAM resources — see the canary work in `../template.yaml`).
+This bypassed the `iam:CreateRole` block, but hit a different, more
+fundamental one: CloudFormation deploys as the Learner Lab user's own session
+(`arn:aws:sts::446248313306:assumed-role/voclabs/<user>`, *not* `LabRole` —
+`LabRoleArn` is only what gets *passed to* the Lambdas/experiments, not the
+identity doing the deploying), and that session has no policy allowing
+`fis:CreateExperimentTemplate` at all:
+
+```
+User: arn:aws:sts::446248313306:assumed-role/voclabs/user4890240=a.reyesp is
+not authorized to perform: fis:CreateExperimentTemplate on resource:
+arn:aws:fis:us-east-1:446248313306:action/aws:lambda:invocation-error because
+no identity-based policy allows the fis:CreateExperimentTemplate action
+(Service: Fis, Status Code: 403, HandlerErrorCode: AccessDenied)
+```
+
+All 5 `ExperimentTemplate` resources failed identically; `FisConfigBucket`/
+`FisConfigBucketPolicy` never got the chance to fail or succeed (cancelled
+mid-rollback). Stack rolled back cleanly, then deleted (`ROLLBACK_COMPLETE`
+→ `DELETE_COMPLETE`), nothing left behind.
+
+**Conclusion:** this is not an IAM-role-trust problem, and swapping
+`RoleArn` targets can't fix it — the FIS API itself is denied to whatever
+principal the Learner Lab session grants, independent of which role gets
+passed as `RoleArn` on the experiment templates. FIS isn't usable on this
+account at all without either broader FIS permissions on the Learner Lab
+session (provisioned by course staff) or deploying from a different,
+FIS-permitted AWS identity. Re-adding `FisExperimentRole` wouldn't change
+this outcome — that path is worse (also blocked, at an earlier step, on
+`iam:CreateRole`), so `fis/template.yaml` keeps the `LabRoleArn`-as-`RoleArn`
+version (attempt 2) as the leaner of the two known-blocked shapes.
 
 ## Deploy order
 
