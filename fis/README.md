@@ -10,19 +10,21 @@ Fault-injection experiments for the event-driven Lambdas (`WsConnectFunction`,
 (`PackageType: Image`), and the AWS FIS Lambda extension can't be attached
 as a plain Layer to those — see the same comment for detail.
 
-## Unverified before you start: IAM on this account
+## Confirmed blocked on this account: IAM role creation
 
 `fis/template.yaml` creates a new IAM role (`FisExperimentRole`, trusted by
-`fis.amazonaws.com`). Whether that's allowed on this AWS Academy Learner Lab
-account is **unverified** — `DEPLOY.md` documents "no IAM role creation" as a
-confirmed restriction for the main stack (that's why every Lambda there is
-pinned to `LabRoleArn` instead of an auto-generated role), but it's untested
-whether that extends to a role this narrowly scoped. Deploying this stack
-*is* the test. If it fails at `FisExperimentRole` with an IAM `AccessDenied`,
-that's your answer — FIS isn't usable here without a role provisioned some
-other way (e.g. by course staff), and everything above that resource (the S3
-bucket + bucket policy) can be left in place; only the role and the five
-`ExperimentTemplate` resources need removing.
+`fis.amazonaws.com`). Deployed and tested 2026-08-16: fails at
+`FisExperimentRole` with `iam:CreateRole ... not authorized`, the same "no
+IAM role creation" restriction `DEPLOY.md` documents for the main stack's
+`LabRoleArn`-pinning choice, confirmed to extend to a role this narrowly
+scoped too. CloudFormation rolled the stack back cleanly (bucket, policy,
+and role all deleted, nothing left behind).
+
+FIS isn't usable on this account without a role provisioned some other way
+(e.g. by course staff). If one becomes available, deploy with
+`--parameter-overrides` unchanged and either pass its ARN in place of
+`FisExperimentRole` or remove that resource and the five
+`ExperimentTemplate` resources' `RoleArn` in favor of the provisioned role.
 
 ## Deploy order
 
