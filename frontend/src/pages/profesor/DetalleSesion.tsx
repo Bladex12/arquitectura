@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -10,13 +10,11 @@ import {
   Trophy,
   Users,
   TrendingUp,
-  BarChart3,
   Award,
   Target,
   CheckCircle2,
   X,
   Eye,
-  Maximize2,
   UserCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -42,10 +40,6 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
-  AreaChart,
-  Area,
-  RadialBarChart,
-  RadialBar,
 } from 'recharts';
 
 interface GameSession {
@@ -83,6 +77,7 @@ interface TeamActivityProgress {
   team_name: string;
   activity_name: string;
   stage_name: string;
+  status: string;
   prototype_image_url?: string;
   pitch_intro_problem?: string;
   pitch_solution?: string;
@@ -158,9 +153,6 @@ export function DetalleSesion() {
   const [selectedPrototype, setSelectedPrototype] = useState<TeamActivityProgress | null>(null);
   const [selectedBubbleMap, setSelectedBubbleMap] = useState<TeamBubbleMap | null>(null);
   const [selectedPitch, setSelectedPitch] = useState<TeamActivityProgress | null>(null);
-  
-  // Tamaño fijo para el bubble map (sin zoom)
-  const BUBBLE_MAP_SIZE = { width: 1000, height: 1000 };
 
   useEffect(() => {
     if (sessionId) {
@@ -837,7 +829,7 @@ export function DetalleSesion() {
                       animationBegin={200}
                       animationDuration={800}
                     >
-                      {valueAreasData.map((entry, index) => (
+                      {valueAreasData.map((_entry, index) => (
                         <Cell key={`cell-${index}`} fill={GRADIENT_COLORS[index % GRADIENT_COLORS.length]} />
                       ))}
                     </Bar>

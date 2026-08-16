@@ -1,15 +1,14 @@
 ﻿import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Settings, Loader2, Target, Layers, Zap, Sparkles, MoreHorizontal, ChevronLeft, FileText, Video, Users, Gamepad2, BookOpen, Presentation, Trophy, Map, MessageCircle, PenTool, Mic, GraduationCap, HelpCircle, FileCheck, ClipboardList, X, Clock, Save, Edit, ToggleLeft, ToggleRight } from 'lucide-react';
+import { ArrowLeft, Loader2, Target, ChevronLeft, FileText, Video, Users, Gamepad2, BookOpen, Presentation, Trophy, Map, MessageCircle, PenTool, Mic, HelpCircle, Clock, Save, Edit } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { challengesAPI, academicAPI } from '@/services';
-import { Plus, Trash2, Search } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { WordSearchPreview } from '@/components/admin/WordSearchPreview';
 
 interface Activity {
@@ -32,18 +31,9 @@ interface OtherScreen {
   gradient: string;
 }
 
-interface Stage {
-  id: number;
-  name: string;
-  icon: any;
-  gradient: string;
-  description: string;
-}
-
 export function UpdateGameEtapa3() {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
-  const [selectedStage] = useState<number>(3);
+  const [selectedStage] = useState<number | string>(3);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loadingActivities, setLoadingActivities] = useState(false);
   
@@ -55,8 +45,9 @@ export function UpdateGameEtapa3() {
   const [presentationTimerMinutes, setPresentationTimerMinutes] = useState(0);
   const [presentationTimerSeconds, setPresentationTimerSeconds] = useState(90);
   
-  // Estado del formulario de edici+�n
-  const [formData, setFormData] = useState({
+  // El valor nunca se lee (los campos del formulario usan su propio estado),
+  // solo el setter -- ver los dos call sites de setFormData m+�s abajo.
+  const [, setFormData] = useState({
     name: '',
     description: '',
     order_number: 0,
@@ -71,11 +62,9 @@ export function UpdateGameEtapa3() {
   const [topics, setTopics] = useState<any[]>([]);
   const [loadingTopics, setLoadingTopics] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState<any | null>(null);
-  const [loadingTopic, setLoadingTopic] = useState(false);
   const [challenges, setChallenges] = useState<any[]>([]);
   const [loadingChallenges, setLoadingChallenges] = useState(false);
   const [selectedChallenge, setSelectedChallenge] = useState<any | null>(null);
-  const [loadingChallenge, setLoadingChallenge] = useState(false);
   const [faculties, setFaculties] = useState<any[]>([]);
   const [creatingTopic, setCreatingTopic] = useState(false);
   const [creatingChallenge, setCreatingChallenge] = useState(false);
@@ -109,7 +98,7 @@ export function UpdateGameEtapa3() {
   const [editingChaos, setEditingChaos] = useState<any | null>(null);
 
   const [presentationGeneralKnowledge, setPresentationGeneralKnowledge] = useState<any[]>([]);
-  const [loadingPresentationGeneralKnowledge, setLoadingPresentationGeneralKnowledge] = useState(false);
+  const [loadingPresentationGeneralKnowledge] = useState(false);
   const [creatingPresentationGeneralKnowledge, setCreatingPresentationGeneralKnowledge] = useState(false);
   const [editingPresentationGeneralKnowledge, setEditingPresentationGeneralKnowledge] = useState<any | null>(null);
 
@@ -143,44 +132,6 @@ export function UpdateGameEtapa3() {
     loadActivities();
   }, [navigate]);
 
-  const stages: Stage[] = [
-    {
-      id: 1,
-      name: 'Etapa 3',
-      icon: Target,
-      gradient: 'from-blue-500 to-cyan-500',
-      description: 'Configurar primera etapa',
-    },
-    {
-      id: 2,
-      name: 'Etapa 2',
-      icon: Layers,
-      gradient: 'from-purple-500 to-violet-500',
-      description: 'Configurar segunda etapa',
-    },
-    {
-      id: 3,
-      name: 'Etapa 3',
-      icon: Zap,
-      gradient: 'from-orange-500 to-red-500',
-      description: 'Configurar tercera etapa',
-    },
-    {
-      id: 4,
-      name: 'Etapa 4',
-      icon: Sparkles,
-      gradient: 'from-pink-500 to-rose-500',
-      description: 'Configurar cuarta etapa',
-    },
-    {
-      id: 'otros',
-      name: 'Otros',
-      icon: MoreHorizontal,
-      gradient: 'from-gray-500 to-slate-600',
-      description: 'Otras configuraciones',
-    },
-  ];
-
   // Mapeo de tipos de actividad a iconos (basado en nombres conocidos)
   const getActivityIcon = (activityTypeName: string, activityName: string) => {
     const lowerName = (activityName || '').toLowerCase();
@@ -201,81 +152,6 @@ export function UpdateGameEtapa3() {
     return FileText; // Icono por defecto
   };
 
-  // Lista de pantallas "otras" que no son parte de las etapas
-  const otherScreens: OtherScreen[] = [
-    {
-      id: 'objetivos',
-      name: 'Objetivos de Juego',
-      description: 'Configurar objetivos de aprendizaje del juego',
-      icon: Target,
-      gradient: 'from-blue-500 to-cyan-500',
-    },
-    {
-      id: 'tutorial',
-      name: 'Tutorial',
-      description: 'Configurar contenido del tutorial',
-      icon: HelpCircle,
-      gradient: 'from-purple-500 to-violet-500',
-    },
-    {
-      id: 'video-institucional',
-      name: 'Video Institucional',
-      description: 'Configurar video institucional',
-      icon: Video,
-      gradient: 'from-orange-500 to-red-500',
-    },
-    {
-      id: 'reflexion',
-      name: 'Reflexión',
-      description: 'Configurar pantalla de reflexión',
-      icon: MessageCircle,
-      gradient: 'from-pink-500 to-rose-500',
-    },
-    {
-      id: 'encuesta-reflexion',
-      name: 'Encuesta de Reflexión',
-      description: 'Configurar encuesta de reflexión',
-      icon: ClipboardList,
-      gradient: 'from-emerald-500 to-teal-600',
-    },
-  ];
-
-  const handleStageClick = async (stageId: number | string) => {
-    if (stageId === 'otros') {
-      // Para "Otros", usamos una lista est+�tica de pantallas
-      setSelectedStage('otros');
-      // Convertir otherScreens a formato similar a Activity para reutilizar la vista
-      const otherScreensAsActivities = otherScreens.map((screen, index) => ({
-        id: screen.id,
-        name: screen.name,
-        description: screen.description,
-        order_number: index + 1,
-        activity_type_name: 'Pantalla General',
-      }));
-      setActivities(otherScreensAsActivities as any);
-      return;
-    }
-
-    setSelectedStage(stageId);
-    setLoadingActivities(true);
-
-    try {
-      // Obtener actividades de la etapa desde el API
-      const activitiesData = await challengesAPI.getActivities({ stage: stageId, include_inactive: 'true' });
-      // Asegurarse de que las actividades tengan el campo timer_duration
-      const activitiesWithTimers = (activitiesData || []).map((activity: any) => ({
-        ...activity,
-        timer_duration: activity.timer_duration ?? null,
-      }));
-      setActivities(activitiesWithTimers);
-    } catch (error) {
-      console.error('Error al cargar actividades:', error);
-      toast.error('Error al cargar las actividades');
-      setActivities([]);
-    } finally {
-      setLoadingActivities(false);
-    }
-  };
 
   const handleBackToStages = () => {
     navigate('/admin/update-game');
@@ -417,7 +293,11 @@ export function UpdateGameEtapa3() {
       // Convertir minutos y segundos a segundos totales
       const totalSeconds = timerMinutes * 60 + timerSeconds;
       const timerDuration = (timerMinutes === 0 && timerSeconds === 0) ? null : totalSeconds;
-      
+      // Declarado en el scope de la funci+�n (no solo del bloque else) porque
+      // se vuelve a leer m+�s abajo, tras cerrar el if/else, para sincronizar
+      // selectedActivity.
+      let updateData: any = {};
+
       // Si es la actividad unificada, solo actualizar la actividad de "Seleccionar Tema"
       // porque esa es la que se usa como current_activity en el juego y de donde se obtiene el temporizador
       if ((selectedActivity as any)._isUnified) {
@@ -437,11 +317,9 @@ export function UpdateGameEtapa3() {
         toast.success('Temporizador actualizado correctamente');
       } else {
         // Verificar si es "Presentaci+�n del Pitch"
-        const isPresentationPitch = selectedActivity.name?.toLowerCase().includes('presentaci+�n') || 
+        const isPresentationPitch = selectedActivity.name?.toLowerCase().includes('presentaci+�n') ||
                                     selectedActivity.name?.toLowerCase().includes('presentacion');
-        
-        const updateData: any = {};
-        
+
         if (isPresentationPitch) {
           // Solo guardar el temporizador de presentaci+�n individual en config_data
           const presentationDuration = presentationTimerMinutes * 60 + presentationTimerSeconds;
@@ -716,12 +594,6 @@ export function UpdateGameEtapa3() {
 
   // Funci+�n para obtener el icono correcto dependiendo si es una actividad o pantalla "otra"
   const getIconForActivity = (activity: Activity) => {
-    // Si es una pantalla "otra", usar el icono espec+�fico
-    if (selectedStage === 'otros') {
-      const screen = otherScreens.find(s => s.id === activity.id);
-      if (screen) return screen.icon;
-    }
-    // Si no, usar el icono basado en el tipo/nombre
     return getActivityIcon(activity.activity_type_name, activity.name);
   };
 
@@ -782,93 +654,11 @@ export function UpdateGameEtapa3() {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {(() => {
-                    // Para Etapa 2, unificar "Seleccionar Tema" y "Ver el Desaf�o" en una sola tarjeta
-                    if (false) { // Etapa 3 no necesita esta l�gica
-                      const sortedActivities = [...activities].sort((a, b) => a.order_number - b.order_number);
-                      const topicActivity = sortedActivities.find((a: Activity) => 
-                        a.name.toLowerCase().includes('tema') || a.name.toLowerCase().includes('seleccionar')
-                      );
-                      const challengeActivity = sortedActivities.find((a: Activity) => 
-                        a.name.toLowerCase().includes('desafío') || a.name.toLowerCase().includes('desafio') || 
-                        a.name.toLowerCase().includes('ver el') || a.name.toLowerCase().includes('ver desaf')
-                      );
-                      
-                      // Filtrar las otras actividades (excluir tema y desafío)
-                      const otherActivities = sortedActivities.filter((a: Activity) => 
-                        a.id !== topicActivity?.id && a.id !== challengeActivity?.id
-                      );
-                      
-                      // Crear tarjeta unificada si existen ambas actividades
-                      const unifiedCard = topicActivity && challengeActivity ? {
-                        id: topicActivity.id, // Usar el ID de la actividad de tema como principal
-                        name: 'Seleccionar Tema y Desafío',
-                        description: 'Elige un tema y analiza su desafío asociado',
-                        order_number: topicActivity.order_number || 1,
-                        activity_type_name: topicActivity.activity_type_name || 'Selecci+�n',
-                        timer_duration: topicActivity.timer_duration || null,
-                        _isUnified: true,
-                        _topicActivityId: topicActivity.id,
-                        _challengeActivityId: challengeActivity.id,
-                      } : null;
-                      
-                      // Combinar: tarjeta unificada + otras actividades
-                      const displayActivities = unifiedCard 
-                        ? [unifiedCard, ...otherActivities]
-                        : sortedActivities;
-                      
-                      return displayActivities.map((activity: any, index: number) => {
-                        if (!activity || !activity.name) return null; // Filtrar actividades inv+�lidas
-                        const IconComponent = getIconForActivity(activity.activity_type_name || '', activity.name || '');
-                        const iconGradient = 'from-gray-400 to-gray-500';
-                        
-                        return (
-                          <motion.div
-                            key={activity.id}
-                            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                            transition={{ delay: index * 0.05 }}
-                            onClick={() => handleActivityClick(activity)}
-                            className="group cursor-pointer overflow-hidden relative"
-                          >
-                            <div className="bg-white/95 backdrop-blur-sm rounded-xl p-5 py-6 shadow-lg border border-gray-200 group-hover:bg-gradient-to-br group-hover:from-pink-500 group-hover:to-purple-600 group-hover:border-0 transition-all">
-                              <div className="relative z-10">
-                                <div className={`bg-gradient-to-br ${iconGradient} group-hover:from-white group-hover:to-white/90 w-10 h-10 rounded-xl flex items-center justify-center mb-3`}>
-                                  <IconComponent className="w-5 h-5 text-white group-hover:text-pink-500" />
-                                </div>
-                                
-                                <h3 className="text-sm font-semibold text-blue-900 mb-1.5 group-hover:text-white">
-                                  {activity.name}
-                                </h3>
-                                
-                                <p className="text-xs text-gray-600 mb-2 group-hover:text-white/90">
-                                  {activity.activity_type_name || 'Actividad'}
-                                </p>
-
-                                {activity.description && (
-                                  <p className="text-xs text-gray-500 mb-2.5 group-hover:text-white/80 line-clamp-2">
-                                    {activity.description}
-                                  </p>
-                                )}
-
-                                <div className="mt-3 flex items-center justify-between">
-                                  <span className="text-xs text-gray-400 group-hover:text-white/70">
-                                    Orden: {activity.order_number}
-                                  </span>
-                                  <span className="text-xs text-pink-500 group-hover:text-white font-medium">
-                                    Editar →
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          </motion.div>
-                        );
-                      }).filter(Boolean);
-                    } else {
                       // Para Etapa 3, mostrar todas las actividades normalmente
                       return activities
                         .sort((a, b) => a.order_number - b.order_number)
                         .map((activity, index) => {
-                          const IconComponent = getIconForActivity(activity.activity_type_name, activity.name);
+                          const IconComponent = getIconForActivity(activity);
                           const iconGradient = 'from-gray-400 to-gray-500';
                           
                           return (
@@ -916,7 +706,6 @@ export function UpdateGameEtapa3() {
                             </motion.div>
                           );
                         });
-                    }
                   })()}
                 </div>
               )}
@@ -1268,7 +1057,7 @@ export function UpdateGameEtapa3() {
                                               faculties: currentFaculties.filter(
                                                 (f: any) => (typeof f === 'object' ? f.id : f) !== faculty.id
                                               ),
-                                              faculty_ids: facultyIds.filter(id => id !== faculty.id),
+                                              faculty_ids: facultyIds.filter((id: any) => id !== faculty.id),
                                             });
                                           }
                                         }}

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Loader2, ChevronLeft, Clock, Save, FileText, Video, Users, Gamepad2, BookOpen, Presentation, Trophy, Map, MessageCircle, PenTool, Mic, GraduationCap, HelpCircle, FileCheck, ClipboardList, Target, Plus, Trash2, Search, Edit, X, RotateCw } from 'lucide-react';
+import { ArrowLeft, Loader2, ChevronLeft, Clock, Save, FileText, Video, Users, Gamepad2, BookOpen, Presentation, Trophy, Map, MessageCircle, PenTool, Mic, GraduationCap, HelpCircle, FileCheck, Target, Plus, Trash2, Search, Edit, X, RotateCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -24,7 +24,6 @@ interface Activity {
 
 export function UpdateGameEtapa1() {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
   const selectedStage = 1; // Siempre es la Etapa 1
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loadingActivities, setLoadingActivities] = useState(false);

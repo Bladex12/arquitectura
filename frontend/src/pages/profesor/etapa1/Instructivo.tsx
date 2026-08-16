@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Loader2, ArrowRight } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { sessionsAPI } from '@/services';
 import { toast } from 'sonner';
 import { GalacticPage } from '@/components/GalacticPage';
@@ -22,7 +21,7 @@ export function ProfesorInstructivo() {
   const [gameSession, setGameSession] = useState<GameSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [advancing, setAdvancing] = useState(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // URL del video explicativo del juego (cambiar por el video real)
   const videoUrl = 'https://www.youtube.com/embed/VIDEO_ID_AQUI'; // Reemplazar con el ID del video real

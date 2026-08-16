@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Loader2, ArrowRight } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { sessionsAPI } from '@/services';
 import { toast } from 'sonner';
 import { GalacticPage } from '@/components/GalacticPage';
@@ -29,7 +28,7 @@ export function ProfesorVideoInstitucional() {
   const [gameSession, setGameSession] = useState<GameSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [advancing, setAdvancing] = useState(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // Seleccionar un video aleatorio al cargar
   const [selectedVideo] = useState(() => {
@@ -59,7 +58,6 @@ export function ProfesorVideoInstitucional() {
       
       console.log('📹 Video Institucional - Estado actual:', {
         current_activity_name: data.current_activity_name,
-        current_activity: data.current_activity,
         current_stage_number: data.current_stage_number
       });
       

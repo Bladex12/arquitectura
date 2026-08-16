@@ -3,7 +3,7 @@ import { api, unwrapResults } from './api';
 export const teamBubbleMapsAPI = {
   list: async (params?: Record<string, any>) => {
     const response = await api.get('/sessions/team-bubble-maps/', { params });
-    return unwrapResults(response.data);
+    return unwrapResults<any[]>(response.data);
   },
 
   create: async (data: {

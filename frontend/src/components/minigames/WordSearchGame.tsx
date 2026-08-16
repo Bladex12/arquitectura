@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { WordSearchData } from './types';
 import { toast } from 'sonner';
 
@@ -92,13 +91,6 @@ export function WordSearchGame({
     // Calcular celdas entre startCell y la celda actual
     const newCells = getCellsBetween(startCell, { row, col });
     setSelectedCells(newCells);
-  };
-
-  const handleMouseUp = () => {
-    if (!isSelecting) return;
-    setIsSelecting(false);
-    verifySelection();
-    setStartCell(null);
   };
 
   const handleTouchStart = (e: React.TouchEvent, row: number, col: number) => {
@@ -376,30 +368,31 @@ export function WordSearchGame({
                     onTouchMove={handleTouchMove}
                     onTouchEnd={handleTouchEnd}
                     whileHover={{ scale: encontrada ? 1 : 1.05 }}
-                    style={{ touchAction: 'none' }}
                     className={`
                       w-7 h-7 sm:w-9 sm:h-9 md:w-10 md:h-10 flex items-center justify-center cursor-pointer text-xs sm:text-sm md:text-base
                       font-bold rounded transition-all duration-200 select-none
-                      ${encontrada 
-                        ? 'text-white shadow-lg font-extrabold' 
-                        : seleccionada 
-                          ? 'text-white shadow-lg font-bold' 
+                      ${encontrada
+                        ? 'text-white shadow-lg font-extrabold'
+                        : seleccionada
+                          ? 'text-white shadow-lg font-bold'
                           : 'bg-white text-gray-700 hover:opacity-80'
                       }
                     `}
-                    style={encontrada 
-                      ? { 
-                          backgroundColor: teamColorHex,
-                          boxShadow: `0 0 12px ${teamColorHex}, inset 0 0 8px rgba(255,255,255,0.3)`,
-                        } 
-                      : seleccionada 
-                        ? { 
-                            backgroundColor: teamColorHex, 
-                            opacity: 0.8,
-                            boxShadow: `0 0 8px ${teamColorHex}`
+                    style={{
+                      touchAction: 'none',
+                      ...(encontrada
+                        ? {
+                            backgroundColor: teamColorHex,
+                            boxShadow: `0 0 12px ${teamColorHex}, inset 0 0 8px rgba(255,255,255,0.3)`,
                           }
-                        : {}
-                    }
+                        : seleccionada
+                          ? {
+                              backgroundColor: teamColorHex,
+                              opacity: 0.8,
+                              boxShadow: `0 0 8px ${teamColorHex}`
+                            }
+                          : {})
+                    }}
                   >
                     <span className="pointer-events-none">
                       {letra}

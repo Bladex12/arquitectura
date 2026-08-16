@@ -75,20 +75,6 @@ export function UBotFormularioPitchModal({
     'Etapa 3'
   ];
 
-  // Crear un mapa de estilos para cada carácter
-  const getCharStyle = (char: string, index: number) => {
-    const textSoFar = fullMessage.slice(0, index + 1);
-    
-    for (const phrase of phrasesToBold) {
-      const phraseIndex = textSoFar.lastIndexOf(phrase);
-      if (phraseIndex !== -1 && index >= phraseIndex && index < phraseIndex + phrase.length) {
-        return { fontWeight: 'bold' as const, color: baseColor };
-      }
-    }
-    
-    return {};
-  };
-
   // Efecto para hacer scroll automático hacia abajo cuando cambia el texto
   useEffect(() => {
     if (textContainerRef.current) {

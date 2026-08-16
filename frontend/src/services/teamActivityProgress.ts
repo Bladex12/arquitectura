@@ -3,7 +3,7 @@ import { api, unwrapResults } from './api';
 export const teamActivityProgressAPI = {
   list: async (params?: Record<string, any>) => {
     const response = await api.get('/sessions/team-activity-progress/', { params });
-    return unwrapResults(response.data);
+    return unwrapResults<any[]>(response.data);
   },
 
   uploadPrototype: async (formData: FormData) => {

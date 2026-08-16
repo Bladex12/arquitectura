@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { sessionsAPI } from '@/services';
-import { toast } from 'sonner';
 
 /**
  * Hook para redirigir automáticamente al estado actual del juego

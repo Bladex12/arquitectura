@@ -3,8 +3,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Plus, History, Target, BookOpen, LogOut, GraduationCap,
-  Users, FileSpreadsheet, Loader2, ChevronDown, Trophy, Play, Shield,
-  Upload, X, BarChart2, Zap, Menu, ChevronRight, AlertTriangle,
+  Users, FileSpreadsheet, ChevronDown, Trophy, Play, Shield,
+  Upload, X, Zap, Menu, ChevronRight,
 } from 'lucide-react';
 import { CancelSessionModal } from '@/components/CancelSessionModal';
 import { authAPI, sessionsAPI, teamsAPI } from '@/services';

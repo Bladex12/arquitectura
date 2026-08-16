@@ -59,9 +59,6 @@ export function ProfesorRegistro() {
       // Login automático después del registro (igual que en login.html - líneas 413-429)
       setTimeout(async () => {
         try {
-          // Extraer username del email (igual que en login.html)
-          const username = formData.email.includes('@') ? formData.email.split('@')[0] : formData.email;
-          
           const loginData = await authAPI.login(formData.email, formData.password);
           
           // Guardar tokens

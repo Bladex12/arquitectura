@@ -13,7 +13,7 @@ export const sessionsAPI = {
 
   list: async (params?: Record<string, any>) => {
     const response = await api.get('/sessions/game-sessions/', { params });
-    return unwrapResults(response.data);
+    return unwrapResults<any[]>(response.data);
   },
 
   getTeams: async (sessionId: number | string) => {
@@ -68,7 +68,7 @@ export const sessionsAPI = {
     const response = await api.get('/sessions/session-stages/', {
       params: { game_session: gameSessionId, ...params },
     });
-    return unwrapResults(response.data);
+    return unwrapResults<any[]>(response.data);
   },
 
   getLobby: async (sessionId: number | string) => {

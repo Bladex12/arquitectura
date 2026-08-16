@@ -3,7 +3,7 @@ import { api, unwrapResults } from './api';
 export const teamsAPI = {
   list: async (params?: Record<string, any>) => {
     const response = await api.get('/sessions/teams/', { params });
-    return unwrapResults(response.data);
+    return unwrapResults<any[]>(response.data);
   },
 
   moveStudent: async (teamId: string, studentId: number, targetTeamId: string, roomCode: string) => {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Clock, Loader2, CheckCircle2, Coins, Bot, User, GraduationCap, Sparkles } from 'lucide-react';
+import { Loader2, CheckCircle2, User, GraduationCap, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { UBotPresentacionModal } from '@/components/UBotPresentacionModal';
 import { toast } from 'sonner';
@@ -29,7 +29,7 @@ export function TabletPresentacion() {
   const [completed, setCompleted] = useState(false);
   const [timerRemaining, setTimerRemaining] = useState<string>('--:--');
   const [connectionId, setConnectionId] = useState<string | null>(null);
-  const [gameSessionId, setGameSessionId] = useState<string | null>(null);
+  const [_gameSessionId, setGameSessionId] = useState<string | null>(null);
   const [currentActivityId, setCurrentActivityId] = useState<number | null>(null);
   const [currentSessionStageId, setCurrentSessionStageId] = useState<number | null>(null);
   const [showUBotModal, setShowUBotModal] = useState(false);
@@ -52,7 +52,7 @@ export function TabletPresentacion() {
   const [generalKnowledgeCompleted, setGeneralKnowledgeCompleted] = useState(false);
   const [generalKnowledgeCurrentIndex, setGeneralKnowledgeCurrentIndex] = useState(0);
   const [generalKnowledgeSelectedAnswers, setGeneralKnowledgeSelectedAnswers] = useState<Map<number, number>>(new Map());
-  const [progressData, setProgressData] = useState<{
+  const [_progressData, setProgressData] = useState<{
     part1_completed?: boolean;
     chaos_completed?: boolean;
     general_knowledge_completed?: boolean;
@@ -124,7 +124,6 @@ export function TabletPresentacion() {
       // Verificar estado del juego (usar lobby en lugar de getById para evitar problemas de autenticación)
       const lobbyData = await sessionsAPI.getLobby(statusData.game_session.id);
       const gameData = lobbyData.game_session;
-      const sessionId = statusData.game_session.id;
 
       const resultsUrl = getResultsRedirectUrl(gameData, connId);
       if (resultsUrl) { window.location.href = resultsUrl; return; }

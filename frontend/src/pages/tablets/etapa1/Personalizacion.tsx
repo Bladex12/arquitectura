@@ -1,10 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Users, Clock, Loader2, CheckCircle2, XCircle, Gamepad2, Coins, Hand, UserPlus, Bot } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { UBotPersonalizacionModal } from '@/components/UBotPersonalizacionModal';
 import { GalacticPage } from '@/components/GalacticPage';
 import { GlassCard } from '@/components/GlassCard';
@@ -31,7 +28,7 @@ export function TabletPersonalizacion() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [team, setTeam] = useState<Team | null>(null);
-  const [personalization, setPersonalization] = useState<Personalization | null>(null);
+  const [, setPersonalization] = useState<Personalization | null>(null);
   const [teamName, setTeamName] = useState('');
   const [knowEachOther, setKnowEachOther] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
@@ -42,7 +39,7 @@ export function TabletPersonalizacion() {
   const [gameSessionId, setGameSessionId] = useState<string | null>(null);
   const [currentActivityId, setCurrentActivityId] = useState<number | null>(null);
   const [showUBotModal, setShowUBotModal] = useState(false);
-  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const timerIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timeExpiredRef = useRef<boolean>(false);
   const checkActivityRef = useRef<() => void>(() => {});
 
@@ -73,7 +70,6 @@ export function TabletPersonalizacion() {
         // Guardar valores iniciales para comparación (COMO EN ETAPA 2)
         const initialActivityId = gameData.current_activity;
         const initialActivityName = gameData.current_activity_name || '';
-        const initialSessionStageId = gameData.current_session_stage;
         const initialStageNumber = gameData.current_stage_number;
 
         // Mostrar U-Bot directamente si no se ha visto
@@ -283,7 +279,7 @@ export function TabletPersonalizacion() {
     timeExpiredRef.current = false;
   }, [currentActivityId]);
 
-  const startTimer = async (activityId: number, gameSessionId: string) => {
+  const startTimer = async (_activityId: number, gameSessionId: string) => {
     // Si ya hay un intervalo corriendo, no iniciar otro
     if (timerIntervalRef.current) {
       return;

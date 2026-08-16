@@ -1,21 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import {
-  Users,
-  Clock,
-  Loader2,
-  CheckCircle2,
-  XCircle,
-  ArrowRight,
-  Play,
-  Award,
-  ClipboardList,
-  Gamepad2,
-  Target,
-  Sparkles,
-  Code,
-} from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EtapaIntroModal } from '@/components/EtapaIntroModal';
 import { isDevMode } from '@/utils/devMode';
@@ -107,8 +92,8 @@ export function ProfesorPresentacion() {
   const [advancing, setAdvancing] = useState(false);
   const [showEtapaIntro, setShowEtapaIntro] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timerIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (sessionId) {
@@ -231,7 +216,7 @@ export function ProfesorPresentacion() {
     }
   };
 
-  const startTimer = async (activityId: number, gameSessionId: string) => {
+  const startTimer = async (_activityId: number, gameSessionId: string) => {
     try {
       const timerData = await sessionsAPI.getActivityTimer(gameSessionId);
 
@@ -347,25 +332,6 @@ export function ProfesorPresentacion() {
     return colorMap[color] || '#667eea';
   };
 
-  const getShortName = (fullName: string) => {
-    const nameParts = fullName.trim().split(/\s+/);
-    const firstName = nameParts[0] || '';
-    let lastName = '';
-    if (nameParts.length === 2) {
-      lastName = nameParts[1];
-    } else if (nameParts.length >= 3) {
-      lastName = nameParts[nameParts.length - 2];
-    }
-    return lastName ? `${firstName} ${lastName}`.trim() : firstName || fullName;
-  };
-
-  const getInitials = (fullName: string) => {
-    const nameParts = fullName.trim().split(/\s+/);
-    const firstInitial = nameParts[0]?.[0]?.toUpperCase() || '';
-    const lastInitial = nameParts[nameParts.length - 1]?.[0]?.toUpperCase() || '';
-    return firstInitial + (lastInitial && lastInitial !== firstInitial ? lastInitial : '');
-  };
-
   if (loading) {
     return (
       <GalacticPage className="items-center justify-center">
@@ -384,19 +350,6 @@ export function ProfesorPresentacion() {
       </div>
     );
   }
-
-  const completedTeams = teams.filter((team) => {
-    const progress = activityProgress[team.id];
-    return progress && progress.status === 'completed';
-  }).length;
-
-  const inProgressTeams = teams.filter((team) => {
-    const progress = activityProgress[team.id];
-    return progress && progress.status !== 'completed' && progress.status !== 'pending';
-  }).length;
-
-  const totalTeams = teams.length;
-  const allTeamsCompleted = totalTeams > 0 && completedTeams === totalTeams;
 
   const completedCount = teams.filter(t => {
     const p = activityProgress[t.id];

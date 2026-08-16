@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence, useMotionValue, useTransform, animate } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { tabletConnectionsAPI } from '@/services';
 import { toast } from 'sonner';
 
@@ -108,21 +108,6 @@ function PinInput({
       </div>
     </div>
   );
-}
-
-// ─── Animated counter for decoration ─────────────────────────────────────────
-function CountUp({ to }: { to: number }) {
-  const count = useMotionValue(0);
-  const rounded = useTransform(count, (v) => Math.round(v));
-  const [display, setDisplay] = useState(0);
-
-  useEffect(() => {
-    const controls = animate(count, to, { duration: 2, ease: 'easeOut', delay: 1 });
-    const unsub = rounded.on('change', (v) => setDisplay(v));
-    return () => { controls.stop(); unsub(); };
-  }, [to]);
-
-  return <span>{display}</span>;
 }
 
 // ─── Team color palette ───────────────────────────────────────────────────────

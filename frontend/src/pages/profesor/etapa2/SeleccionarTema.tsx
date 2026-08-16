@@ -306,7 +306,7 @@ export function ProfesorSeleccionarTema() {
     }
   };
 
-  const handleNextActivity = async (skipRequirements: boolean = false) => {
+  const handleNextActivity = async (_skipRequirements: boolean = false) => {
     if (!sessionId) return;
     setLoading(true);
     

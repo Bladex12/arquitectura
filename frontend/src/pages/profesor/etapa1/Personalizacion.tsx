@@ -50,11 +50,10 @@ export function ProfesorPersonalizacion() {
   const [hasError, setHasError] = useState(false);
   const [timerRemaining, setTimerRemaining] = useState<string>('--:--');
   const [advancing, setAdvancing] = useState(false);
-  const [timeExpired, setTimeExpired] = useState(false);
   const [showEtapaIntro, setShowEtapaIntro] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timerIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Redirigir automáticamente si el juego está en otro estado
   useGameStateRedirect();
@@ -158,7 +157,7 @@ export function ProfesorPersonalizacion() {
     }
   };
 
-  const startTimer = async (activityId: number, sessionId: string) => {
+  const startTimer = async (_activityId: number, sessionId: string) => {
     try {
       const timerData = await sessionsAPI.getActivityTimer(sessionId);
 
@@ -270,22 +269,6 @@ export function ProfesorPersonalizacion() {
       return;
     }
     doAdvance();
-  };
-
-  const getTeamColorHex = (color: string) => {
-    const colorMap: Record<string, string> = {
-      Verde: '#28a745',
-      Azul: '#007bff',
-      Rojo: '#dc3545',
-      Amarillo: '#ffc107',
-      Naranja: '#fd7e14',
-      Morado: '#6f42c1',
-      Rosa: '#e83e8c',
-      Cian: '#17a2b8',
-      Gris: '#6c757d',
-      Marrón: '#795548',
-    };
-    return colorMap[color] || '#667eea';
   };
 
   if (loading) {

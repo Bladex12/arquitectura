@@ -44,7 +44,6 @@ function generateWordSearch(words: string[]): WordSearchData {
     seed = seed & seed; // Convertir a entero de 32 bits
   }
   seed = Math.abs(seed);
-  const rng = new SeededRandom(seed);
 
   // Posiciones con mayor complejidad: horizontal, vertical y diagonal
   // IMPORTANTE: Colocar diagonales PRIMERO para evitar conflictos
@@ -352,7 +351,7 @@ function generateWordSearch(words: string[]): WordSearchData {
 export function parseMinigameConfig(
   config: MinigameConfig,
   gameType: MinigameType,
-  seed?: number | string
+  _seed?: number | string
 ): AnyMinigameData {
   // Sopa de letras - SOLO COMO FALLBACK DE EMERGENCIA
   // Normalmente esto debería venir del backend en word_search_data

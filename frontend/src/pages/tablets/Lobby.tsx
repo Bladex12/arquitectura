@@ -2,13 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  Users,
-  Tablet,
   Loader2,
-  Gamepad2,
   CheckCircle2,
   XCircle,
-  Clock,
   Rocket,
   Briefcase,
   Map,
@@ -63,11 +59,11 @@ export function TabletLobby() {
   const [myTeamId, setMyTeamId] = useState<string | null>(null);
   const [gameStarted, setGameStarted] = useState(false);
   const [loadingDots, setLoadingDots] = useState('');
-  const [showLoadingScreen, setShowLoadingScreen] = useState(false);
+  const [showLoadingScreen] = useState(false);
   const [currentMessage, setCurrentMessage] = useState(0);
   const [progress, setProgress] = useState(0);
   const [showUBotModal, setShowUBotModal] = useState(false);
-  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const progressIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const checkActivityRef = useRef<() => void>(() => {});
 
   const loadingMessages = [
@@ -139,7 +135,6 @@ export function TabletLobby() {
           // Guardar valores iniciales para comparación
           const initialActivityId = gameData.current_activity;
           const initialActivityName = gameData.current_activity_name || '';
-          const initialSessionStageId = gameData.current_session_stage;
           const initialStageNumber = gameData.current_stage_number;
 
           // Verificar actividad y etapa (llamado por useRoomSync: WS push en

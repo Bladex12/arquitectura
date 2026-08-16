@@ -44,7 +44,7 @@ export function AdminPanel() {
   const navigate = useNavigate();
   const location = useLocation();
   const [admin, setAdmin] = useState<Admin | null>(null);
-  const [sessions, setSessions] = useState<GameSession[]>([]);
+  const [, setSessions] = useState<GameSession[]>([]);
   const [activeSession, setActiveSession] = useState<GameSession | null>(null);
   const [activeSessions, setActiveSessions] = useState<GameSession[]>([]);
 
@@ -54,7 +54,7 @@ export function AdminPanel() {
     return 'dashboard';
   };
 
-  const [currentSection, setCurrentSection] = useState<Section>(getSectionFromPath());
+  const [, setCurrentSection] = useState<Section>(getSectionFromPath());
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ sessions: 0, students: 0 });
 

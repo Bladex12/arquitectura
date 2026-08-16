@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { CheckCircle2, Loader2, Send, AlertCircle, GraduationCap, BookOpen, Instagram, Facebook, Linkedin, Mail, Heart } from 'lucide-react';
+import { CheckCircle2, Loader2, Send, GraduationCap, BookOpen, Instagram, Facebook, Linkedin, Mail, Heart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -45,7 +45,6 @@ const ENTREPRENEURSHIP_OPTIONS = [
 
 export function FormularioEvaluacion() {
   const { roomCode } = useParams<{ roomCode: string }>();
-  const navigate = useNavigate();
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [faculties, setFaculties] = useState<Faculty[]>([]);
@@ -113,6 +112,10 @@ export function FormularioEvaluacion() {
     
     if (!formData.student_name || !formData.student_email) {
       toast.error('Por favor completa tu nombre y correo UDD');
+      return;
+    }
+    if (!roomCode) {
+      toast.error('Código de sala inválido');
       return;
     }
 

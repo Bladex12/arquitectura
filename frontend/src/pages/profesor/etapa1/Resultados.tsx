@@ -69,7 +69,7 @@ export function ProfesorResultadosEtapa1() {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [syncStatus, setSyncStatus] = useState<Record<string, boolean>>({});
   const showResultsCalledRef = useRef(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const stageId = searchParams.get('stage_id');
 

@@ -82,7 +82,7 @@ export function ProfesorBubbleMap() {
   const [teamsWithMaps, setTeamsWithMaps] = useState<TeamWithMap[]>([]);
   const [gameSession, setGameSession] = useState<any>(null);
   const [currentActivity, setCurrentActivity] = useState<any>(null);
-  const [currentSessionStage, setCurrentSessionStage] = useState<any>(null);
+  const [, setCurrentSessionStage] = useState<any>(null);
   const [timerRemaining, setTimerRemaining] = useState<string>('--:--');
   const [allTeamsCompleted, setAllTeamsCompleted] = useState(false);
   const [previewMap, setPreviewMap] = useState<{ team: Team; bubbleMap: BubbleMap } | null>(null);
@@ -91,12 +91,9 @@ export function ProfesorBubbleMap() {
   const [teamChallenges, setTeamChallenges] = useState<Record<string, { persona_name?: string; persona_image_url?: string }>>({});
   const [teamFinalizedMap, setTeamFinalizedMap] = useState<Record<string, boolean>>({});
 
-  // Tamaño fijo para el bubble map (sin zoom)
-  const BUBBLE_MAP_SIZE = { width: 1000, height: 1000 };
-
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const timerSyncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timerIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timerSyncIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timerStartTimeRef = useRef<number | null>(null);
   const timerDurationRef = useRef<number | null>(null);
 
@@ -234,9 +231,8 @@ export function ProfesorBubbleMap() {
   };
 
   const loadBubbleMaps = async (sessionStageId: number) => {
+    if (!sessionId) return;
     try {
-      const token = localStorage.getItem('authToken');
-      
       // Fetch teams
       const teams = await sessionsAPI.getTeams(sessionId);
       const teamsArray: Team[] = Array.isArray(teams) ? teams : [teams];
@@ -365,7 +361,7 @@ export function ProfesorBubbleMap() {
     }
   };
 
-  const startTimer = async (activityId: number, gameSessionId: string) => {
+  const startTimer = async (_activityId: number, gameSessionId: string) => {
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
       timerIntervalRef.current = null;
@@ -415,7 +411,7 @@ export function ProfesorBubbleMap() {
     }
   };
 
-  const handleNextActivity = async (skipRequirements: boolean = false) => {
+  const handleNextActivity = async (_skipRequirements: boolean = false) => {
     if (!sessionId) return;
     setLoading(true);
     try {

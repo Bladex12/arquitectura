@@ -30,6 +30,7 @@ interface GameSession {
   id: string; status: string;
   current_activity?: number; current_activity_name?: string;
   current_stage_number?: number; course?: number; faculty?: number;
+  show_results_stage?: number;
 }
 
 type Step = 'category' | 'challenge';
@@ -67,7 +68,7 @@ export function TabletSeleccionarTemaDesafioV2() {
   const navigate = useNavigate();
 
   const [team, setTeam] = useState<Team | null>(null);
-  const [gameSessionId, setGameSessionId] = useState<number | null>(null);
+  const [, setGameSessionId] = useState<number | null>(null);
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [sessionStageId, setSessionStageId] = useState<number | null>(null);
   const [currentActivityId, setCurrentActivityId] = useState<number | null>(null);
@@ -188,7 +189,7 @@ export function TabletSeleccionarTemaDesafioV2() {
         topicsLoadedRef.current = true;
         try {
           const topicList = await challengesAPI.getTopics({});
-          const arr = Array.isArray(topicList) ? topicList : (topicList?.results || []);
+          const arr = Array.isArray(topicList) ? topicList : [];
           setTopics(arr);
         } catch (err) {
           console.error('Error loading topics:', err);
@@ -199,9 +200,9 @@ export function TabletSeleccionarTemaDesafioV2() {
       }
 
       if (isInitialLoad && stageId) {
-        syncTimer(statusData.game_session.id, connId, stageId);
+        syncTimer(statusData.game_session.id);
         timerSyncRef.current = setInterval(
-          () => syncTimer(statusData.game_session.id, connId, stageId!),
+          () => syncTimer(statusData.game_session.id),
           30000
         );
       }
@@ -213,14 +214,14 @@ export function TabletSeleccionarTemaDesafioV2() {
     }
   };
 
-  const syncTimer = async (gsId: string, connId: string, stageId: number) => {
+  const syncTimer = async (gsId: string) => {
     try {
       const timerData = await sessionsAPI.getActivityTimer(gsId);
       if (!timerData) return;
       const remaining = timerData.remaining_seconds ?? 0;
       if (remaining <= 0 && !timeExpiredRef.current) {
         timeExpiredRef.current = true;
-        await advanceActivityOnTimerExpiration(gsId, stageId, connId);
+        await advanceActivityOnTimerExpiration(gsId);
       }
       startLocalTimer(remaining);
     } catch {}
@@ -242,7 +243,7 @@ export function TabletSeleccionarTemaDesafioV2() {
     setStep('challenge');
     try {
       const result = await challengesAPI.getChallenges({ topic: topic.id });
-      const arr = Array.isArray(result) ? result : (result?.results || []);
+      const arr = Array.isArray(result) ? result : [];
       setChallenges(arr);
     } catch {
       toast.error('Error cargando desafíos');

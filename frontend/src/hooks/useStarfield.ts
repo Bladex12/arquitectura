@@ -20,10 +20,16 @@ export function useStarfield(
   nebTargetRef.current = nebTarget;
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const canvasEl = canvasRef.current;
+    if (!canvasEl) return;
+    const ctx2d = canvasEl.getContext('2d');
+    if (!ctx2d) return;
+    // Rebound to non-nullable-typed consts -- TS's control-flow narrowing
+    // from the guards above doesn't persist into the nested function
+    // declarations below (resize/drawBgShoots/bgLoop), only into closures
+    // defined in the same statement.
+    const canvas: HTMLCanvasElement = canvasEl;
+    const ctx: CanvasRenderingContext2D = ctx2d;
 
     let BW = 0, BH = 0;
     let stars: Star[] = [];

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Clock, Loader2, CheckCircle2, Coins, Bot } from 'lucide-react';
+import { Loader2, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { UBotMinijuegoModal } from '@/components/UBotMinijuegoModal';
 import { toast } from 'sonner';
@@ -36,9 +36,9 @@ export function TabletMinijuego() {
   const [userAnswer, setUserAnswer] = useState('');
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [timerRemaining, setTimerRemaining] = useState<string>('--:--');
+  const [, setTimerRemaining] = useState<string>('--:--');
   const [connectionId, setConnectionId] = useState<string | null>(null);
-  const [gameSessionId, setGameSessionId] = useState<number | null>(null);
+  const [, setGameSessionId] = useState<number | null>(null);
   const [currentActivityId, setCurrentActivityId] = useState<number | null>(null);
   const [currentSessionStageId, setCurrentSessionStageId] = useState<number | null>(null);
   // completedItems removido - no se usa realmente, solo se establecía pero nunca se leía
@@ -116,7 +116,6 @@ export function TabletMinijuego() {
       // Verificar estado del juego (usar lobby en lugar de getById para evitar problemas de autenticación)
       const lobbyData = await sessionsAPI.getLobby(statusData.game_session.id);
       const gameData = lobbyData.game_session;
-      const sessionId = statusData.game_session.id;
 
       const resultsUrl = getResultsRedirectUrl(gameData, connId);
       if (resultsUrl) { window.location.href = resultsUrl; return; }
@@ -262,7 +261,6 @@ export function TabletMinijuego() {
       
       const config = activityData.config_data || {};
       const wordSearchDataFromBackend = activityData.word_search_data; // Datos generados por el backend
-      const anagramDataFromBackend = activityData.anagram_data; // Datos del anagrama del backend
       const generalKnowledgeDataFromBackend = activityData.general_knowledge_data; // Datos de conocimiento general del backend
       
       let existingProgress: any = null;
@@ -319,7 +317,7 @@ export function TabletMinijuego() {
       
       // Si hay progreso en general_knowledge o anagrama completado, avanzar directamente ahí
       // Solo si checkExistingProgress no lo hizo ya (verificar si ya está en general_knowledge)
-      if ((hasGeneralKnowledgeProgress || generalKnowledgeData.completed || anagramCompleted) && currentPart !== 'general_knowledge') {
+      if (hasGeneralKnowledgeProgress || generalKnowledgeData.completed || anagramCompleted) {
         console.log('[loadMinijuegoActivity] Anagrama completado o general_knowledge en progreso, avanzando directamente a general_knowledge');
         setCurrentPart('general_knowledge');
         // Restaurar preguntas si están guardadas
@@ -412,7 +410,7 @@ export function TabletMinijuego() {
             }
             
             // Validar formato de palabras
-            const validWords = wordsToUse.filter(w => w && (typeof w === 'string' || (typeof w === 'object' && w.word)));
+            const validWords = wordsToUse.filter((w: any) => w && (typeof w === 'string' || (typeof w === 'object' && w.word)));
             if (validWords.length !== 5) {
               console.error(`ERROR: Solo ${validWords.length} palabras válidas de ${wordsToUse.length}`);
               toast.error('Error: Las palabras del anagrama no tienen el formato correcto.');
@@ -561,7 +559,7 @@ export function TabletMinijuego() {
             }
             
             // Validar que todas las palabras tengan el formato correcto
-            const validWords = wordsToUse.filter(w => w && (typeof w === 'string' || (typeof w === 'object' && w.word)));
+            const validWords = wordsToUse.filter((w: any) => w && (typeof w === 'string' || (typeof w === 'object' && w.word)));
             if (validWords.length !== 5) {
               console.error(`ERROR: Solo ${validWords.length} palabras válidas de ${wordsToUse.length}`);
               toast.error('Error: Las palabras del anagrama no tienen el formato correcto.');
@@ -860,7 +858,7 @@ export function TabletMinijuego() {
                       }
                       
                       // Validar formato de palabras
-                      const validWords = anagramDataFromBackend.words.filter(w => 
+                      const validWords = anagramDataFromBackend.words.filter((w: any) =>
                         w && (typeof w === 'string' || (typeof w === 'object' && w.word))
                       );
                       
@@ -939,7 +937,7 @@ export function TabletMinijuego() {
     }
   };
 
-  const startTimer = async (activityId: number, gameSessionId: string) => {
+  const startTimer = async (_activityId: number, gameSessionId: string) => {
     if (timerIntervalRef.current) {
       return;
     }
@@ -1221,22 +1219,6 @@ export function TabletMinijuego() {
 
   // handleKeyPress removido - no se usa, el componente AnagramGame maneja su propio onKeyPress
 
-  const getTeamColorHex = (color: string) => {
-    const colorMap: Record<string, string> = {
-      Verde: '#28a745',
-      Azul: '#007bff',
-      Rojo: '#dc3545',
-      Amarillo: '#ffc107',
-      Naranja: '#fd7e14',
-      Morado: '#6f42c1',
-      Rosa: '#e83e8c',
-      Cian: '#17a2b8',
-      Gris: '#6c757d',
-      Marrón: '#795548',
-    };
-    return colorMap[color] || '#667eea';
-  };
-
   if (loading) {
     return (
       <GalacticPage className="items-center justify-center">
@@ -1256,7 +1238,7 @@ export function TabletMinijuego() {
     );
   }
 
-  const handleWordFound = async (word: string, cells: Array<{ row: number; col: number }>) => {
+  const handleWordFound = async (word: string, _cells: Array<{ row: number; col: number }>) => {
     const newFoundWords = [...foundWords, word];
     setFoundWords(newFoundWords);
 
@@ -1343,7 +1325,6 @@ export function TabletMinijuego() {
       );
 
       if (response.ok) {
-        const data = await response.json();
         // No mostrar toast aquí, se mostrará cuando el usuario haga clic en el botón
         // toast.success(`¡Has completado la Parte 1: Sopa de Letras! ${data.tokens_earned || 0} tokens ganados`);
       }
@@ -1861,7 +1842,7 @@ export function TabletMinijuego() {
           )
         ) : currentPart === 'word_search' && minigameData && currentGameType === MinigameType.WORD_SEARCH ? (
           <WordSearchGame
-            data={minigameData}
+            data={minigameData as WordSearchData}
             foundWords={foundWords}
             onWordFound={handleWordFound}
             onComplete={handleWordSearchComplete}

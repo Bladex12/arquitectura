@@ -154,12 +154,12 @@ export function ProfesorLobby() {
   } | null>(null);
   const [startingGame, setStartingGame] = useState(false);
   const [isLaunchModalOpen, setIsLaunchModalOpen] = useState(false);
-  const [finalizingSession, setFinalizingSession] = useState(false);
+  const [, setFinalizingSession] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [shuffling, setShuffling] = useState(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     document.title = `Lobby - Misión Emprende`;
@@ -462,6 +462,7 @@ export function ProfesorLobby() {
 
   // ─── Shuffle all teams (revolver + guardar automáticamente) ───────────────────
   const shuffleAllTeams = async () => {
+    if (!sessionId) return;
     const allStudents = localTeams.flatMap((t) => t.students);
     if (allStudents.length === 0) { toast.error('No hay estudiantes para reorganizar'); return; }
 
@@ -494,6 +495,7 @@ export function ProfesorLobby() {
 
   // ─── Confirm launch: lógica real de inicio ────────────────────────────────────
   const confirmLaunch = async () => {
+    if (!sessionId) return;
     setIsLaunchModalOpen(false);
     setStartingGame(true);
     try {

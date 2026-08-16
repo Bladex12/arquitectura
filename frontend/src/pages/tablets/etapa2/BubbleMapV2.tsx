@@ -28,6 +28,7 @@ interface GameSession {
   id: string; status: string;
   current_activity?: number; current_activity_name?: string;
   current_stage_number?: number;
+  show_results_stage?: number;
 }
 
 interface Idea {
@@ -104,7 +105,7 @@ export function TabletBubbleMapV2() {
 
   const [team, setTeam] = useState<Team | null>(null);
   const [challenge, setChallenge] = useState<Challenge | null>(null);
-  const [sessionStageId, setSessionStageId] = useState<number | null>(null);
+  const [, setSessionStageId] = useState<number | null>(null);
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [mapId, setMapId] = useState<string | null>(null);
 
@@ -205,8 +206,8 @@ export function TabletBubbleMapV2() {
           setSessionStageId(stage2.id);
           sessionStageIdRef.current = stage2.id;
           await loadBubbleMapData(statusData.team.id, stage2.id);
-          syncTimer(gsId, connId, stage2.id);
-          timerSyncRef.current = setInterval(() => syncTimer(gsId, connId, stage2.id), 30000);
+          syncTimer(gsId);
+          timerSyncRef.current = setInterval(() => syncTimer(gsId), 30000);
         } else {
           setView('map');
         }
@@ -240,7 +241,7 @@ export function TabletBubbleMapV2() {
 
       // Load existing bubble map (v2 format only)
       const maps = await teamBubbleMapsAPI.list({ team: teamId, session_stage: stageId });
-      const mapsArr = Array.isArray(maps) ? maps : (maps?.results || []);
+      const mapsArr = Array.isArray(maps) ? maps : [];
       const existingMap = mapsArr[0];
 
       if (existingMap?.map_data?.version === 2) {
@@ -262,14 +263,14 @@ export function TabletBubbleMapV2() {
     }
   };
 
-  const syncTimer = async (gsId: string, connId: string, stageId: number) => {
+  const syncTimer = async (gsId: string) => {
     try {
       const timerData = await sessionsAPI.getActivityTimer(gsId);
       if (!timerData) return;
       const remaining = timerData.remaining_seconds ?? 0;
       if (remaining <= 0 && !timeExpiredRef.current) {
         timeExpiredRef.current = true;
-        await advanceActivityOnTimerExpiration(gsId, stageId, connId);
+        await advanceActivityOnTimerExpiration(gsId);
       }
       startLocalTimer(remaining);
     } catch {}

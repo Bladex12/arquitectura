@@ -1,23 +1,16 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import {
   ArrowLeft,
-  BarChart3,
   Loader2,
   Users,
   UserCheck,
   Gamepad2,
   CheckCircle2,
   TrendingUp,
-  Clock,
   Target,
-  MessageSquare,
-  PieChart as PieChartIcon,
-  Calendar,
   ChevronRight,
   ChevronLeft,
-  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -696,7 +689,7 @@ export function Dashboard() {
                         cx="50%"
                         cy="50%"
                         labelLine={false}
-                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                        label={({ name, percent }) => `${name}: ${((percent ?? 0) * 100).toFixed(0)}%`}
                         outerRadius={100}
                         fill="#8884d8"
                         dataKey="value"
@@ -772,12 +765,12 @@ export function Dashboard() {
                             cx="50%"
                             cy="50%"
                             labelLine={false}
-                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                            label={({ name, percent }) => `${name}: ${((percent ?? 0) * 100).toFixed(0)}%`}
                             outerRadius={100}
                             fill="#8884d8"
                             dataKey="value"
                           >
-                            {cancellationReasons.reasons.map((reason, index) => (
+                            {cancellationReasons.reasons.map((_reason, index) => (
                               <Cell 
                                 key={`cell-${index}`} 
                                 fill={CHART_COLORS[index % CHART_COLORS.length]}
@@ -785,7 +778,7 @@ export function Dashboard() {
                             ))}
                           </Pie>
                           <Tooltip 
-                            formatter={(value: number, name: string, props: any) => [
+                            formatter={(value: number, _name: string, props: any) => [
                               `${value} sesiones (${props.payload.percentage}%)`,
                               props.payload.name
                             ]}
@@ -859,10 +852,10 @@ export function Dashboard() {
                   <Bar
                     dataKey="avg_duration_seconds"
                     fill="#667eea"
-                    onClick={(data: Stage) => loadStageActivities(data.stage_id)}
+                    onClick={(data: any) => loadStageActivities(data.stage_id)}
                     style={{ cursor: 'pointer' }}
                   >
-                    {stages.map((entry, index) => (
+                    {stages.map((_entry, index) => (
                       <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                     ))}
                   </Bar>
@@ -889,10 +882,10 @@ export function Dashboard() {
                     <Bar
                       dataKey="avg_duration_seconds"
                       fill="#4facfe"
-                      onClick={(data: Activity) => loadActivityAnalysis(data.activity_id)}
+                      onClick={(data: any) => loadActivityAnalysis(data.activity_id)}
                       style={{ cursor: 'pointer' }}
                     >
-                      {activities.map((entry, index) => (
+                      {activities.map((_entry, index) => (
                         <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                       ))}
                     </Bar>
@@ -987,18 +980,18 @@ export function Dashboard() {
               <ResponsiveContainer width="100%" height={300}>
                 <PieChart>
                   <Pie
-                    data={topics}
+                    data={topics as any}
                     cx="50%"
                     cy="50%"
                     labelLine={false}
-                    label={({ topic_name, selection_count }) => `${topic_name}: ${selection_count}`}
+                    label={({ topic_name, selection_count }: any) => `${topic_name}: ${selection_count}`}
                     outerRadius={100}
                     fill="#8884d8"
                     dataKey="selection_count"
                     onClick={(data: Topic) => loadTopicChallenges(data.topic_id)}
                     style={{ cursor: 'pointer' }}
                   >
-                    {topics.map((entry, index) => (
+                    {topics.map((_entry, index) => (
                       <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                     ))}
                   </Pie>
@@ -1034,10 +1027,10 @@ export function Dashboard() {
                     <Bar
                       dataKey="selection_count"
                       fill="#f093fb"
-                      onClick={(data: Challenge) => loadChallengeAnalysis(data.challenge_id)}
+                      onClick={(data: any) => loadChallengeAnalysis(data.challenge_id)}
                       style={{ cursor: 'pointer' }}
                     >
-                      {challenges.map((entry, index) => (
+                      {challenges.map((_entry, index) => (
                         <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                       ))}
                     </Bar>
@@ -1122,12 +1115,12 @@ export function Dashboard() {
                       <Bar
                         dataKey="games_count"
                         fill="#667eea"
-                        onClick={(data: { faculty_id: number; faculty_name: string; games_count: number }) => 
+                        onClick={(data: any) =>
                           loadFacultyCareers(data.faculty_id)
                         }
                         style={{ cursor: 'pointer' }}
                       >
-                        {faculties.map((entry, index) => (
+                        {faculties.map((_entry, index) => (
                           <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                         ))}
                       </Bar>
@@ -1159,7 +1152,7 @@ export function Dashboard() {
                       />
                       <Tooltip />
                       <Bar dataKey="games_count" fill="#4facfe">
-                        {careers.map((entry, index) => (
+                        {careers.map((_entry, index) => (
                           <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                         ))}
                       </Bar>

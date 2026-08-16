@@ -1,14 +1,18 @@
 import { api, unwrapResults } from './api';
 
+// unwrapResults<T> defaults to {} with no explicit type argument -- every
+// endpoint below returns a list, so call sites (activitiesData.map, etc.)
+// need the array type, not the generic default.
+
 export const challengesAPI = {
   getLearningObjectives: async () => {
     const response = await api.get('/challenges/learning-objectives/');
-    return unwrapResults(response.data);
+    return unwrapResults<any[]>(response.data);
   },
 
   getActivities: async (params?: Record<string, any>) => {
     const response = await api.get('/challenges/activities/', { params });
-    return unwrapResults(response.data);
+    return unwrapResults<any[]>(response.data);
   },
 
   getActivityById: async (activityId: number | string) => {
@@ -23,7 +27,7 @@ export const challengesAPI = {
 
   getTopics: async (params?: Record<string, any>) => {
     const response = await api.get('/challenges/topics/', { params });
-    return unwrapResults(response.data);
+    return unwrapResults<any[]>(response.data);
   },
 
   getTopicById: async (topicId: number | string) => {
@@ -33,7 +37,7 @@ export const challengesAPI = {
 
   getChallenges: async (params?: Record<string, any>) => {
     const response = await api.get('/challenges/challenges/', { params });
-    return unwrapResults(response.data);
+    return unwrapResults<any[]>(response.data);
   },
 
   updateActivity: async (activityId: number | string, data: Partial<{
@@ -146,7 +150,7 @@ export const challengesAPI = {
   getWordSearchOptions: async (activityId?: number | string) => {
     const params = activityId ? { activity: activityId } : {};
     const response = await api.get('/challenges/word-search-options/', { params });
-    return unwrapResults(response.data);
+    return unwrapResults<any[]>(response.data);
   },
 
   generateWordSearchPreview: async (data: { words: string[]; name: string }) => {
@@ -174,7 +178,7 @@ export const challengesAPI = {
   // Anagram Words CRUD
   getAnagramWords: async () => {
     const response = await api.get('/challenges/anagram-words/');
-    return unwrapResults(response.data);
+    return unwrapResults<any[]>(response.data);
   },
 
   createAnagramWord: async (data: { word: string; is_active?: boolean }) => {
@@ -190,7 +194,7 @@ export const challengesAPI = {
   // Chaos Questions CRUD
   getChaosQuestions: async () => {
     const response = await api.get('/challenges/chaos-questions/');
-    return unwrapResults(response.data);
+    return unwrapResults<any[]>(response.data);
   },
 
   createChaosQuestion: async (data: { question: string; is_active?: boolean }) => {
@@ -223,7 +227,7 @@ export const challengesAPI = {
   // General Knowledge Questions CRUD
   getGeneralKnowledgeQuestions: async () => {
     const response = await api.get('/challenges/general-knowledge-questions/');
-    return unwrapResults(response.data);
+    return unwrapResults<any[]>(response.data);
   },
 
   createGeneralKnowledgeQuestion: async (data: {

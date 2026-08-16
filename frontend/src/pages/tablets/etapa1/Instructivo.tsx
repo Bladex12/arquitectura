@@ -1,20 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 import { sessionsAPI, tabletConnectionsAPI, teamPersonalizationsAPI } from '@/services';
-import { toast } from 'sonner';
 import { GalacticPage } from '@/components/GalacticPage';
 import { GlassCard } from '@/components/GlassCard';
 import { useRoomSync } from '@/hooks/useRoomSync';
-
-interface GameSession {
-  id: string;
-  room_code: string;
-  status: string;
-  current_activity_name?: string;
-  current_stage_number?: number;
-}
 
 export function TabletInstructivo() {
   const [searchParams] = useSearchParams();
@@ -64,7 +54,6 @@ export function TabletInstructivo() {
         // Guardar valores iniciales para comparación
         const initialActivityId = gameData.current_activity;
         const initialActivityName = gameData.current_activity_name || '';
-        const initialSessionStageId = gameData.current_session_stage;
         const initialStageNumber = gameData.current_stage_number;
 
         // Si la sesión finaliza, redirigir al join
