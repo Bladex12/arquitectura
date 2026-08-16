@@ -67,6 +67,10 @@ Resources:
     Properties:
       PackageType: Image
       Role: !Ref LabRoleArn
+      # Canary rollout, step 2: SAM natively rewires the Api event's method
+      # integration to the alias, so this needs no manual routing fix (unlike
+      # the hand-rolled WebSocket integrations below).
+      AutoPublishAlias: live
       Environment:
         Variables:
           SECRET_KEY: !Ref DjangoSecretKey
@@ -82,6 +86,9 @@ Resources:
           # ConnectionsTable/apigatewaymanagementapi directly -- see
           # BroadcastFunction's comment for why.
           BROADCAST_FUNCTION_NAME: !Ref BroadcastFunction
+          # Routes the async invoke through BroadcastFunction's canary alias
+          # instead of $LATEST -- see broadcast.py's Qualifier handling.
+          BROADCAST_FUNCTION_QUALIFIER: live
       Events:
         RootApi:
           Type: Api
@@ -310,6 +317,10 @@ Resources:
       Handler: index.handler
       CodeUri: lambda/ws-connect/
       Role: !Ref LabRoleArn
+      # Canary rollout: paired with WsConnectIntegration/WsConnectPermission
+      # below pointing at the alias instead of $LATEST -- AutoPublishAlias
+      # alone doesn't move traffic for hand-rolled ApiGatewayV2 integrations.
+      AutoPublishAlias: live
       # Layers/AWS_FIS_*/AWS_LAMBDA_EXEC_WRAPPER below: FIS Lambda-extension
       # wiring, inactive unless FisConfigBucketArn is set -- see fis/README.md.
       Layers: !If [HasFisConfigBucket, [!Ref FisLambdaExtensionLayerArn], !Ref 'AWS::NoValue']
@@ -327,6 +338,8 @@ Resources:
       Handler: index.handler
       CodeUri: lambda/ws-disconnect/
       Role: !Ref LabRoleArn
+      # Canary rollout: see WsConnectFunction's comment above.
+      AutoPublishAlias: live
       Layers: !If [HasFisConfigBucket, [!Ref FisLambdaExtensionLayerArn], !Ref 'AWS::NoValue']
       Environment:
         Variables:
@@ -368,6 +381,10 @@ Resources:
       CodeUri: lambda/broadcast/
       Role: !Ref LabRoleArn
       Timeout: 10
+      # Canary rollout: DjangoFunction's async invoke passes
+      # BROADCAST_FUNCTION_QUALIFIER=live (see broadcast.py) to route through
+      # this alias rather than $LATEST.
+      AutoPublishAlias: live
       Layers: !If [HasFisConfigBucket, [!Ref FisLambdaExtensionLayerArn], !Ref 'AWS::NoValue']
       Environment:
         Variables:
@@ -376,26 +393,30 @@ Resources:
           AWS_FIS_CONFIGURATION_LOCATION: !If [HasFisConfigBucket, !Ref FisConfigBucketArn, !Ref 'AWS::NoValue']
           AWS_LAMBDA_EXEC_WRAPPER: !If [HasFisConfigBucket, /opt/aws-fis/bootstrap, !Ref 'AWS::NoValue']
 
+  # IntegrationUri below points at each function's `live` alias (created by
+  # AutoPublishAlias above), not $LATEST -- SAM's Events sugar can't express
+  # WebSocket routes, so unlike Api/DynamoDB-triggered functions this has to
+  # be wired by hand for the canary alias to actually carry traffic.
   WsConnectIntegration:
     Type: AWS::ApiGatewayV2::Integration
     Properties:
       ApiId: !Ref WebSocketApi
       IntegrationType: AWS_PROXY
-      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WsConnectFunction.Arn}/invocations
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WsConnectFunctionAliaslive}/invocations
 
   WsDisconnectIntegration:
     Type: AWS::ApiGatewayV2::Integration
     Properties:
       ApiId: !Ref WebSocketApi
       IntegrationType: AWS_PROXY
-      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WsDisconnectFunction.Arn}/invocations
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WsDisconnectFunctionAliaslive}/invocations
 
   WsDefaultIntegration:
     Type: AWS::ApiGatewayV2::Integration
     Properties:
       ApiId: !Ref WebSocketApi
       IntegrationType: AWS_PROXY
-      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WsDefaultFunction.Arn}/invocations
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WsDefaultFunctionAliaslive}/invocations
 
   WsConnectRoute:
     Type: AWS::ApiGatewayV2::Route
@@ -418,11 +439,13 @@ Resources:
       RouteKey: $default
       Target: !Sub integrations/${WsDefaultIntegration}
 
+  # Scoped to the alias ARN (not the bare function), so this only authorizes
+  # API Gateway to invoke the `live` alias -- matching IntegrationUri above.
   WsConnectPermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !Ref WsConnectFunction
+      FunctionName: !Ref WsConnectFunctionAliaslive
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*
 
@@ -430,7 +453,7 @@ Resources:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !Ref WsDisconnectFunction
+      FunctionName: !Ref WsDisconnectFunctionAliaslive
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*
 
@@ -438,25 +461,21 @@ Resources:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !Ref WsDefaultFunction
+      FunctionName: !Ref WsDefaultFunctionAliaslive
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*
 
-  WebSocketDeployment:
-    Type: AWS::ApiGatewayV2::Deployment
-    DependsOn:
-      - WsConnectRoute
-      - WsDisconnectRoute
-      - WsDefaultRoute
-    Properties:
-      ApiId: !Ref WebSocketApi
-
+  # AutoDeploy instead of a manual Deployment resource -- a manual Deployment
+  # snapshots routes/integrations at creation time and won't pick up the
+  # alias-ARN change above without a new Deployment resource on every future
+  # WS change. AutoDeploy publishes route/integration changes to the stage
+  # automatically, same as HTTP APIs.
   WebSocketStage:
     Type: AWS::ApiGatewayV2::Stage
     Properties:
       ApiId: !Ref WebSocketApi
-      DeploymentId: !Ref WebSocketDeployment
       StageName: prod
+      AutoDeploy: true
 
   # ==========================================================
   # admin_dashboard analytics: DynamoDB Streams -> Firehose -> S3 -> Athena
@@ -491,6 +510,10 @@ Resources:
       Handler: index.handler
       CodeUri: lambda/stream-to-firehose/
       Role: !Ref LabRoleArn
+      # Canary rollout: DynamoDB Events sugar below, SAM rewires the event
+      # source mapping to the alias automatically -- no manual routing fix
+      # needed here, unlike the hand-rolled WebSocket integrations.
+      AutoPublishAlias: live
       Layers: !If [HasFisConfigBucket, [!Ref FisLambdaExtensionLayerArn], !Ref 'AWS::NoValue']
       Environment:
         Variables:

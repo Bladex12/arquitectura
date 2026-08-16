@@ -37,11 +37,16 @@ def broadcast_room(room_code):
     if not function_name:
         return
 
+    kwargs = {
+        'FunctionName': function_name,
+        'InvocationType': 'Event',
+        'Payload': json.dumps({'room_code': room_code}).encode('utf-8'),
+    }
+    qualifier = os.environ.get('BROADCAST_FUNCTION_QUALIFIER')
+    if qualifier:
+        kwargs['Qualifier'] = qualifier
+
     try:
-        boto3.client('lambda', region_name=os.environ.get('AWS_REGION', 'us-east-1')).invoke(
-            FunctionName=function_name,
-            InvocationType='Event',
-            Payload=json.dumps({'room_code': room_code}).encode('utf-8'),
-        )
+        boto3.client('lambda', region_name=os.environ.get('AWS_REGION', 'us-east-1')).invoke(**kwargs)
     except Exception:
         logger.exception('broadcast_room: failed to invoke broadcast function for room %s', room_code)
