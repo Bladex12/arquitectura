@@ -204,3 +204,7 @@ After code changes, `sam build && sam deploy` again — SAM diffs against the de
 ### Known stubs / incomplete pieces
 
 - `lambda/ws-connect`, `lambda/ws-disconnect`, `lambda/ws-default`, `lambda/stream-to-firehose` are minimal stubs, not fully-featured handlers — check `lambda/*/index.js` before assuming production-grade behavior.
+
+### Chaos testing (AWS FIS)
+
+A separate stack, `fis/template.yaml`, adds AWS Fault Injection Service experiment templates for the WS/broadcast/analytics Lambdas — see `fis/README.md` for the deploy order and what each experiment tests. Kept out of this stack deliberately since it creates a new IAM role whose feasibility on this Learner Lab account is unverified.

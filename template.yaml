@@ -25,6 +25,31 @@ Parameters:
   DjangoSecretKey:
     Type: String
     NoEcho: true
+  FisLambdaExtensionLayerArn:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /aws/service/fis/lambda-extension/AWS-FIS-extension-x86_64/1.x.x
+    Description: >
+      AWS-published SSM public parameter resolving to the current AWS FIS
+      Lambda extension layer ARN for this region/architecture (x86_64,
+      the default Lambda architecture since no function below sets
+      Architectures). Resolved automatically at deploy time -- see
+      https://docs.aws.amazon.com/fis/latest/userguide/actions-lambda-extension-arns.html.
+      Not used unless FisConfigBucketArn is also set (see below).
+  FisConfigBucketArn:
+    Type: String
+    Default: ''
+    Description: >
+      S3 ARN (e.g. arn:aws:s3:::bucket-name/FisConfigs/) of the fault-config
+      distribution bucket created by fis/template.yaml, the separate FIS
+      chaos-testing stack. Left blank by default so this stack deploys
+      standalone (e.g. every routine CI push) without depending on that
+      stack existing. Deploy fis/template.yaml first, then re-deploy this
+      stack passing its FisConfigBucketArn output here to activate FIS
+      instrumentation on the WS/broadcast/analytics Lambdas -- see
+      fis/README.md.
+
+Conditions:
+  HasFisConfigBucket: !Not [!Equals [!Ref FisConfigBucketArn, '']]
 
 Globals:
   Function:
@@ -285,10 +310,15 @@ Resources:
       Handler: index.handler
       CodeUri: lambda/ws-connect/
       Role: !Ref LabRoleArn
+      # Layers/AWS_FIS_*/AWS_LAMBDA_EXEC_WRAPPER below: FIS Lambda-extension
+      # wiring, inactive unless FisConfigBucketArn is set -- see fis/README.md.
+      Layers: !If [HasFisConfigBucket, [!Ref FisLambdaExtensionLayerArn], !Ref 'AWS::NoValue']
       Environment:
         Variables:
           CONNECTIONS_TABLE: !Ref ConnectionsTable
           GAME_SESSIONS_TABLE: !Ref GameSessionTable
+          AWS_FIS_CONFIGURATION_LOCATION: !If [HasFisConfigBucket, !Ref FisConfigBucketArn, !Ref 'AWS::NoValue']
+          AWS_LAMBDA_EXEC_WRAPPER: !If [HasFisConfigBucket, /opt/aws-fis/bootstrap, !Ref 'AWS::NoValue']
 
   WsDisconnectFunction:
     Type: AWS::Serverless::Function
@@ -297,9 +327,12 @@ Resources:
       Handler: index.handler
       CodeUri: lambda/ws-disconnect/
       Role: !Ref LabRoleArn
+      Layers: !If [HasFisConfigBucket, [!Ref FisLambdaExtensionLayerArn], !Ref 'AWS::NoValue']
       Environment:
         Variables:
           CONNECTIONS_TABLE: !Ref ConnectionsTable
+          AWS_FIS_CONFIGURATION_LOCATION: !If [HasFisConfigBucket, !Ref FisConfigBucketArn, !Ref 'AWS::NoValue']
+          AWS_LAMBDA_EXEC_WRAPPER: !If [HasFisConfigBucket, /opt/aws-fis/bootstrap, !Ref 'AWS::NoValue']
 
   WsDefaultFunction:
     Type: AWS::Serverless::Function
@@ -308,6 +341,18 @@ Resources:
       Handler: index.handler
       CodeUri: lambda/ws-default/
       Role: !Ref LabRoleArn
+      # Canary-deployment spike: AutoPublishAlias alone, deployed by itself,
+      # before any DeploymentPreference is added. SAM requires a function to
+      # already have a published version/alias from a PRIOR deploy before a
+      # gradual-deployment config can shift traffic to/from it -- adding both
+      # in the same deploy fails. WsDefaultFunction is the guinea pig: lowest
+      # traffic, lowest blast radius, of the 6 functions this is planned for.
+      AutoPublishAlias: live
+      Layers: !If [HasFisConfigBucket, [!Ref FisLambdaExtensionLayerArn], !Ref 'AWS::NoValue']
+      Environment:
+        Variables:
+          AWS_FIS_CONFIGURATION_LOCATION: !If [HasFisConfigBucket, !Ref FisConfigBucketArn, !Ref 'AWS::NoValue']
+          AWS_LAMBDA_EXEC_WRAPPER: !If [HasFisConfigBucket, /opt/aws-fis/bootstrap, !Ref 'AWS::NoValue']
 
   # DjangoFunction async-invokes this instead of calling ConnectionsTable/
   # apigatewaymanagementapi directly, historically because DjangoFunction
@@ -318,15 +363,18 @@ Resources:
   BroadcastFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Runtime: python3.11
+      Runtime: python3.14
       Handler: handler.handler
       CodeUri: lambda/broadcast/
       Role: !Ref LabRoleArn
       Timeout: 10
+      Layers: !If [HasFisConfigBucket, [!Ref FisLambdaExtensionLayerArn], !Ref 'AWS::NoValue']
       Environment:
         Variables:
           CONNECTIONS_TABLE: !Ref ConnectionsTable
           WS_API_ENDPOINT: !Sub "${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+          AWS_FIS_CONFIGURATION_LOCATION: !If [HasFisConfigBucket, !Ref FisConfigBucketArn, !Ref 'AWS::NoValue']
+          AWS_LAMBDA_EXEC_WRAPPER: !If [HasFisConfigBucket, /opt/aws-fis/bootstrap, !Ref 'AWS::NoValue']
 
   WsConnectIntegration:
     Type: AWS::ApiGatewayV2::Integration
@@ -443,9 +491,12 @@ Resources:
       Handler: index.handler
       CodeUri: lambda/stream-to-firehose/
       Role: !Ref LabRoleArn
+      Layers: !If [HasFisConfigBucket, [!Ref FisLambdaExtensionLayerArn], !Ref 'AWS::NoValue']
       Environment:
         Variables:
           DELIVERY_STREAM_NAME: !Ref AnalyticsDeliveryStream
+          AWS_FIS_CONFIGURATION_LOCATION: !If [HasFisConfigBucket, !Ref FisConfigBucketArn, !Ref 'AWS::NoValue']
+          AWS_LAMBDA_EXEC_WRAPPER: !If [HasFisConfigBucket, /opt/aws-fis/bootstrap, !Ref 'AWS::NoValue']
       Events:
         GameSessionStream:
           Type: DynamoDB
@@ -487,3 +538,15 @@ Outputs:
     Value: !Ref StaticMediaBucket
   AnalyticsBucketName:
     Value: !Ref AnalyticsBucket
+  # Consumed by fis/template.yaml's WsConnectFunctionArn/etc. parameters --
+  # see fis/README.md for the two-stack deploy order.
+  WsConnectFunctionArn:
+    Value: !GetAtt WsConnectFunction.Arn
+  WsDisconnectFunctionArn:
+    Value: !GetAtt WsDisconnectFunction.Arn
+  WsDefaultFunctionArn:
+    Value: !GetAtt WsDefaultFunction.Arn
+  BroadcastFunctionArn:
+    Value: !GetAtt BroadcastFunction.Arn
+  StreamToFirehoseFunctionArn:
+    Value: !GetAtt StreamToFirehoseFunction.Arn
