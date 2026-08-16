@@ -361,6 +361,14 @@ Resources:
       # in the same deploy fails. WsDefaultFunction is the guinea pig: lowest
       # traffic, lowest blast radius, of the 6 functions this is planned for.
       AutoPublishAlias: live
+      # Probes whether LabRoleArn is trusted by codedeploy.amazonaws.com --
+      # unverified until now (see DEPLOY.md). Reusing LabRoleArn instead of
+      # letting SAM generate a CodeDeploy service role, since this account
+      # doesn't allow IAM role creation. No Alarms configured yet -- this is
+      # step 1, just proving the trust relationship works.
+      DeploymentPreference:
+        Type: Canary10Percent5Minutes
+        Role: !Ref LabRoleArn
       Layers: !If [HasFisConfigBucket, [!Ref FisLambdaExtensionLayerArn], !Ref 'AWS::NoValue']
       Environment:
         Variables:
