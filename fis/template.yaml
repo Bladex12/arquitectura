@@ -1,0 +1,322 @@
+AWSTemplateFormatVersion: '2010-09-09'
+# Kept as a SEPARATE stack from ../template.yaml deliberately: FisExperimentRole
+# below creates a new IAM role, which may be blocked on this AWS Academy
+# Learner Lab account (see DEPLOY.md's Learner Lab restrictions section) --
+# if so, only THIS stack fails/rolls back, never the main app stack.
+#
+# DjangoFunction is intentionally NOT covered here: it's a container-image
+# Lambda (PackageType: Image), and the AWS FIS Lambda extension can't be
+# attached as a plain Layer to those -- it would need manual surgery on the
+# Docker image alongside the already-present Lambda Web Adapter extension,
+# best done as its own separate, carefully tested change.
+#
+# See fis/README.md for the required two-stack deploy order (this stack's
+# FisConfigBucketArn output feeds back into ../template.yaml's
+# FisConfigBucketArn parameter to actually activate the extension).
+Description: >
+  AWS FIS chaos-testing stack for Mision Emprende's event-driven Lambdas
+  (WS connect/disconnect/default, broadcast, stream-to-firehose). See
+  fis/README.md for the deploy order and per-function rationale.
+
+Parameters:
+  LabRoleArn:
+    Type: String
+    Description: >
+      Same pre-provisioned AWS Academy Learner Lab role as ../template.yaml's
+      LabRoleArn parameter. Used here only as the Principal in a bucket
+      policy (granting it read access to the fault-config bucket) -- this
+      stack never modifies LabRoleArn itself.
+  WsConnectFunctionArn:
+    Type: String
+    Description: From ../template.yaml's WsConnectFunctionArn output.
+  WsDisconnectFunctionArn:
+    Type: String
+    Description: From ../template.yaml's WsDisconnectFunctionArn output.
+  WsDefaultFunctionArn:
+    Type: String
+    Description: From ../template.yaml's WsDefaultFunctionArn output.
+  BroadcastFunctionArn:
+    Type: String
+    Description: From ../template.yaml's BroadcastFunctionArn output.
+  StreamToFirehoseFunctionArn:
+    Type: String
+    Description: From ../template.yaml's StreamToFirehoseFunctionArn output.
+
+Resources:
+
+  # ==========================================================
+  # Fault-config distribution bucket (AWS FIS <-> Lambda extension)
+  # ==========================================================
+
+  FisConfigBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # Grants the targeted Lambdas' own execution role (LabRoleArn) read access
+  # to the fault-config prefix, without ever touching LabRoleArn's own IAM
+  # policy -- a bucket policy is a resource-based policy on something THIS
+  # stack owns, so it isn't blocked by the account's "no IAM role/policy
+  # creation" restriction the way modifying LabRoleArn directly would be.
+  FisConfigBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FisConfigBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowLabRoleListingConfigLocation
+            Effect: Allow
+            Principal:
+              AWS: !Ref LabRoleArn
+            Action: s3:ListBucket
+            Resource: !GetAtt FisConfigBucket.Arn
+            Condition:
+              StringLike:
+                s3:prefix:
+                  - 'FisConfigs/*'
+          - Sid: AllowLabRoleReadingConfigObjects
+            Effect: Allow
+            Principal:
+              AWS: !Ref LabRoleArn
+            Action: s3:GetObject
+            Resource: !Sub '${FisConfigBucket.Arn}/FisConfigs/*'
+
+  # ==========================================================
+  # FIS experiment role
+  # ==========================================================
+  # UNVERIFIED on this account: creating a new IAM role may be blocked on
+  # AWS Academy Learner Lab (../DEPLOY.md documents "No IAM role creation" as
+  # a confirmed restriction for the main stack's LabRoleArn-pinning choice).
+  # Whether that restriction extends to a role trusted only by
+  # fis.amazonaws.com (rather than a broader custom role) is unverified --
+  # reusing LabRoleArn instead isn't an option since its trust policy almost
+  # certainly doesn't include fis.amazonaws.com as a trusted principal and
+  # this stack has no way to add one. If `sam deploy` on this stack fails at
+  # this resource with an IAM AccessDenied, that's the answer: FIS isn't
+  # usable on this account without a role created some other way (e.g. by
+  # course staff), and everything above this resource (the bucket/policy)
+  # can stay -- only this role and the ExperimentTemplates below it need
+  # removing.
+  FisExperimentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: fis.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: FisLambdaActionsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AllowFisToWriteAndDeleteFaultConfigurations
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub '${FisConfigBucket.Arn}/FisConfigs/*'
+              - Sid: AllowFisToInspectLambdaFunctions
+                Effect: Allow
+                Action:
+                  - lambda:GetFunction
+                Resource: '*'
+              - Sid: AllowFisToDoTagLookups
+                Effect: Allow
+                Action:
+                  - tag:GetResources
+                Resource: '*'
+
+  # ==========================================================
+  # Experiment templates -- one per targeted Lambda, each using
+  # aws:lambda:invocation-error (see fis/README.md for why this action and
+  # these parameters were chosen per function). None auto-start; every one
+  # is run by hand (`aws fis start-experiment`) so a chaos test never fires
+  # unattended against the live game.
+  # ==========================================================
+
+  WsConnectInvocationErrorExperiment:
+    Type: AWS::FIS::ExperimentTemplate
+    Properties:
+      Description: >
+        WsConnectFunction ($connect route) invocation-error, 50% of
+        invocations, 2 minutes. Tests whether the frontend's WebSocket
+        reconnect/backoff logic handles a flaky $connect route sanely
+        rather than spinning or silently giving up.
+      Actions:
+        injectError:
+          ActionId: aws:lambda:invocation-error
+          Parameters:
+            duration: PT2M
+            invocationPercentage: '50'
+            preventExecution: 'true'
+          Targets:
+            Functions: targetFunction
+      Targets:
+        targetFunction:
+          ResourceType: aws:lambda:function
+          ResourceArns:
+            - !Ref WsConnectFunctionArn
+          SelectionMode: ALL
+      StopConditions:
+        - Source: none
+      Tags:
+        Name: fis-ws-connect-invocation-error
+      RoleArn: !GetAtt FisExperimentRole.Arn
+
+  WsDisconnectInvocationErrorExperiment:
+    Type: AWS::FIS::ExperimentTemplate
+    Properties:
+      Description: >
+        WsDisconnectFunction ($disconnect route) invocation-error, 50% of
+        invocations, 2 minutes. Tests for orphaned ConnectionsTable rows
+        when disconnect cleanup fails -- BroadcastFunction wastes
+        invocations trying to reach dead connections if these accumulate.
+      Actions:
+        injectError:
+          ActionId: aws:lambda:invocation-error
+          Parameters:
+            duration: PT2M
+            invocationPercentage: '50'
+            preventExecution: 'true'
+          Targets:
+            Functions: targetFunction
+      Targets:
+        targetFunction:
+          ResourceType: aws:lambda:function
+          ResourceArns:
+            - !Ref WsDisconnectFunctionArn
+          SelectionMode: ALL
+      StopConditions:
+        - Source: none
+      Tags:
+        Name: fis-ws-disconnect-invocation-error
+      RoleArn: !GetAtt FisExperimentRole.Arn
+
+  WsDefaultInvocationErrorExperiment:
+    Type: AWS::FIS::ExperimentTemplate
+    Properties:
+      Description: >
+        WsDefaultFunction ($default route) invocation-error, 100% of
+        invocations, 1 minute. Lowest-priority target -- just confirms an
+        unhandled-route failure doesn't kill the whole WebSocket connection
+        (API Gateway should error just that frame).
+      Actions:
+        injectError:
+          ActionId: aws:lambda:invocation-error
+          Parameters:
+            duration: PT1M
+            invocationPercentage: '100'
+            preventExecution: 'true'
+          Targets:
+            Functions: targetFunction
+      Targets:
+        targetFunction:
+          ResourceType: aws:lambda:function
+          ResourceArns:
+            - !Ref WsDefaultFunctionArn
+          SelectionMode: ALL
+      StopConditions:
+        - Source: none
+      Tags:
+        Name: fis-ws-default-invocation-error
+      RoleArn: !GetAtt FisExperimentRole.Arn
+
+  # Highest-priority experiment in this stack: BroadcastFunction is invoked
+  # async (InvocationType='Event', see game_sessions/broadcast.py) from every
+  # state-changing view, with NO DestinationConfig/DLQ/MaximumRetryAttempts
+  # configured anywhere in ../template.yaml. After Lambda's default 2
+  # automatic async retries, a broadcast failure is silently dropped --
+  # nothing alerts, and the caller only logs and swallows the error by
+  # design (a broadcast failure must never 500 the HTTP response). This
+  # experiment answers: does a student/professor screen recover via the next
+  # poll/broadcast, or does it show stale state until the next unrelated
+  # broadcast happens to fire?
+  BroadcastInvocationErrorExperiment:
+    Type: AWS::FIS::ExperimentTemplate
+    Properties:
+      Description: >
+        BroadcastFunction invocation-error, 100% of invocations, 5 minutes --
+        async fan-out with no DLQ configured, tests silent-drop recovery.
+      Actions:
+        injectError:
+          ActionId: aws:lambda:invocation-error
+          Parameters:
+            duration: PT5M
+            invocationPercentage: '100'
+            preventExecution: 'true'
+          Targets:
+            Functions: targetFunction
+      Targets:
+        targetFunction:
+          ResourceType: aws:lambda:function
+          ResourceArns:
+            - !Ref BroadcastFunctionArn
+          SelectionMode: ALL
+      StopConditions:
+        - Source: none
+      Tags:
+        Name: fis-broadcast-invocation-error
+      RoleArn: !GetAtt FisExperimentRole.Arn
+
+  # StreamToFirehoseFunction (DynamoDB Streams consumer off GameSessionTable,
+  # see ../template.yaml) is analytics-only, off the gameplay critical path
+  # -- safe to hit hard, and the point of this experiment is exactly that:
+  # confirm errors here never touch gameplay. Also surfaces a real gap found
+  # while designing this: no DLQ/BisectBatchOnFunctionError configured on
+  # this function's event source mapping, so a poison-pill record can retry
+  # against the shard indefinitely until it ages out of the 24h stream
+  # retention window.
+  StreamToFirehoseInvocationErrorExperiment:
+    Type: AWS::FIS::ExperimentTemplate
+    Properties:
+      Description: >
+        StreamToFirehoseFunction invocation-error, 100% of invocations, 5
+        minutes -- analytics-only, confirms failures don't touch gameplay.
+      Actions:
+        injectError:
+          ActionId: aws:lambda:invocation-error
+          Parameters:
+            duration: PT5M
+            invocationPercentage: '100'
+            preventExecution: 'true'
+          Targets:
+            Functions: targetFunction
+      Targets:
+        targetFunction:
+          ResourceType: aws:lambda:function
+          ResourceArns:
+            - !Ref StreamToFirehoseFunctionArn
+          SelectionMode: ALL
+      StopConditions:
+        - Source: none
+      Tags:
+        Name: fis-stream-to-firehose-invocation-error
+      RoleArn: !GetAtt FisExperimentRole.Arn
+
+Outputs:
+  FisConfigBucketArn:
+    Description: >
+      Feed this back into ../template.yaml's FisConfigBucketArn parameter
+      (as arn:aws:s3:::<bucket>/FisConfigs/) to activate the Lambda
+      extension on the targeted functions -- see fis/README.md.
+    Value: !Sub '${FisConfigBucket.Arn}/FisConfigs/'
+  FisExperimentRoleArn:
+    Value: !GetAtt FisExperimentRole.Arn
+  WsConnectExperimentId:
+    Value: !Ref WsConnectInvocationErrorExperiment
+  WsDisconnectExperimentId:
+    Value: !Ref WsDisconnectInvocationErrorExperiment
+  WsDefaultExperimentId:
+    Value: !Ref WsDefaultInvocationErrorExperiment
+  BroadcastExperimentId:
+    Value: !Ref BroadcastInvocationErrorExperiment
+  StreamToFirehoseExperimentId:
+    Value: !Ref StreamToFirehoseInvocationErrorExperiment
