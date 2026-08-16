@@ -21,6 +21,7 @@ createRoot(document.getElementById('root')!).render(
         richColors 
         closeButton
         duration={2000}
+        visibleToasts={3}
         toastOptions={{
           style: {
             background: 'white',

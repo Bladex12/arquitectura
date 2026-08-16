@@ -205,7 +205,7 @@ export function ProfesorSeleccionarTema() {
     }
   };
 
-  const loadTeamsProgress = async (teamsList: Team[], activityId: number, stageId: number) => {
+  const loadTeamsProgress = async (teamsList: Team[], activityId: number, stageId: string) => {
     try {
       // Obtener el progreso de todos los equipos en una sola llamada
       const progressList = await teamActivityProgressAPI.list({

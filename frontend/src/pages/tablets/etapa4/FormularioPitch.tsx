@@ -68,7 +68,7 @@ export function TabletFormularioPitch() {
   const navigate = useNavigate();
   const [team, setTeam] = useState<Team | null>(null);
   const [currentActivityId, setCurrentActivityId] = useState<number | null>(null);
-  const [currentSessionStageId, setCurrentSessionStageId] = useState<number | null>(null);
+  const [currentSessionStageId, setCurrentSessionStageId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [timerRemaining, setTimerRemaining] = useState<string>('--:--');
@@ -213,7 +213,7 @@ export function TabletFormularioPitch() {
     }
   };
 
-  const loadPitchStatus = async (teamId: string, activityId: number, sessionStageId: number) => {
+  const loadPitchStatus = async (teamId: string, activityId: number, sessionStageId: string) => {
     if (isTypingRef.current || focusedFieldRef.current || isUpdatingFromServerRef.current) {
       return;
     }

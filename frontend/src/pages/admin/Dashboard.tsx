@@ -852,7 +852,7 @@ export function Dashboard() {
                   <Bar
                     dataKey="avg_duration_seconds"
                     fill="#667eea"
-                    onClick={(data: any) => loadStageActivities(data.stage_id)}
+                    onClick={(data: any) => { if (data?.stage_id != null) loadStageActivities(data.stage_id); }}
                     style={{ cursor: 'pointer' }}
                   >
                     {stages.map((_entry, index) => (
@@ -882,7 +882,7 @@ export function Dashboard() {
                     <Bar
                       dataKey="avg_duration_seconds"
                       fill="#4facfe"
-                      onClick={(data: any) => loadActivityAnalysis(data.activity_id)}
+                      onClick={(data: any) => { if (data?.activity_id != null) loadActivityAnalysis(data.activity_id); }}
                       style={{ cursor: 'pointer' }}
                     >
                       {activities.map((_entry, index) => (
@@ -1027,7 +1027,7 @@ export function Dashboard() {
                     <Bar
                       dataKey="selection_count"
                       fill="#f093fb"
-                      onClick={(data: any) => loadChallengeAnalysis(data.challenge_id)}
+                      onClick={(data: any) => { if (data?.challenge_id != null) loadChallengeAnalysis(data.challenge_id); }}
                       style={{ cursor: 'pointer' }}
                     >
                       {challenges.map((_entry, index) => (
@@ -1115,9 +1115,9 @@ export function Dashboard() {
                       <Bar
                         dataKey="games_count"
                         fill="#667eea"
-                        onClick={(data: any) =>
-                          loadFacultyCareers(data.faculty_id)
-                        }
+                        onClick={(data: any) => {
+                          if (data?.faculty_id != null) loadFacultyCareers(data.faculty_id);
+                        }}
                         style={{ cursor: 'pointer' }}
                       >
                         {faculties.map((_entry, index) => (

@@ -1,9 +1,36 @@
 import { api, unwrapResults } from './api';
 
+// Matches game_sessions/serializers.py's TeamActivityProgressSerializer.
+// `id` is a colon-joined "<team_id>:<activity_id>", not the item's raw SK
+// -- see that serializer's docstring for why (SK contains '#', a URL
+// fragment delimiter that silently truncates any request built from it).
+export interface TeamActivityProgress {
+  id: string;
+  team: string;
+  team_name: string | null;
+  session_stage: string | null;
+  stage_name: string | null;
+  activity: string;
+  activity_name: string | null;
+  status: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  progress_percentage: number;
+  response_data?: any;
+  selected_topic?: any;
+  selected_challenge?: any;
+  prototype_image_url?: string | null;
+  pitch_intro_problem?: string | null;
+  pitch_solution?: string | null;
+  pitch_value?: string | null;
+  pitch_impact?: string | null;
+  pitch_closing?: string | null;
+}
+
 export const teamActivityProgressAPI = {
-  list: async (params?: Record<string, any>) => {
+  list: async (params?: Record<string, any>): Promise<TeamActivityProgress[]> => {
     const response = await api.get('/sessions/team-activity-progress/', { params });
-    return unwrapResults<any[]>(response.data);
+    return unwrapResults<TeamActivityProgress[]>(response.data);
   },
 
   uploadPrototype: async (formData: FormData) => {
@@ -39,7 +66,7 @@ export const teamActivityProgressAPI = {
   savePitch: async (data: {
     team_id: string;
     activity_id: number;
-    session_stage_id: number;
+    session_stage_id: number | string;
     pitch_intro_problem?: string;
     pitch_solution?: string;
     pitch_value?: string;

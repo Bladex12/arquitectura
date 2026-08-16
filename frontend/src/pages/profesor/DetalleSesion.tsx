@@ -19,14 +19,19 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { 
-  sessionsAPI, 
-  teamsAPI, 
-  reflectionEvaluationsAPI, 
-  teamActivityProgressAPI, 
-  teamBubbleMapsAPI, 
-  tokenTransactionsAPI 
+import {
+  sessionsAPI,
+  teamsAPI,
+  reflectionEvaluationsAPI,
+  teamActivityProgressAPI,
+  teamBubbleMapsAPI,
+  tokenTransactionsAPI
 } from '@/services';
+import type { GameSession } from '@/services/sessions';
+import type { Team } from '@/services/teams';
+import type { TeamActivityProgress } from '@/services/teamActivityProgress';
+import type { TeamBubbleMap } from '@/services/teamBubbleMaps';
+import type { TokenTransaction } from '@/services/tokenTransactions';
 import { toast } from 'sonner';
 import {
   BarChart,
@@ -42,66 +47,10 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 
-interface GameSession {
-  id: number;
-  room_code: string;
-  status: string;
-  course_name?: string;
-  created_at: string;
-  started_at?: string;
-  ended_at?: string;
-}
-
-interface Team {
-  id: number;
-  name: string;
-  color: string;
-  tokens_total: number;
-  students?: Student[];
-}
-
-interface Student {
-  id: number;
-  full_name: string;
-  email: string;
-}
-
 interface ReflectionEvaluation {
   satisfaction: string;
   entrepreneurship_interest: string;
   value_areas: string[];
-}
-
-interface TeamActivityProgress {
-  id: number;
-  team_name: string;
-  activity_name: string;
-  stage_name: string;
-  status: string;
-  prototype_image_url?: string;
-  pitch_intro_problem?: string;
-  pitch_solution?: string;
-  pitch_value?: string;
-  pitch_impact?: string;
-  pitch_closing?: string;
-}
-
-interface TeamBubbleMap {
-  id: number;
-  team_name: string;
-  stage_name: string;
-  map_data: any;
-}
-
-interface TokenTransaction {
-  id: number;
-  team_name: string;
-  amount: number;
-  source_type: string;
-  session_stage?: number;
-  stage_name?: string | null;
-  stage_number?: number | null;
-  activity_name?: string;
 }
 
 // Colores vibrantes para gráficos
@@ -382,8 +331,9 @@ export function DetalleSesion() {
       // Agrupar por equipo
       const byTeamMap = new Map<string, number>();
       tokensArray.forEach((t: TokenTransaction) => {
-        const current = byTeamMap.get(t.team_name) || 0;
-        byTeamMap.set(t.team_name, current + t.amount);
+        const teamName = t.team_name || 'Equipo desconocido';
+        const current = byTeamMap.get(teamName) || 0;
+        byTeamMap.set(teamName, current + t.amount);
       });
       const byTeam = Array.from(byTeamMap.entries())
         .map(([team, tokens]) => ({
@@ -458,7 +408,7 @@ export function DetalleSesion() {
       // Agregar los tokens reales por equipo y etapa
       tokensArray.forEach((t: TokenTransaction) => {
         if (t.stage_number) {
-          const teamName = t.team_name;
+          const teamName = t.team_name || 'Equipo desconocido';
           if (!byStageAndTeamMap.has(t.stage_number)) {
             byStageAndTeamMap.set(t.stage_number, new Map<string, number>());
           }

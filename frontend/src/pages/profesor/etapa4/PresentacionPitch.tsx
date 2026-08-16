@@ -9,6 +9,7 @@ import {
   teamPersonalizationsAPI,
   peerEvaluationsAPI
 } from '@/services';
+import type { SessionStage } from '@/services/sessions';
 import { toast } from 'sonner';
 import { useGameStateRedirect } from '@/hooks/useGameStateRedirect';
 import { isDevMode } from '@/utils/devMode';
@@ -24,14 +25,6 @@ interface Team {
   id: string;
   name: string;
   color: string;
-}
-
-interface SessionStage {
-  id: number;
-  presentation_order: string[] | null;
-  current_presentation_team_id: string | null;
-  presentation_state: string;
-  presentation_timestamps?: Record<string, string>;
 }
 
 interface GameSession {

@@ -230,7 +230,7 @@ export function ProfesorBubbleMap() {
     }
   };
 
-  const loadBubbleMaps = async (sessionStageId: number) => {
+  const loadBubbleMaps = async (sessionStageId: string) => {
     if (!sessionId) return;
     try {
       // Fetch teams

@@ -106,7 +106,7 @@ export function TabletPrototipoV2() {
   const [loading, setLoading] = useState(true);
   const [, setGameSessionId] = useState<number | null>(null);
   const [currentActivityId, setCurrentActivityId] = useState<number | null>(null);
-  const [currentSessionStageId, setCurrentSessionStageId] = useState<number | null>(null);
+  const [currentSessionStageId, setCurrentSessionStageId] = useState<string | null>(null);
 
   // Screen
   const [screen, setScreen] = useState<Screen>('upload');
@@ -137,7 +137,7 @@ export function TabletPrototipoV2() {
   const timerStartTimeRef = useRef<number | null>(null);
   const timerDurationRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const sessionStageIdRef = useRef<number | null>(null);
+  const sessionStageIdRef = useRef<string | null>(null);
   const personaLoadedRef = useRef(false);
   const gameSessionIdRef = useRef<number | null>(null);
   const isFetchingRef = useRef(false);
@@ -263,7 +263,7 @@ export function TabletPrototipoV2() {
 
   // ─── Persona fetch ────────────────────────────────────────────────────────────
 
-  const loadPersona = async (teamId: string, stage2Id: number) => {
+  const loadPersona = async (teamId: string, stage2Id: string) => {
     try {
       const progressList = await teamActivityProgressAPI.list({
         team: teamId,

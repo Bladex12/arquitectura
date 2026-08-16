@@ -1840,9 +1840,9 @@ export function TabletMinijuego() {
               <p>Cargando anagrama...</p>
             </div>
           )
-        ) : currentPart === 'word_search' && minigameData && currentGameType === MinigameType.WORD_SEARCH ? (
+        ) : currentPart === 'word_search' && minigameData && currentGameType === MinigameType.WORD_SEARCH && minigameData.type === MinigameType.WORD_SEARCH ? (
           <WordSearchGame
-            data={minigameData as WordSearchData}
+            data={minigameData}
             foundWords={foundWords}
             onWordFound={handleWordFound}
             onComplete={handleWordSearchComplete}

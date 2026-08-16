@@ -8,17 +8,9 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
 import { academicAPI, reflectionEvaluationsAPI } from '@/services';
+import type { Faculty } from '@/services/academic';
+import type { CareerListItem as Career } from '@/services/academic';
 import { toast } from 'sonner';
-
-interface Faculty {
-  id: number;
-  name: string;
-}
-
-interface Career {
-  id: number;
-  name: string;
-}
 
 const VALUE_AREAS = [
   'Resolver desafios',

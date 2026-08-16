@@ -7,6 +7,7 @@ import {
   challengesAPI,
   teamActivityProgressAPI,
 } from '@/services';
+import type { Topic, Challenge } from '@/services/challenges';
 import { getResultsRedirectUrl } from '@/utils/tabletResultsRedirect';
 import { advanceActivityOnTimerExpiration } from '@/utils/timerAutoAdvance';
 import { toast } from 'sonner';
@@ -15,16 +16,6 @@ import { useRoomSync } from '@/hooks/useRoomSync';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Team { id: string; name: string; color: string; }
-
-interface Topic {
-  id: number; name: string; icon?: string; description?: string;
-}
-
-interface Challenge {
-  id: number; title: string; description?: string; icon?: string;
-  persona_name?: string; persona_age?: number;
-  persona_story?: string; persona_image_url?: string;
-}
 
 interface GameSession {
   id: string; status: string;
@@ -70,7 +61,7 @@ export function TabletSeleccionarTemaDesafioV2() {
   const [team, setTeam] = useState<Team | null>(null);
   const [, setGameSessionId] = useState<number | null>(null);
   const [connectionId, setConnectionId] = useState<string | null>(null);
-  const [sessionStageId, setSessionStageId] = useState<number | null>(null);
+  const [sessionStageId, setSessionStageId] = useState<string | null>(null);
   const [currentActivityId, setCurrentActivityId] = useState<number | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -79,7 +70,7 @@ export function TabletSeleccionarTemaDesafioV2() {
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [selectedChallenge, setSelectedChallenge] = useState<Challenge | null>(null);
-  const [expandedChallengeId, setExpandedChallengeId] = useState<number | null>(null);
+  const [expandedChallengeId, setExpandedChallengeId] = useState<string | null>(null);
   const [challengeToConfirm, setChallengeToConfirm] = useState<Challenge | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [waitingForProfessor, setWaitingForProfessor] = useState(false);
@@ -89,7 +80,7 @@ export function TabletSeleccionarTemaDesafioV2() {
   const timerSyncRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isFetchingRef = useRef(false);
   const timeExpiredRef = useRef(false);
-  const sessionStageIdRef = useRef<number | null>(null);
+  const sessionStageIdRef = useRef<string | null>(null);
   const topicsLoadedRef = useRef(false);
 
   useEffect(() => {

@@ -13,6 +13,7 @@ import {
   BarChart3,
 } from 'lucide-react';
 import { authAPI, sessionsAPI } from '@/services';
+import type { GameSession } from '@/services/sessions';
 import { toast } from 'sonner';
 
 interface Admin {
@@ -23,19 +24,6 @@ interface Admin {
     first_name?: string;
     last_name?: string;
   };
-}
-
-interface GameSession {
-  id: string;
-  room_code: string;
-  status: 'lobby' | 'running' | 'completed' | 'cancelled';
-  course_name?: string;
-  created_at: string;
-  started_at?: string;
-  ended_at?: string;
-  current_stage_name?: string;
-  current_stage_number?: number;
-  current_activity_name?: string;
 }
 
 type Section = 'dashboard' | 'update-game' | 'history' | 'learning-objectives' | 'tutorial';

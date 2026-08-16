@@ -10,9 +10,11 @@ Description: >
   (see docs/superpowers/specs/2026-08-03-academic-challenges-dynamodb-migration-design.md).
 
   NOTE: WS handlers (lambda/ws-*) and the stream-to-firehose Lambda are
-  stubs -- see the migration plan for which tasks fill them in. Canary
-  (AutoPublishAlias/DeploymentPreference) is intentionally left off every
-  function until the base stack deploys successfully once.
+  stubs -- see the migration plan for which tasks fill them in. All 6
+  functions below publish AutoPublishAlias: live; WsDefaultFunction alone
+  has a real (CodeDeploy) DeploymentPreference so far. See the comment
+  above Globals: below for why the FIS extension block isn't hoisted
+  there despite being on 5 of the 6 functions.
 
 Parameters:
   LabRoleArn:
@@ -26,15 +28,17 @@ Parameters:
     Type: String
     NoEcho: true
   FisLambdaExtensionLayerArn:
-    Type: AWS::SSM::Parameter::Value<String>
-    Default: /aws/service/fis/lambda-extension/AWS-FIS-extension-x86_64/1.x.x
+    Type: String
+    Default: ''
     Description: >
-      AWS-published SSM public parameter resolving to the current AWS FIS
-      Lambda extension layer ARN for this region/architecture (x86_64,
-      the default Lambda architecture since no function below sets
-      Architectures). Resolved automatically at deploy time -- see
-      https://docs.aws.amazon.com/fis/latest/userguide/actions-lambda-extension-arns.html.
-      Not used unless FisConfigBucketArn is also set (see below).
+      ARN of the AWS FIS Lambda extension layer for this region/architecture
+      (x86_64) -- see fis/README.md's activation step for how to fetch it.
+      Deliberately a plain manually-passed parameter, not
+      AWS::SSM::Parameter::Value<String>: CFN resolves SSM-typed parameter
+      defaults unconditionally on every deploy, before any Condition is
+      evaluated, so a stale SSM path would break every routine no-FIS
+      deploy, not just FIS activation. Not used unless FisConfigBucketArn
+      is also set.
   FisConfigBucketArn:
     Type: String
     Default: ''
@@ -43,14 +47,31 @@ Parameters:
       distribution bucket created by fis/template.yaml, the separate FIS
       chaos-testing stack. Left blank by default so this stack deploys
       standalone (e.g. every routine CI push) without depending on that
-      stack existing. Deploy fis/template.yaml first, then re-deploy this
-      stack passing its FisConfigBucketArn output here to activate FIS
+      stack existing, and so the FIS extension's overhead never touches
+      the hot-path Lambdas (Broadcast, WS Connect/Disconnect/Default,
+      StreamToFirehose) outside a deliberate testing window -- redeploy
+      with this left blank to deactivate FIS instrumentation. Deploy
+      fis/template.yaml first, then re-deploy this stack passing its
+      FisConfigBucketArn output here to activate FIS
       instrumentation on the WS/broadcast/analytics Lambdas -- see
       fis/README.md.
 
 Conditions:
   HasFisConfigBucket: !Not [!Equals [!Ref FisConfigBucketArn, '']]
 
+# AutoPublishAlias: live is NOT hoisted here even though all 6 functions
+# below already set it identically -- would be harmless (function-level
+# always wins over Globals) but also pointless, since none of them would
+# change behavior.
+#
+# The FIS Layers/Environment block (on 5 of 6 functions -- DjangoFunction
+# has neither a Layers key nor any AWS_FIS_* env var) is NOT hoisted here
+# either, and this one is a real correctness concern, not just tidiness:
+# SAM merges Globals Environment variables into every function that
+# doesn't already define that key, but does NOT merge Layers into a
+# function that has no Layers key at all. Hoisting would give
+# DjangoFunction the AWS_LAMBDA_EXEC_WRAPPER env var without a matching
+# layer, risking a cold-start failure the next time FIS is activated.
 Globals:
   Function:
     Timeout: 30
@@ -570,14 +591,18 @@ Outputs:
   AnalyticsBucketName:
     Value: !Ref AnalyticsBucket
   # Consumed by fis/template.yaml's WsConnectFunctionArn/etc. parameters --
-  # see fis/README.md for the two-stack deploy order.
+  # see fis/README.md for the two-stack deploy order. Point at each
+  # function's `live` alias, not the bare function -- that's the ARN real
+  # traffic actually invokes (see WsConnectIntegration/WsConnectPermission
+  # etc. above), so FIS experiments fault-inject the path real requests
+  # take instead of an unqualified $LATEST no one calls.
   WsConnectFunctionArn:
-    Value: !GetAtt WsConnectFunction.Arn
+    Value: !Ref WsConnectFunctionAliaslive
   WsDisconnectFunctionArn:
-    Value: !GetAtt WsDisconnectFunction.Arn
+    Value: !Ref WsDisconnectFunctionAliaslive
   WsDefaultFunctionArn:
-    Value: !GetAtt WsDefaultFunction.Arn
+    Value: !Ref WsDefaultFunctionAliaslive
   BroadcastFunctionArn:
-    Value: !GetAtt BroadcastFunction.Arn
+    Value: !Ref BroadcastFunctionAliaslive
   StreamToFirehoseFunctionArn:
-    Value: !GetAtt StreamToFirehoseFunction.Arn
+    Value: !Ref StreamToFirehoseFunctionAliaslive

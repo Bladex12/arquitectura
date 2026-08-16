@@ -14,18 +14,8 @@ import {
   Check,
 } from 'lucide-react';
 import { challengesAPI } from '@/services';
+import type { LearningObjective } from '@/services/challenges';
 import { toast } from 'sonner';
-
-interface LearningObjective {
-  id: number;
-  title: string;
-  description?: string;
-  evaluation_criteria?: string;
-  pedagogical_recommendations?: string;
-  estimated_time?: number;
-  stage_name?: string;
-  stage_number?: number;
-}
 
 export function Objetivos() {
   const navigate = useNavigate();

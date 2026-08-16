@@ -3,33 +3,13 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { EtapaIntroModal } from '@/components/EtapaIntroModal';
 import { sessionsAPI, teamsAPI, teamPersonalizationsAPI } from '@/services';
+import type { Team } from '@/services/teams';
+import type { TeamPersonalization as Personalization } from '@/services/teamPersonalizations';
 import { toast } from 'sonner';
 import { useGameStateRedirect } from '@/hooks/useGameStateRedirect';
 import { AdvanceConfirmModal } from '@/components/AdvanceConfirmModal';
 import { GalacticPage } from '@/components/GalacticPage';
 import { TimerBlock } from '@/components/TimerBlock';
-
-interface Student {
-  id: number;
-  full_name: string;
-}
-
-interface Team {
-  id: string;
-  name: string;
-  color: string;
-  students_count: number;
-  students?: Student[];
-}
-
-interface Personalization {
-  id?: string;
-  team: string;
-  team_name?: string;
-  team_members_know_each_other?: boolean | null;
-  created_at?: string;
-  updated_at?: string;
-}
 
 interface GameSession {
   id: string;

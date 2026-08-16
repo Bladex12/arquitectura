@@ -105,7 +105,7 @@ export function TabletBubbleMapV2() {
 
   const [team, setTeam] = useState<Team | null>(null);
   const [challenge, setChallenge] = useState<Challenge | null>(null);
-  const [, setSessionStageId] = useState<number | null>(null);
+  const [, setSessionStageId] = useState<string | null>(null);
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [mapId, setMapId] = useState<string | null>(null);
 
@@ -133,7 +133,7 @@ export function TabletBubbleMapV2() {
   const timerSyncRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isFetchingRef = useRef(false);
   const timeExpiredRef = useRef(false);
-  const sessionStageIdRef = useRef<number | null>(null);
+  const sessionStageIdRef = useRef<string | null>(null);
   const dragRef = useRef<{
     active: boolean; ideaId: string; nodeId: string;
     el: HTMLDivElement | null; offX: number; offY: number;
@@ -220,7 +220,7 @@ export function TabletBubbleMapV2() {
     }
   };
 
-  const loadBubbleMapData = async (teamId: string, stageId: number) => {
+  const loadBubbleMapData = async (teamId: string, stageId: string) => {
     try {
       // Load selected challenge from progress
       const progressList = await teamActivityProgressAPI.list({ team: teamId, session_stage: stageId });

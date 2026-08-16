@@ -3,22 +3,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Loader2, CalendarDays, Clock, ChevronRight } from 'lucide-react';
 import { sessionsAPI } from '@/services';
+import type { GameSession } from '@/services/sessions';
 import { toast } from 'sonner';
-
-interface GameSession {
-  id: string;
-  room_code: string;
-  status: 'lobby' | 'running' | 'completed' | 'cancelled';
-  course_name?: string;
-  created_at: string;
-  started_at?: string;
-  ended_at?: string;
-  current_stage_number?: number;
-  current_stage_name?: string;
-  current_activity_name?: string;
-  cancellation_reason?: string;
-  cancellation_reason_other?: string;
-}
 
 export function Historial() {
   const navigate = useNavigate();

@@ -7,6 +7,7 @@ import { GalacticPage } from '@/components/GalacticPage';
 import { GlassCard } from '@/components/GlassCard';
 import { toast } from 'sonner';
 import { tabletConnectionsAPI, sessionsAPI, teamPersonalizationsAPI } from '@/services';
+import type { TeamPersonalization as Personalization } from '@/services/teamPersonalizations';
 import { advanceActivityOnTimerExpiration } from '@/utils/timerAutoAdvance';
 import { getResultsRedirectUrl } from '@/utils/tabletResultsRedirect';
 import { useRoomSync } from '@/hooks/useRoomSync';
@@ -16,12 +17,6 @@ interface Team {
   name: string;
   color: string;
   tokens_total?: number;
-}
-
-interface Personalization {
-  id?: number;
-  team_name?: string;
-  team_members_know_each_other?: boolean;
 }
 
 export function TabletPersonalizacion() {
@@ -145,7 +140,7 @@ export function TabletPersonalizacion() {
             const existingPers = persResults[0];
             setPersonalization(existingPers);
             setTeamName(existingPers.team_name || '');
-            setKnowEachOther(existingPers.team_members_know_each_other);
+            setKnowEachOther(existingPers.team_members_know_each_other ?? null);
             setSubmitted(true);
           }
         } catch (error) {
@@ -359,9 +354,12 @@ export function TabletPersonalizacion() {
 
       // Actualizar el estado local con la personalización guardada
       setPersonalization({
-        id: result.id,
+        team: team.id,
+        team_name_display: result.team_name_display ?? teamName.trim(),
         team_name: teamName.trim(),
         team_members_know_each_other: knowEachOther,
+        created_at: result.created_at,
+        updated_at: result.updated_at,
       });
 
       toast.success('✓ Personalización guardada exitosamente');

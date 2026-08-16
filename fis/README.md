@@ -65,16 +65,22 @@ sam deploy --stack-name mision-emprende-fis --region us-east-1 \
 ```
 
 **3. Activate the extension on the main stack**, passing this stack's
-`FisConfigBucketArn` output back in:
+`FisConfigBucketArn` output back in, plus the FIS Lambda extension layer
+ARN (also a manually-passed parameter, on purpose -- see its Description
+in `../template.yaml` for why it isn't SSM-resolved automatically):
 
 ```bash
 cd ..
 FIS_BUCKET_ARN=$(aws cloudformation describe-stacks --stack-name mision-emprende-fis \
   --region us-east-1 --query "Stacks[0].Outputs[?OutputKey=='FisConfigBucketArn'].OutputValue" --output text)
+FIS_LAYER_ARN=$(aws ssm get-parameter \
+  --name /aws/service/fis/lambda-extension/AWS-FIS-extension-x86_64/1.x.x \
+  --query Parameter.Value --output text)
 sam deploy --parameter-overrides \
   LabRoleArn="<same as always>" \
   DjangoSecretKey="<same as always>" \
-  FisConfigBucketArn="$FIS_BUCKET_ARN"
+  FisConfigBucketArn="$FIS_BUCKET_ARN" \
+  FisLambdaExtensionLayerArn="$FIS_LAYER_ARN"
 ```
 
 After this, the 5 target functions carry the FIS extension layer and will

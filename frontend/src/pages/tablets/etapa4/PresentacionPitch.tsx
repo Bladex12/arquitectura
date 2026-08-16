@@ -303,7 +303,7 @@ export function TabletPresentacionPitch() {
     }
   };
 
-  const loadPresentationStatus = async (stageId: number) => {
+  const loadPresentationStatus = async (stageId: string) => {
     try {
       const status: PresentationStatus = await sessionStagesAPI.getPresentationStatus(stageId);
 
@@ -424,7 +424,7 @@ export function TabletPresentacionPitch() {
     }
   };
 
-  const startPresentationTimer = async (stageId: number) => {
+  const startPresentationTimer = async (stageId: string) => {
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
       timerIntervalRef.current = null;

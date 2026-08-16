@@ -21,8 +21,8 @@ interface TeamProgress {
   progress: {
     id: string;
     status: string;
-    prototype_image_url?: string;
-    completed_at?: string;
+    prototype_image_url?: string | null;
+    completed_at?: string | null;
   } | null;
 }
 

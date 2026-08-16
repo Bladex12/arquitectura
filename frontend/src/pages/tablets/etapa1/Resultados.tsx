@@ -227,7 +227,7 @@ export function TabletResultadosEtapa1() {
       }
 
       if (isResultadosPage || !currentActivityId) {
-        let stageId: number | undefined = undefined;
+        let stageId: string | undefined = undefined;
 
         console.log('📊 Tablet - Cargando resultados para etapa:', targetStageNumber);
 
@@ -236,7 +236,7 @@ export function TabletResultadosEtapa1() {
           if (Array.isArray(stagesData)) {
             const targetStage = stagesData.find((s: any) => s.stage_number === targetStageNumber);
             if (targetStage && targetStage.stage) {
-              stageId = typeof targetStage.stage === 'object' ? targetStage.stage.id : targetStage.stage;
+              stageId = targetStage.stage;
               console.log('✅ Tablet - Stage ID encontrado:', stageId, 'para etapa', targetStageNumber);
 
               if (targetStageNumber === 4) {
@@ -297,7 +297,7 @@ export function TabletResultadosEtapa1() {
     return '';
   };
 
-  const loadStageResults = async (gameSessionId: string, stageId: number | undefined, currentTeam: Team, stageNumber?: number) => {
+  const loadStageResults = async (gameSessionId: string, stageId: string | undefined, currentTeam: Team, stageNumber?: number) => {
     try {
       const validStageId = (stageId !== undefined && stageId !== null && !isNaN(Number(stageId)) && Number(stageId) > 0)
         ? stageId

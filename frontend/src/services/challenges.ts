@@ -1,18 +1,134 @@
 import { api, unwrapResults } from './api';
 
 // unwrapResults<T> defaults to {} with no explicit type argument -- every
-// endpoint below returns a list, so call sites (activitiesData.map, etc.)
-// need the array type, not the generic default.
+// list endpoint below is typed against its real Django serializer shape
+// (challenges/serializers.py) instead, so call sites (activitiesData.map,
+// etc.) get real element types, not any.
+
+export interface LearningObjective {
+  id: string;
+  stage?: string | null;
+  stage_name: string | null;
+  stage_number: number | null;
+  title: string;
+  description?: string | null;
+  evaluation_criteria?: string | null;
+  pedagogical_recommendations?: string | null;
+  estimated_time?: number | null;
+  associated_resources?: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Activity {
+  id: string;
+  stage: string;
+  stage_name: string;
+  activity_type: string;
+  activity_type_name: string;
+  name: string;
+  description?: string | null;
+  order_number: number;
+  timer_duration?: number | null;
+  config_data?: any;
+  word_search_data?: any;
+  anagram_data?: any;
+  general_knowledge_data?: any;
+  chaos_data?: any;
+  bubble_map_config?: any;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Topic {
+  id: string;
+  name: string;
+  icon?: string | null;
+  description?: string | null;
+  image_url?: string | null;
+  category?: string | null;
+  faculties: Array<{ id: string; name: string; code?: string | null; is_active: boolean }>;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Challenge {
+  id: string;
+  topic: string;
+  topic_name: string;
+  title: string;
+  description?: string | null;
+  icon?: string | null;
+  persona_name?: string | null;
+  persona_age?: number | null;
+  persona_story?: string | null;
+  persona_image?: string | null;
+  persona_image_url?: string | null;
+  difficulty_level: 'low' | 'medium' | 'high';
+  learning_objectives?: string | null;
+  additional_resources?: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WordSearchOption {
+  id: string;
+  activity: string;
+  activity_name: string | null;
+  name: string;
+  words: any;
+  grid?: any;
+  word_positions?: any;
+  seed?: number | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AnagramWord {
+  id: string;
+  word: string;
+  scrambled_word: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChaosQuestion {
+  id: string;
+  question: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GeneralKnowledgeQuestion {
+  id: string;
+  question: string;
+  option_a: string;
+  option_b: string;
+  option_c: string;
+  option_d: string;
+  correct_answer: number;
+  options: Array<{ label: string; text: string }>;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
 
 export const challengesAPI = {
-  getLearningObjectives: async () => {
+  getLearningObjectives: async (): Promise<LearningObjective[]> => {
     const response = await api.get('/challenges/learning-objectives/');
-    return unwrapResults<any[]>(response.data);
+    return unwrapResults<LearningObjective[]>(response.data);
   },
 
-  getActivities: async (params?: Record<string, any>) => {
+  getActivities: async (params?: Record<string, any>): Promise<Activity[]> => {
     const response = await api.get('/challenges/activities/', { params });
-    return unwrapResults<any[]>(response.data);
+    return unwrapResults<Activity[]>(response.data);
   },
 
   getActivityById: async (activityId: number | string) => {
@@ -25,9 +141,9 @@ export const challengesAPI = {
     return response.data;
   },
 
-  getTopics: async (params?: Record<string, any>) => {
+  getTopics: async (params?: Record<string, any>): Promise<Topic[]> => {
     const response = await api.get('/challenges/topics/', { params });
-    return unwrapResults<any[]>(response.data);
+    return unwrapResults<Topic[]>(response.data);
   },
 
   getTopicById: async (topicId: number | string) => {
@@ -35,9 +151,9 @@ export const challengesAPI = {
     return response.data;
   },
 
-  getChallenges: async (params?: Record<string, any>) => {
+  getChallenges: async (params?: Record<string, any>): Promise<Challenge[]> => {
     const response = await api.get('/challenges/challenges/', { params });
-    return unwrapResults<any[]>(response.data);
+    return unwrapResults<Challenge[]>(response.data);
   },
 
   updateActivity: async (activityId: number | string, data: Partial<{
@@ -147,10 +263,10 @@ export const challengesAPI = {
   },
 
   // Word Search Options CRUD
-  getWordSearchOptions: async (activityId?: number | string) => {
+  getWordSearchOptions: async (activityId?: number | string): Promise<WordSearchOption[]> => {
     const params = activityId ? { activity: activityId } : {};
     const response = await api.get('/challenges/word-search-options/', { params });
-    return unwrapResults<any[]>(response.data);
+    return unwrapResults<WordSearchOption[]>(response.data);
   },
 
   generateWordSearchPreview: async (data: { words: string[]; name: string }) => {
@@ -176,9 +292,9 @@ export const challengesAPI = {
   },
 
   // Anagram Words CRUD
-  getAnagramWords: async () => {
+  getAnagramWords: async (): Promise<AnagramWord[]> => {
     const response = await api.get('/challenges/anagram-words/');
-    return unwrapResults<any[]>(response.data);
+    return unwrapResults<AnagramWord[]>(response.data);
   },
 
   createAnagramWord: async (data: { word: string; is_active?: boolean }) => {
@@ -192,9 +308,9 @@ export const challengesAPI = {
   },
 
   // Chaos Questions CRUD
-  getChaosQuestions: async () => {
+  getChaosQuestions: async (): Promise<ChaosQuestion[]> => {
     const response = await api.get('/challenges/chaos-questions/');
-    return unwrapResults<any[]>(response.data);
+    return unwrapResults<ChaosQuestion[]>(response.data);
   },
 
   createChaosQuestion: async (data: { question: string; is_active?: boolean }) => {
@@ -225,9 +341,9 @@ export const challengesAPI = {
   },
 
   // General Knowledge Questions CRUD
-  getGeneralKnowledgeQuestions: async () => {
+  getGeneralKnowledgeQuestions: async (): Promise<GeneralKnowledgeQuestion[]> => {
     const response = await api.get('/challenges/general-knowledge-questions/');
-    return unwrapResults<any[]>(response.data);
+    return unwrapResults<GeneralKnowledgeQuestion[]>(response.data);
   },
 
   createGeneralKnowledgeQuestion: async (data: {

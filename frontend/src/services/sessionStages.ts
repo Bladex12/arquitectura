@@ -1,49 +1,49 @@
 import { api } from './api';
 
 export const sessionStagesAPI = {
-  generatePresentationOrder: async (stageId: number) => {
+  generatePresentationOrder: async (stageId: number | string) => {
     const response = await api.post(`/sessions/session-stages/${stageId}/generate_presentation_order/`);
     return response.data;
   },
 
-  updatePresentationOrder: async (stageId: number, presentationOrder: string[]) => {
+  updatePresentationOrder: async (stageId: number | string, presentationOrder: string[]) => {
     const response = await api.post(`/sessions/session-stages/${stageId}/update_presentation_order/`, {
       presentation_order: presentationOrder,
     });
     return response.data;
   },
 
-  startPresentation: async (stageId: number) => {
+  startPresentation: async (stageId: number | string) => {
     const response = await api.post(`/sessions/session-stages/${stageId}/start_presentation/`);
     return response.data;
   },
 
-  startTeamPitch: async (stageId: number) => {
+  startTeamPitch: async (stageId: number | string) => {
     const response = await api.post(`/sessions/session-stages/${stageId}/start_team_pitch/`);
     return response.data;
   },
 
-  finishTeamPresentation: async (stageId: number) => {
+  finishTeamPresentation: async (stageId: number | string) => {
     const response = await api.post(`/sessions/session-stages/${stageId}/finish_team_presentation/`);
     return response.data;
   },
 
-  nextPresentation: async (stageId: number) => {
+  nextPresentation: async (stageId: number | string) => {
     const response = await api.post(`/sessions/session-stages/${stageId}/next_presentation/`);
     return response.data;
   },
 
-  getPresentationTimer: async (stageId: number) => {
+  getPresentationTimer: async (stageId: number | string) => {
     const response = await api.get(`/sessions/session-stages/${stageId}/presentation_timer/`);
     return response.data;
   },
 
-  getPresentationStatus: async (stageId: number) => {
+  getPresentationStatus: async (stageId: number | string) => {
     const response = await api.get(`/sessions/session-stages/${stageId}/presentation_status/`);
     return response.data;
   },
 
-  getPresentationEvaluationProgress: async (stageId: number) => {
+  getPresentationEvaluationProgress: async (stageId: number | string) => {
     const response = await api.get(`/sessions/session-stages/${stageId}/presentation_evaluation_progress/`);
     return response.data;
   },

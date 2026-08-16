@@ -21,11 +21,11 @@ interface TeamPitch {
   team: Team;
   progress: {
     id: string;
-    pitch_intro_problem: string | null;
-    pitch_solution: string | null;
-    pitch_value: string | null;
-    pitch_impact: string | null;
-    pitch_closing: string | null;
+    pitch_intro_problem?: string | null;
+    pitch_solution?: string | null;
+    pitch_value?: string | null;
+    pitch_impact?: string | null;
+    pitch_closing?: string | null;
     status: string;
     progress_percentage: number;
   } | null;
@@ -128,7 +128,7 @@ export function ProfesorFormularioPitch() {
     }
   };
 
-  const loadTeamsPitch = async (gameSessionId: string, activityId: number, sessionStageId: number) => {
+  const loadTeamsPitch = async (gameSessionId: string, activityId: number, sessionStageId: string) => {
     try {
       const teams = await sessionsAPI.getTeams(gameSessionId);
       const teamsArray: Team[] = Array.isArray(teams) ? teams : [teams];
