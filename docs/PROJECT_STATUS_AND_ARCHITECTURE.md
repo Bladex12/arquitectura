@@ -165,38 +165,57 @@ deploying identity outright. `fis/template.yaml` keeps the leaner
 Stack rolled back and was deleted cleanly both times, nothing left dangling.
 See `fis/README.md` for the full error output and per-experiment rationale.
 
-### 1.6 Canary deployment (in progress, **Step 0 of 3, not yet deployed**)
+**Corroborated by a course-provided example** (`chaos-wallet-fis`, a separate
+sample project, not part of this repo): it builds the identical shape —
+`FisExperimentRole` trusted by `fis.amazonaws.com`, the same
+`s3:PutObject`/`lambda:GetFunction`/`tag:GetResources` policy — and its own
+`README-FIS.md` states outright it's for AWS accounts that **do** allow
+`iam:CreateRole`, explicitly **not** AWS Academy Learner Lab, and its deploy
+command takes `--profile <tu-perfil-sin-restricciones>` ("your unrestricted
+profile"). The course material already assumes FIS demos run outside the
+Lab account — confirming this isn't a technique we missed, just one that
+was never meant to run here.
 
-Plan: `AutoPublishAlias`/`DeploymentPreference` (AWS SAM's built-in gradual
-Lambda deployment, backed by CodeDeploy) on all 6 Lambdas, with
-CloudWatch-alarm-gated auto-rollback. Done so far:
+### 1.6 Canary deployment (**fully implemented and confirmed live on all 6 Lambdas**, 2026-08-16)
 
-- `WsDefaultFunction` (lowest-traffic, lowest-risk — chosen as the guinea
-  pig) has `AutoPublishAlias: live` added, alone — SAM requires a function
-  to have a prior published version before `DeploymentPreference` can shift
-  traffic to/from it, so this has to ship and deploy by itself first.
-- `BroadcastFunction`'s runtime bumped `python3.11` → `python3.14` (found
-  along the way: `python3.11` is deprecated, and Lambda blocks *updates* to
-  it after 2026-08-31 — needed fixing regardless of canary).
+`AutoPublishAlias`/`DeploymentPreference` (AWS SAM's built-in gradual Lambda
+deployment, backed by CodeDeploy), `Canary10Percent5Minutes`, on every
+Lambda: `DjangoFunction`, `WsConnectFunction`, `WsDisconnectFunction`,
+`WsDefaultFunction`, `BroadcastFunction`, `StreamToFirehoseFunction`. Real
+traffic actually routes through the `live` alias on all 6, not just the
+plumbing existing — the three WebSocket Lambdas' `ApiGatewayV2::Integration`
+resources point at `${<Fn>Aliaslive}` (hand-wired, since SAM's `Events:`
+sugar can't express raw WebSocket integrations), `BroadcastFunction` is
+invoked with `Qualifier=live` (`DjangoFunction` passes
+`BROADCAST_FUNCTION_QUALIFIER=live`, read in `game_sessions/broadcast.py`),
+and `StreamToFirehoseFunction`/`DjangoFunction` use SAM's native `Events:`
+sugar (`DynamoDB`/`Api`), which rewires to the alias automatically.
 
-**Not yet done, blocked on a live deploy to verify:** whether `LabRoleArn`
-(the one IAM role this account can use) is trusted by
-`codedeploy.amazonaws.com` — if not, canary deployment isn't usable on this
-account at all, the same way FIS's experiment role might not be. Also
-found and still open: two of the three WebSocket Lambdas and
-`BroadcastFunction` are invoked through hand-written CloudFormation/
-application-code paths (not SAM's own `Events:` sugar), so they need an
-explicit fix to actually route traffic through the canary alias — writing
-`AutoPublishAlias` alone on those would silently produce a canary that
-*reports* shifting traffic while every real invocation keeps hitting
-`$LATEST`. Full plan: `docs/superpowers/plans/` (or ask — it's tracked in
-the active session plan, not yet promoted to a committed spec doc).
+Rollout history:
+- `WsDefaultFunction` shipped first, alone, with a bare `DeploymentPreference`
+  (no alarms) as a low-risk probe: does this account's `LabRoleArn` even
+  work as a CodeDeploy service role, since this account can't let SAM
+  generate one? **Confirmed yes** — no `AccessDenied`, `CreateDeploymentGroup`
+  succeeded (commit `c8b5259d`). Notably the *opposite* outcome from FIS's
+  identical-shaped question (§1.5) about `fis.amazonaws.com` trust.
+- `BroadcastFunction`'s runtime bumped `python3.11` → `python3.14` along the
+  way (Lambda blocks *updates* to the deprecated runtime after 2026-08-31 —
+  needed regardless of canary).
+- With the trust relationship proven, `DeploymentPreference` +
+  a CloudWatch `Errors`-metric alarm (`>=1` error/minute on the `live`
+  alias, `TreatMissingData: notBreaching`) were added to the other 5
+  functions, including `DjangoFunction` — a container-image
+  (`PackageType: Image`) Lambda, the one untested combination (Lambda's
+  alias/version traffic-shifting is documented as package-type agnostic,
+  but this repo had never exercised it). **Deployed live and confirmed**:
+  all 6 `AWS::CodeDeploy::DeploymentGroup` resources and all 6
+  `AWS::CloudWatch::Alarm` resources created without error — unlike FIS,
+  this account's restrictions didn't block CloudWatch alarm creation
+  either. Post-deploy smoke check (`GET` on the live `DjangoApiUrl`) returned
+  200, confirming alias-routed traffic still serves normally.
 
-Since this section was written, all 6 Lambdas were confirmed to already
-have `AutoPublishAlias: live` (the "Step 0" guinea-pig approach above was
-overtaken by that), and the FIS-target Outputs were pointed at those
-aliases instead of `$LATEST` (§1.0) — but the CodeDeploy-role-trust and
-hand-written-invocation-path questions above are still open.
+Nothing left open on canary — the routing-fix and role-trust questions this
+section used to flag as unresolved are both settled.
 
 ### 1.7 Pushed to GitHub (resolved 2026-08-16)
 

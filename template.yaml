@@ -11,10 +11,10 @@ Description: >
 
   NOTE: WS handlers (lambda/ws-*) and the stream-to-firehose Lambda are
   stubs -- see the migration plan for which tasks fill them in. All 6
-  functions below publish AutoPublishAlias: live; WsDefaultFunction alone
-  has a real (CodeDeploy) DeploymentPreference so far. See the comment
-  above Globals: below for why the FIS extension block isn't hoisted
-  there despite being on 5 of the 6 functions.
+  functions publish AutoPublishAlias: live and have a CodeDeploy
+  DeploymentPreference (LabRoleArn confirmed trusted by
+  codedeploy.amazonaws.com). See the comment above Globals: below for
+  why the FIS extension block isn't hoisted there.
 
 Parameters:
   LabRoleArn:
@@ -90,8 +90,16 @@ Resources:
       Role: !Ref LabRoleArn
       # Canary rollout, step 2: SAM natively rewires the Api event's method
       # integration to the alias, so this needs no manual routing fix (unlike
-      # the hand-rolled WebSocket integrations below).
+      # the hand-rolled WebSocket integrations below). This is the one
+      # untested combination: PackageType: Image with DeploymentPreference --
+      # Lambda's alias/version traffic-shifting is documented as package-type
+      # agnostic, but this repo had never actually exercised it before.
       AutoPublishAlias: live
+      DeploymentPreference:
+        Type: Canary10Percent5Minutes
+        Role: !Ref LabRoleArn
+        Alarms:
+          - !Ref DjangoErrorsAlarm
       Environment:
         Variables:
           SECRET_KEY: !Ref DjangoSecretKey
@@ -342,6 +350,13 @@ Resources:
       # below pointing at the alias instead of $LATEST -- AutoPublishAlias
       # alone doesn't move traffic for hand-rolled ApiGatewayV2 integrations.
       AutoPublishAlias: live
+      # See WsDefaultFunction's comment -- same proven LabRoleArn/CodeDeploy
+      # pattern, applied here once that trust relationship was confirmed.
+      DeploymentPreference:
+        Type: Canary10Percent5Minutes
+        Role: !Ref LabRoleArn
+        Alarms:
+          - !Ref WsConnectErrorsAlarm
       # Layers/AWS_FIS_*/AWS_LAMBDA_EXEC_WRAPPER below: FIS Lambda-extension
       # wiring, inactive unless FisConfigBucketArn is set -- see fis/README.md.
       Layers: !If [HasFisConfigBucket, [!Ref FisLambdaExtensionLayerArn], !Ref 'AWS::NoValue']
@@ -361,6 +376,11 @@ Resources:
       Role: !Ref LabRoleArn
       # Canary rollout: see WsConnectFunction's comment above.
       AutoPublishAlias: live
+      DeploymentPreference:
+        Type: Canary10Percent5Minutes
+        Role: !Ref LabRoleArn
+        Alarms:
+          - !Ref WsDisconnectErrorsAlarm
       Layers: !If [HasFisConfigBucket, [!Ref FisLambdaExtensionLayerArn], !Ref 'AWS::NoValue']
       Environment:
         Variables:
@@ -382,14 +402,16 @@ Resources:
       # in the same deploy fails. WsDefaultFunction is the guinea pig: lowest
       # traffic, lowest blast radius, of the 6 functions this is planned for.
       AutoPublishAlias: live
-      # Probes whether LabRoleArn is trusted by codedeploy.amazonaws.com --
-      # unverified until now (see DEPLOY.md). Reusing LabRoleArn instead of
-      # letting SAM generate a CodeDeploy service role, since this account
-      # doesn't allow IAM role creation. No Alarms configured yet -- this is
-      # step 1, just proving the trust relationship works.
+      # Probed whether LabRoleArn is trusted by codedeploy.amazonaws.com --
+      # confirmed live (reusing LabRoleArn instead of letting SAM generate a
+      # CodeDeploy service role, since this account doesn't allow IAM role
+      # creation). Alarms below gate auto-rollback on the canary's own error
+      # rate -- see the CloudWatch Alarm resources near the end of this file.
       DeploymentPreference:
         Type: Canary10Percent5Minutes
         Role: !Ref LabRoleArn
+        Alarms:
+          - !Ref WsDefaultErrorsAlarm
       Layers: !If [HasFisConfigBucket, [!Ref FisLambdaExtensionLayerArn], !Ref 'AWS::NoValue']
       Environment:
         Variables:
@@ -414,6 +436,11 @@ Resources:
       # BROADCAST_FUNCTION_QUALIFIER=live (see broadcast.py) to route through
       # this alias rather than $LATEST.
       AutoPublishAlias: live
+      DeploymentPreference:
+        Type: Canary10Percent5Minutes
+        Role: !Ref LabRoleArn
+        Alarms:
+          - !Ref BroadcastErrorsAlarm
       Layers: !If [HasFisConfigBucket, [!Ref FisLambdaExtensionLayerArn], !Ref 'AWS::NoValue']
       Environment:
         Variables:
@@ -543,6 +570,11 @@ Resources:
       # source mapping to the alias automatically -- no manual routing fix
       # needed here, unlike the hand-rolled WebSocket integrations.
       AutoPublishAlias: live
+      DeploymentPreference:
+        Type: Canary10Percent5Minutes
+        Role: !Ref LabRoleArn
+        Alarms:
+          - !Ref StreamToFirehoseErrorsAlarm
       Layers: !If [HasFisConfigBucket, [!Ref FisLambdaExtensionLayerArn], !Ref 'AWS::NoValue']
       Environment:
         Variables:
@@ -572,6 +604,123 @@ Resources:
       CatalogId: !Ref AWS::AccountId
       DatabaseInput:
         Name: mision_emprende_analytics
+
+  # ==========================================================
+  # Canary auto-rollback alarms -- one per function with a
+  # DeploymentPreference, referenced from that function's Alarms: list.
+  # Scoped to the `live` alias specifically (Resource dimension), not the
+  # function as a whole, so each alarm reflects only traffic already
+  # shifted to the version being canaried -- >=1 error in a single 1-minute
+  # window trips it, appropriate for this app's low traffic volume.
+  # ==========================================================
+
+  WsConnectErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: WsConnectFunction live-alias errors during canary rollout
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref WsConnectFunction
+        - Name: Resource
+          Value: !Sub "${WsConnectFunction}:live"
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  WsDisconnectErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: WsDisconnectFunction live-alias errors during canary rollout
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref WsDisconnectFunction
+        - Name: Resource
+          Value: !Sub "${WsDisconnectFunction}:live"
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  WsDefaultErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: WsDefaultFunction live-alias errors during canary rollout
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref WsDefaultFunction
+        - Name: Resource
+          Value: !Sub "${WsDefaultFunction}:live"
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  BroadcastErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: BroadcastFunction live-alias errors during canary rollout
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref BroadcastFunction
+        - Name: Resource
+          Value: !Sub "${BroadcastFunction}:live"
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  StreamToFirehoseErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: StreamToFirehoseFunction live-alias errors during canary rollout
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref StreamToFirehoseFunction
+        - Name: Resource
+          Value: !Sub "${StreamToFirehoseFunction}:live"
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  DjangoErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: DjangoFunction live-alias errors during canary rollout
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref DjangoFunction
+        - Name: Resource
+          Value: !Sub "${DjangoFunction}:live"
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
 
 Outputs:
   DjangoApiUrl:
