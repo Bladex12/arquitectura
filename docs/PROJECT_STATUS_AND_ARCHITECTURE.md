@@ -65,6 +65,7 @@ Verified via a real `sam validate --lint`, `sam build && sam deploy` (no
 FIS params — the routine path) and a second green GitHub Actions run after
 push: outputs now resolve to `...:function:Name:live`, routine deploys
 still succeed with the plain-String param, and `npm run build` is clean.
+Committed as `23995cd4`.
 
 ### 1.1 RDS MySQL → DynamoDB, full serverless cutover (committed `db2b51e9`)
 
@@ -164,6 +165,7 @@ deploying identity outright. `fis/template.yaml` keeps the leaner
 (`LabRoleArn`-as-`RoleArn`) version since re-adding the role wouldn't help.
 Stack rolled back and was deleted cleanly both times, nothing left dangling.
 See `fis/README.md` for the full error output and per-experiment rationale.
+Committed as `a08bce64`.
 
 **Corroborated by a course-provided example** (`chaos-wallet-fis`, a separate
 sample project, not part of this repo): it builds the identical shape —
@@ -215,7 +217,10 @@ Rollout history:
   200, confirming alias-routed traffic still serves normally.
 
 Nothing left open on canary — the routing-fix and role-trust questions this
-section used to flag as unresolved are both settled.
+section used to flag as unresolved are both settled. Committed as
+`e4ccaee2`, pushed, and independently re-verified by GitHub Actions running
+its own `sam build && sam deploy` from a clean checkout (not just the local
+deploy above) — both the `test` and `deploy` jobs finished green.
 
 ### 1.7 Pushed to GitHub (resolved 2026-08-16)
 
